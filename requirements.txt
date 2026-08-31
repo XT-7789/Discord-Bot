@@ -1,0 +1,4 @@
+discord.py>=2.6,<3
+Flask>=3,<4
+python-dotenv>=1,<2
+Pillow>=10,<12
