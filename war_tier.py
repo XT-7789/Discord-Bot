@@ -389,6 +389,64 @@ def _draw_geo_feature(draw, feature, project, fill, outline=None, width=1, hole_
                 draw.polygon(points, fill=hole_fill, outline=outline, width=1)
 
 
+_PIXEL_GLYPHS = {
+    "A":("01110","10001","10001","11111","10001","10001","10001"), "B":("11110","10001","10001","11110","10001","10001","11110"),
+    "C":("01111","10000","10000","10000","10000","10000","01111"), "D":("11110","10001","10001","10001","10001","10001","11110"),
+    "E":("11111","10000","10000","11110","10000","10000","11111"), "F":("11111","10000","10000","11110","10000","10000","10000"),
+    "G":("01111","10000","10000","10111","10001","10001","01111"), "H":("10001","10001","10001","11111","10001","10001","10001"),
+    "I":("11111","00100","00100","00100","00100","00100","11111"), "J":("00111","00010","00010","00010","10010","10010","01100"),
+    "K":("10001","10010","10100","11000","10100","10010","10001"), "L":("10000","10000","10000","10000","10000","10000","11111"),
+    "M":("10001","11011","10101","10101","10001","10001","10001"), "N":("10001","11001","10101","10011","10001","10001","10001"),
+    "O":("01110","10001","10001","10001","10001","10001","01110"), "P":("11110","10001","10001","11110","10000","10000","10000"),
+    "Q":("01110","10001","10001","10001","10101","10010","01101"), "R":("11110","10001","10001","11110","10100","10010","10001"),
+    "S":("01111","10000","10000","01110","00001","00001","11110"), "T":("11111","00100","00100","00100","00100","00100","00100"),
+    "U":("10001","10001","10001","10001","10001","10001","01110"), "V":("10001","10001","10001","10001","10001","01010","00100"),
+    "W":("10001","10001","10001","10101","10101","11011","10001"), "X":("10001","10001","01010","00100","01010","10001","10001"),
+    "Y":("10001","10001","01010","00100","00100","00100","00100"), "Z":("11111","00001","00010","00100","01000","10000","11111"),
+    "0":("01110","10001","10011","10101","11001","10001","01110"), "1":("00100","01100","00100","00100","00100","00100","01110"),
+    "2":("01110","10001","00001","00010","00100","01000","11111"), "3":("11110","00001","00001","01110","00001","00001","11110"),
+    "4":("00010","00110","01010","10010","11111","00010","00010"), "5":("11111","10000","10000","11110","00001","00001","11110"),
+    "6":("01110","10000","10000","11110","10001","10001","01110"), "7":("11111","00001","00010","00100","01000","01000","01000"),
+    "8":("01110","10001","10001","01110","10001","10001","01110"), "9":("01110","10001","10001","01111","00001","00001","01110"),
+    "-":("00000","00000","00000","11111","00000","00000","00000"), ".":("00000","00000","00000","00000","00000","01100","01100"),
+    ":":("00000","01100","01100","00000","01100","01100","00000"), "/":("00001","00010","00010","00100","01000","01000","10000"),
+    "(":("00010","00100","01000","01000","01000","00100","00010"), ")":("01000","00100","00010","00010","00010","00100","01000"),
+    ",":("00000","00000","00000","00000","00110","00100","01000"), "'":("00100","00100","00000","00000","00000","00000","00000"),
+    "?":("01110","10001","00001","00010","00100","00000","00100"), "!":("00100","00100","00100","00100","00100","00000","00100"),
+    "+":("00000","00100","00100","11111","00100","00100","00000"), "#":("01010","11111","01010","01010","11111","01010","00000"),
+    "=":("00000","00000","11111","00000","11111","00000","00000"),
+    " ":("00000","00000","00000","00000","00000","00000","00000"),
+}
+
+
+class _PixelFont:
+    def __init__(self, scale=1):
+        self.scale = max(1, int(scale))
+
+
+def _pixel_metrics(text, font):
+    lines = str(text).splitlines() or [""]
+    scale = font.scale
+    return max((len(line) for line in lines), default=0) * 6 * scale, len(lines) * 8 * scale
+
+
+def _draw_pixel_text(raw, xy, text, font, fill):
+    start_x, start_y = int(xy[0]), int(xy[1])
+    scale = font.scale
+    clean_text = str(text).replace("★", "C").replace("—", "-").replace("·", "-")
+    for line_index, line in enumerate(clean_text.upper().splitlines() or [""]):
+        for char_index, char in enumerate(line.encode("ascii", "replace").decode("ascii")):
+            glyph = _PIXEL_GLYPHS.get(char, _PIXEL_GLYPHS["?"])
+            origin_x = start_x + char_index * 6 * scale
+            origin_y = start_y + line_index * 8 * scale
+            for row_index, row in enumerate(glyph):
+                for column_index, bit in enumerate(row):
+                    if bit == "1":
+                        x = origin_x + column_index * scale
+                        y = origin_y + row_index * scale
+                        raw.rectangle((x, y, x + scale - 1, y + scale - 1), fill=fill)
+
+
 class _SafeMapDraw:
     """ImageDraw proxy that keeps maps working when Termux lacks _imagingft."""
     def __init__(self, raw):
@@ -398,39 +456,49 @@ class _SafeMapDraw:
         return getattr(self.raw, name)
 
     def text(self, xy, text, *args, **kwargs):
-        if kwargs.get("font") is None:
-            return None
+        font = kwargs.get("font")
+        if font is None or isinstance(font, _PixelFont):
+            return _draw_pixel_text(self.raw, xy, text, font or _PixelFont(), kwargs.get("fill", "white"))
         try:
             return self.raw.text(xy, text, *args, **kwargs)
         except (ImportError, OSError, UnicodeError):
-            return None
+            return _draw_pixel_text(self.raw, xy, text, _PixelFont(), kwargs.get("fill", "white"))
 
     def textbbox(self, xy, text, *args, **kwargs):
-        if kwargs.get("font") is None:
-            return (xy[0], xy[1], xy[0] + len(str(text)) * 7, xy[1] + 14)
+        font = kwargs.get("font")
+        if font is None or isinstance(font, _PixelFont):
+            width, height = _pixel_metrics(text, font or _PixelFont())
+            return (xy[0], xy[1], xy[0] + width, xy[1] + height)
         try:
             return self.raw.textbbox(xy, text, *args, **kwargs)
         except (ImportError, OSError, UnicodeError):
-            return (xy[0], xy[1], xy[0] + len(str(text)) * 7, xy[1] + 14)
+            width, height = _pixel_metrics(text, _PixelFont())
+            return (xy[0], xy[1], xy[0] + width, xy[1] + height)
 
     def textlength(self, text, *args, **kwargs):
-        if kwargs.get("font") is None:
-            return len(str(text)) * 7
+        font = kwargs.get("font")
+        if font is None or isinstance(font, _PixelFont):
+            return _pixel_metrics(text, font or _PixelFont())[0]
         try:
             return self.raw.textlength(text, *args, **kwargs)
         except (ImportError, OSError, UnicodeError):
-            return len(str(text)) * 7
+            return _pixel_metrics(text, _PixelFont())[0]
 
 
 def _safe_map_draw(ImageDraw, image):
     return _SafeMapDraw(ImageDraw.Draw(image))
 
 
+def _ascii_map_label(value, fallback):
+    clean = str(value or "").encode("ascii", "ignore").decode("ascii").strip()
+    return clean or fallback
+
+
 def _map_fonts():
     try:
         from PIL import ImageFont
     except (ImportError, OSError):
-        return (None, None, None, None, None)
+        return (_PixelFont(3), _PixelFont(1), _PixelFont(3), _PixelFont(2), _PixelFont(1))
     font_path = next((path for path in (
         r"C:\Windows\Fonts\msyh.ttc",
         "/system/fonts/NotoSansCJK-Regular.ttc",
@@ -445,8 +513,8 @@ def _map_fonts():
                     ImageFont.truetype(font_path, 13))
         return tuple(ImageFont.load_default() for _ in range(5))
     except (ImportError, OSError):
-        print("Pillow font support is unavailable; rendering map without bitmap labels.")
-        return (None, None, None, None, None)
+        print("Pillow font support is unavailable; using X BOT's built-in pixel font.")
+        return (_PixelFont(3), _PixelFont(1), _PixelFont(3), _PixelFont(2), _PixelFont(1))
 
 
 def _player_map_colours(db, players=None):
@@ -879,7 +947,8 @@ def build_real_tactical_map(db, user_id):
     draw.rectangle((0, 0, width, 108), fill="#151f2d")
     draw.rectangle((0, 106, width, 112), fill="#e7a629")
     draw.text((30, 19), f"TACTICAL MAP - {nation['nation_name']}", fill="#f5f7fb", font=title_font)
-    draw.text((30, 67), f"{len(owned_codes)} real regions  |  Capital: {nation['capital_name']}",
+    capital_label = _ascii_map_label(nation["capital_name"], "CAPITAL LAND")
+    draw.text((30, 67), f"{len(owned_codes)} real regions  |  Capital: {capital_label}",
               fill="#9db7c7", font=normal_font)
     draw.rounded_rectangle((24, height - 43, width - 24, height - 10), radius=8,
                            fill="#151f2d", outline="#536b78", width=2)
