@@ -400,8 +400,14 @@ def _draw_geo_feature(draw, feature, project, fill, outline=None, width=1, hole_
 
 def _map_fonts():
     from PIL import ImageFont
-    font_path = r"C:\Windows\Fonts\msyh.ttc"
-    if os.path.exists(font_path):
+    font_path = next((path for path in (
+        r"C:\Windows\Fonts\msyh.ttc",
+        "/system/fonts/NotoSansCJK-Regular.ttc",
+        "/system/fonts/NotoSans-Regular.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ) if os.path.exists(path)), None)
+    if font_path:
         return (ImageFont.truetype(font_path, 22), ImageFont.truetype(font_path, 15),
                 ImageFont.truetype(font_path, 27), ImageFont.truetype(font_path, 17),
                 ImageFont.truetype(font_path, 13))
@@ -864,10 +870,76 @@ def build_tactical_map_safe(db, user_id):
     except Exception as error:
         print(f"Real tactical map fallback for {user_id}: {error}")
     try:
-        return build_tactical_map(db, user_id)
+        return build_tactical_summary_map(db, user_id)
     except Exception as fallback_error:
         print(f"Tactical map fallback also failed for {user_id}: {fallback_error}")
         return None
+
+
+def build_tactical_summary_map(db, user_id):
+    """Phone-safe map for real ADM1/CAP codes; never assumes the legacy grid format."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    tiles = {**world_city_tiles(_province_features()), **world_capital_tiles()}
+    sync_map_ownership(db, world_city_tiles(_province_features()))
+    nation = db.execute("SELECT nation_name,capital_name FROM players WHERE user_id=?", (user_id,)).fetchone()
+    owned_rows = db.execute("""SELECT territory_code,territory_name,is_capital FROM map_territories
+        WHERE owner_user_id=? ORDER BY is_capital DESC,acquired_at,territory_name""", (user_id,)).fetchall()
+    located = [(row, tiles[row["territory_code"]]) for row in owned_rows if row["territory_code"] in tiles]
+    if nation is None or not located:
+        return None
+
+    width, height = 1200, 820
+    image = Image.new("RGB", (width, height), "#0d2635")
+    draw = ImageDraw.Draw(image)
+    _, _, title_font, normal_font, small_font = _map_fonts()
+    draw.rectangle((0, 0, width, 108), fill="#151f2d")
+    draw.rectangle((0, 106, width, 112), fill="#e7a629")
+    # Keep bitmap text ASCII-safe on minimal Android font installations. The
+    # Discord embed above the image still shows the player's full Unicode name.
+    draw.text((30, 20), "X BOT - YOUR NATION MAP", fill="#f5f7fb", font=title_font)
+    draw.text((30, 67), f"{len(located)} mapped Land regions", fill="#9db7c7", font=normal_font)
+
+    map_left, map_right, map_top, map_bottom = 35, 835, 145, 755
+    centres = [tile[2] for _row, tile in located]
+    west, east = min(point[0] for point in centres), max(point[0] for point in centres)
+    south, north = min(point[1] for point in centres), max(point[1] for point in centres)
+    lon_span, lat_span = max(4.0, east - west), max(3.0, north - south)
+    west -= lon_span * .3; east += lon_span * .3
+    south -= lat_span * .3; north += lat_span * .3
+
+    def project(point):
+        lon, lat = point
+        return (map_left + (lon - west) / max(.01, east - west) * (map_right - map_left),
+                map_top + (north - lat) / max(.01, north - south) * (map_bottom - map_top))
+
+    for index, (row, tile) in enumerate(located, 1):
+        x, y = project(tile[2])
+        radius = 14 if row["is_capital"] else 11
+        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill="#4de0c1", outline="#ffffff", width=3)
+        marker = "C" if row["is_capital"] else str(index)
+        box = draw.textbbox((0, 0), marker, font=small_font)
+        draw.text((x-(box[2]-box[0])/2, y-(box[3]-box[1])/2-1), marker, fill="#101820", font=small_font)
+
+    panel_x = 870
+    draw.rounded_rectangle((panel_x, 135, width-22, 770), radius=12, fill="#151f2d", outline="#536b78", width=2)
+    draw.text((panel_x+18, 158), "LAND REGIONS", fill="#f5f7fb", font=normal_font)
+    for index, (row, _tile) in enumerate(located[:18], 1):
+        label = str(row["territory_name"] or row["territory_code"])
+        # Real map labels are mostly Latin; replacement keeps rare unsupported
+        # glyphs from breaking Pillow on Termux.
+        safe_label = label.encode("ascii", "replace").decode("ascii")
+        prefix = "C" if row["is_capital"] else str(index)
+        draw.text((panel_x+18, 195+(index-1)*29), f"{prefix}. {safe_label[:31]}", fill="#dce8ed", font=small_font)
+    if len(located) > 18:
+        draw.text((panel_x+18, 195+18*29), f"+ {len(located)-18} more", fill="#e7a629", font=small_font)
+    draw.text((35, 785), "C = Capital   Number = Land region", fill="#dce8ed", font=small_font)
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
 
 
 DEFAULTS = {
