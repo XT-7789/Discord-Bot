@@ -854,6 +854,22 @@ def build_real_tactical_map(db, user_id):
     return output
 
 
+def build_tactical_map_safe(db, user_id):
+    """Render the real map when possible, with a compact phone-safe fallback."""
+    try:
+        image = build_real_tactical_map(db, user_id)
+        if image is not None:
+            return image
+        print(f"Real tactical map returned no image for {user_id}; using compact fallback.")
+    except Exception as error:
+        print(f"Real tactical map fallback for {user_id}: {error}")
+    try:
+        return build_tactical_map(db, user_id)
+    except Exception as fallback_error:
+        print(f"Tactical map fallback also failed for {user_id}: {fallback_error}")
+        return None
+
+
 DEFAULTS = {
     "attack_cooldown": "60",
     "capital_damage": "25",
@@ -1462,7 +1478,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             "🗺️ Free Land Claimed",
             f"**{land_name}** is now part of **{player['nation_name']}**.\n"
             f"🌍 Nation Land: **{int(player['land']) + 1}** · Next free claim: <t:{now + cooldown}:R>\n\n"
-            "This Land is connected to your Nation. Use `/land_upgrade` to create more city slots, or `/city_build` to develop it."
+            "This Land is connected to your Nation. Open `/war` → **City Centre** to upgrade or develop it."
         ))
 
     @bot.tree.command(name="map", description="View the X BOT strategic world map", **player_command_kwargs)
@@ -1486,7 +1502,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             colour=discord.Colour.teal(),
         )
         embed.set_image(url="attachment://xbot-strategic-map.png")
-        embed.set_footer(text="Use /armed_forces to inspect your land, air and navy forces.")
+        embed.set_footer(text="Use /war to inspect your Land, armed forces, Cities and Season progress.")
         await interaction.followup.send(embed=embed, file=file)
 
     @bot.tree.command(name="map_detail", description="Open a zoomed real-region tactical map for a Nation", **player_command_kwargs)
@@ -1495,18 +1511,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         target = nation or interaction.user
         create_player(target)
         await interaction.response.defer()
-        try:
-            image = build_real_tactical_map(db, target.id)
-        except Exception as error:
-            # Some Android Pillow builds can fail while drawing a complex real
-            # province shape. Keep the command playable with the compact map
-            # rather than returning Discord's generic Command Error panel.
-            print(f"Real tactical map fallback for {target.id}: {error}")
-            try:
-                image = build_tactical_map(db, target.id)
-            except Exception as fallback_error:
-                print(f"Tactical map fallback also failed for {target.id}: {fallback_error}")
-                image = None
+        image = build_tactical_map_safe(db, target.id)
         if image is None:
             await interaction.followup.send(
                 f"❌ **{target.display_name}** does not have a mapped Nation territory yet.",
@@ -1554,7 +1559,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 # View with the City Centre LayoutView in one edit can make
                 # Discord ignore the component interaction on mobile.
                 await interaction.response.defer()
-                image = build_real_tactical_map(db, self.owner_id)
+                image = build_tactical_map_safe(db, self.owner_id)
                 if image is None:
                     await interaction.followup.send(
                         "❌ Your Nation does not have a mapped Land yet. Ask an administrator to set your Nation Land location first.",
