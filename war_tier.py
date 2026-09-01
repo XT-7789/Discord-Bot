@@ -389,8 +389,48 @@ def _draw_geo_feature(draw, feature, project, fill, outline=None, width=1, hole_
                 draw.polygon(points, fill=hole_fill, outline=outline, width=1)
 
 
+class _SafeMapDraw:
+    """ImageDraw proxy that keeps maps working when Termux lacks _imagingft."""
+    def __init__(self, raw):
+        self.raw = raw
+
+    def __getattr__(self, name):
+        return getattr(self.raw, name)
+
+    def text(self, xy, text, *args, **kwargs):
+        if kwargs.get("font") is None:
+            return None
+        try:
+            return self.raw.text(xy, text, *args, **kwargs)
+        except (ImportError, OSError, UnicodeError):
+            return None
+
+    def textbbox(self, xy, text, *args, **kwargs):
+        if kwargs.get("font") is None:
+            return (xy[0], xy[1], xy[0] + len(str(text)) * 7, xy[1] + 14)
+        try:
+            return self.raw.textbbox(xy, text, *args, **kwargs)
+        except (ImportError, OSError, UnicodeError):
+            return (xy[0], xy[1], xy[0] + len(str(text)) * 7, xy[1] + 14)
+
+    def textlength(self, text, *args, **kwargs):
+        if kwargs.get("font") is None:
+            return len(str(text)) * 7
+        try:
+            return self.raw.textlength(text, *args, **kwargs)
+        except (ImportError, OSError, UnicodeError):
+            return len(str(text)) * 7
+
+
+def _safe_map_draw(ImageDraw, image):
+    return _SafeMapDraw(ImageDraw.Draw(image))
+
+
 def _map_fonts():
-    from PIL import ImageFont
+    try:
+        from PIL import ImageFont
+    except (ImportError, OSError):
+        return (None, None, None, None, None)
     font_path = next((path for path in (
         r"C:\Windows\Fonts\msyh.ttc",
         "/system/fonts/NotoSansCJK-Regular.ttc",
@@ -398,11 +438,15 @@ def _map_fonts():
         "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/data/data/com.termux/files/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ) if os.path.exists(path)), None)
-    if font_path:
-        return (ImageFont.truetype(font_path, 22), ImageFont.truetype(font_path, 15),
-                ImageFont.truetype(font_path, 27), ImageFont.truetype(font_path, 17),
-                ImageFont.truetype(font_path, 13))
-    return tuple(ImageFont.load_default() for _ in range(5))
+    try:
+        if font_path:
+            return (ImageFont.truetype(font_path, 22), ImageFont.truetype(font_path, 15),
+                    ImageFont.truetype(font_path, 27), ImageFont.truetype(font_path, 17),
+                    ImageFont.truetype(font_path, 13))
+        return tuple(ImageFont.load_default() for _ in range(5))
+    except (ImportError, OSError):
+        print("Pillow font support is unavailable; rendering map without bitmap labels.")
+        return (None, None, None, None, None)
 
 
 def _player_map_colours(db, players=None):
@@ -416,7 +460,7 @@ def _player_map_colours(db, players=None):
 def build_strategic_map(db):
     """Render the full world map using persistent Nation territory ownership."""
     try:
-        from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageFilter
+        from PIL import Image, ImageDraw, ImageChops, ImageFilter
     except ImportError:
         return None
 
@@ -427,14 +471,13 @@ def build_strategic_map(db):
     sync_map_ownership(db, tiles)
     width, height = 1600, 900
     image = Image.new("RGB", (width, height), "#102c3d")
-    draw = ImageDraw.Draw(image)
+    draw = _safe_map_draw(ImageDraw, image)
     land_mask = Image.new("L", (width, height), 0)
     land_draw = ImageDraw.Draw(land_mask)
     # Microsoft YaHei supports Chinese Nation names on Windows; fall back safely
     # if the dashboard/bot is later moved to another operating system.
     font_path = r"C:\Windows\Fonts\msyh.ttc"
-    title_font = ImageFont.truetype(font_path, 22) if os.path.exists(font_path) else ImageFont.load_default(size=22)
-    small_font = ImageFont.truetype(font_path, 15) if os.path.exists(font_path) else ImageFont.load_default(size=15)
+    title_font, small_font, _, _, _ = _map_fonts()
     map_top, map_bottom, margin = 105, 850, 18
     map_width, map_height = width - margin * 2, map_bottom - map_top
     def project(point):
@@ -499,7 +542,7 @@ def build_strategic_map(db):
         image.paste("#eef4ed", (0, 0, width, height), border_mask)
         image.paste(player_colors.get(owner_id, "#83958a"), (0, 0, width, height), territory_mask)
     # Continue drawing labels and UI on the newly composited image.
-    draw = ImageDraw.Draw(image)
+    draw = _safe_map_draw(ImageDraw, image)
 
     # Capital flags are attached to the oldest retained territory for every Nation.
     for row in players:
@@ -535,7 +578,7 @@ def build_strategic_map(db):
 def build_tactical_map(db, user_id):
     """Render a zoomed hex-sector map around one Nation's owned Land."""
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
     except ImportError:
         return None
     if not os.path.exists(WORLD_MAP_PATH):
@@ -571,11 +614,9 @@ def build_tactical_map(db, user_id):
 
     width, height = 1200, 820
     image = Image.new("RGB", (width, height), "#0d2635")
-    draw = ImageDraw.Draw(image)
+    draw = _safe_map_draw(ImageDraw, image)
     font_path = r"C:\Windows\Fonts\msyh.ttc"
-    title_font = ImageFont.truetype(font_path, 27) if os.path.exists(font_path) else ImageFont.load_default(size=27)
-    normal_font = ImageFont.truetype(font_path, 17) if os.path.exists(font_path) else ImageFont.load_default(size=17)
-    small_font = ImageFont.truetype(font_path, 14) if os.path.exists(font_path) else ImageFont.load_default(size=14)
+    _, _, title_font, normal_font, small_font = _map_fonts()
     draw.rectangle((0, 0, width, 112), fill="#151f2d")
     draw.rectangle((0, 108, width, 113), fill="#e7a629")
     draw.text((30, 20), f"TACTICAL MAP - {nation['nation_name']}", fill="#f5f7fb", font=title_font)
@@ -649,7 +690,7 @@ def build_real_strategic_map(db):
     sync_map_ownership(db, tiles)
     width, height = 1600, 900
     image = Image.new("RGB", (width, height), "#102c3d")
-    draw = ImageDraw.Draw(image)
+    draw = _safe_map_draw(ImageDraw, image)
     title_font, small_font, _, _, _ = _map_fonts()
     map_top, map_bottom, margin = 105, 850, 18
     map_width, map_height = width - margin * 2, map_bottom - map_top
@@ -770,7 +811,7 @@ def build_real_tactical_map(db, user_id):
     width, height = 1200, 820
     map_top, map_bottom, margin, panel_x = 112, 770, 28, 870
     image = Image.new("RGB", (width, height), "#0d2635")
-    draw = ImageDraw.Draw(image)
+    draw = _safe_map_draw(ImageDraw, image)
     _, _, title_font, normal_font, small_font = _map_fonts()
 
     def project(point):
@@ -924,7 +965,7 @@ def build_tactical_summary_map(db, user_id):
 
     width, height = 1200, 820
     image = Image.new("RGB", (width, height), "#0d2635")
-    draw = ImageDraw.Draw(image)
+    draw = _safe_map_draw(ImageDraw, image)
     _, _, title_font, normal_font, small_font = _map_fonts()
     draw.rectangle((0, 0, width, 108), fill="#151f2d")
     draw.rectangle((0, 106, width, 112), fill="#e7a629")
