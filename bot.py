@@ -395,36 +395,42 @@ class XBot(discord.Client):
     async def setup_hook(self):
         applications.setup_persistent_views(self, db)
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
-        scopes = [None]
-        if _staff_guild_id:
-            staff_guild = discord.Object(id=_staff_guild_id)
-            # Publish the player entry commands to this server as well as
-            # globally. Guild commands refresh immediately, while Discord may
-            # cache a changed global catalogue for a while.
-            self.tree.copy_global_to(guild=staff_guild)
-            scopes.append(staff_guild)
 
-        # Temporarily remove panel-only commands, sync the small public list,
-        # then restore the Python command objects without syncing them.  This
-        # keeps internal button callbacks working while Discord users see only
-        # the intentional entry commands.
-        for command_guild in scopes:
-            hidden_commands = []
+        def hide_panel_commands(command_guild, allowed_names):
+            hidden = []
             for command in list(self.tree.get_commands(guild=command_guild)):
-                if command.name not in published:
+                if command.name not in allowed_names:
                     removed = self.tree.remove_command(command.name, guild=command_guild)
                     if removed is not None:
-                        hidden_commands.append(removed)
-            await self.tree.sync(guild=command_guild)
-            for command in hidden_commands:
+                        hidden.append(removed)
+            return hidden
+
+        def restore_panel_commands(command_guild, hidden):
+            for command in hidden:
                 self.tree.add_command(command, guild=command_guild)
+
+        def report_sync(command_guild, hidden):
             scope_name = "global" if command_guild is None else f"guild {command_guild.id}"
-            visible_names = sorted(
-                command.name for command in self.tree.get_commands(guild=command_guild)
-                if command.name in published
-            )
+            visible_names = sorted(command.name for command in self.tree.get_commands(guild=command_guild))
             print(f"Published {len(visible_names)} X BOT commands to {scope_name}: {', '.join(visible_names)}")
-            print(f"Kept {len(hidden_commands)} panel-only commands hidden from {scope_name}.")
+            print(f"Kept {len(hidden)} panel-only commands hidden from {scope_name}.")
+
+        # Filter the global catalogue first. copy_global_to must only see this
+        # small player list; copying all internal panel callbacks would exceed
+        # Discord's 100-command guild limit.
+        global_hidden = hide_panel_commands(None, PUBLIC_PLAYER_COMMANDS)
+        await self.tree.sync()
+        report_sync(None, global_hidden)
+
+        if _staff_guild_id:
+            staff_guild = discord.Object(id=_staff_guild_id)
+            self.tree.copy_global_to(guild=staff_guild)
+            guild_hidden = hide_panel_commands(staff_guild, published)
+            await self.tree.sync(guild=staff_guild)
+            report_sync(staff_guild, guild_hidden)
+            restore_panel_commands(staff_guild, guild_hidden)
+
+        restore_panel_commands(None, global_hidden)
         casino.start_vip_cleanup_task(self, db)
         leveling.start_voice_task(self, db)
 
