@@ -240,21 +240,18 @@ def _province_polygon(code, bounds, project):
 
 
 def sync_map_ownership(db, tile_info):
-    """Make persistent city-sector ownership match Land exactly: 1 Land = 1 tile."""
+    """Add missing map ownership without deleting saved player territory.
+
+    Map rendering and search call this helper often. It must therefore be
+    repair-only: removing an unfamiliar or temporarily unavailable code here
+    can make a Nation's Discord map disappear while its Cities still reference
+    those Lands.
+    """
     # Capital City Lands are a separate layer from normal state/province Lands.
     # Keep them while synchronising the normal map tiles.
     capital_tiles = world_capital_tiles()
-    valid_codes = set(tile_info) | set(capital_tiles)
-    db.execute("DELETE FROM map_territories WHERE territory_code NOT IN ({})".format(
-        ",".join("?" for _ in valid_codes)), tuple(valid_codes))
     players = db.execute("""SELECT user_id,nation_name,MAX(0,land) AS desired
         FROM players WHERE nation_name IS NOT NULL AND TRIM(nation_name)<>'' ORDER BY user_id""").fetchall()
-    player_ids = {int(row["user_id"]) for row in players}
-    if player_ids:
-        placeholders = ",".join("?" for _ in player_ids)
-        db.execute(f"DELETE FROM map_territories WHERE owner_user_id NOT IN ({placeholders})", tuple(player_ids))
-    else:
-        db.execute("DELETE FROM map_territories")
 
     # Codes are the stable database identity; display names may improve over
     # time. Refresh them without moving land or changing its owner/level.
@@ -262,13 +259,6 @@ def sync_map_ownership(db, tile_info):
         db.execute("UPDATE map_territories SET territory_name=? WHERE territory_code=?", (full_name, code))
     for code, (_stable_code, full_name, _centre, _bounds) in capital_tiles.items():
         db.execute("UPDATE map_territories SET territory_name=? WHERE territory_code=?", (full_name, code))
-
-    # Shrink defeated Nations first, freeing the exact number of regions needed by the winners.
-    for player in players:
-        owned = db.execute("""SELECT territory_code FROM map_territories WHERE owner_user_id=?
-            ORDER BY is_capital DESC, acquired_at, territory_code""", (player["user_id"],)).fetchall()
-        for row in owned[max(0, int(player["desired"])):]:
-            db.execute("DELETE FROM map_territories WHERE territory_code=?", (row["territory_code"],))
 
     assigned = {row["territory_code"] for row in db.execute("SELECT territory_code FROM map_territories")}
     available = [code for code in tile_info if code not in assigned]
@@ -280,11 +270,12 @@ def sync_map_ownership(db, tile_info):
             (user_id,),
         )]
         while len(owned) < desired and available:
-            if not owned:
+            valid_owned = [code for code in owned if code in tile_info]
+            if not valid_owned:
                 digest = hashlib.sha256(str(user_id).encode("ascii")).digest()
                 chosen = available[int.from_bytes(digest[:4], "big") % len(available)]
             else:
-                owned_points = [tile_info[code][2] for code in owned if code in tile_info]
+                owned_points = [tile_info[code][2] for code in valid_owned]
                 def distance(code):
                     lon, lat = tile_info[code][2]
                     return min((min(abs(lon - x), 360 - abs(lon - x)) ** 2 + (lat - y) ** 2) for x, y in owned_points)
@@ -883,12 +874,23 @@ def build_tactical_summary_map(db, user_id):
     except ImportError:
         return None
     tiles = {**world_city_tiles(_province_features()), **world_capital_tiles()}
-    sync_map_ownership(db, world_city_tiles(_province_features()))
     nation = db.execute("SELECT nation_name,capital_name FROM players WHERE user_id=?", (user_id,)).fetchone()
     owned_rows = db.execute("""SELECT territory_code,territory_name,is_capital FROM map_territories
         WHERE owner_user_id=? ORDER BY is_capital DESC,acquired_at,territory_name""", (user_id,)).fetchall()
-    located = [(row, tiles[row["territory_code"]]) for row in owned_rows if row["territory_code"] in tiles]
-    if nation is None or not located:
+    # Never hide a Nation merely because an old Dashboard saved a territory
+    # code that a newer map asset cannot resolve. Known codes use their real
+    # coordinates; legacy codes receive stable approximate positions so the
+    # owner can still open and inspect their map.
+    located = []
+    for index, row in enumerate(owned_rows):
+        tile = tiles.get(row["territory_code"])
+        if tile is None:
+            column, grid_row = index % 5, index // 5
+            centre = (float(column * 4), float(-grid_row * 4))
+            tile = (row["territory_code"], row["territory_name"], centre,
+                    (centre[0] - 1, centre[1] - 1, centre[0] + 1, centre[1] + 1))
+        located.append((row, tile))
+    if nation is None or not owned_rows:
         return None
 
     width, height = 1200, 820
