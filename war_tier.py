@@ -867,6 +867,35 @@ def build_tactical_map_safe(db, user_id):
         return None
 
 
+def build_nation_map_resilient(db, user_id):
+    """Always prefer a Nation map, then fall back to the proven World map."""
+    image = build_tactical_map_safe(db, user_id)
+    if image is not None:
+        return image, True
+    try:
+        image = build_real_strategic_map(db)
+        if image is not None:
+            print(f"Using World map fallback for Nation {user_id}.")
+            return image, False
+    except Exception as error:
+        print(f"World map fallback also failed for Nation {user_id}: {error}")
+    return None, False
+
+
+def nation_land_summary(db, user_id, limit=18):
+    rows = db.execute("""SELECT territory_name,is_capital,level FROM map_territories
+        WHERE owner_user_id=? ORDER BY is_capital DESC,acquired_at,territory_name LIMIT ?""",
+        (user_id, limit)).fetchall()
+    if not rows:
+        return "No claimed Land is recorded for this Nation."
+    lines = [f"{'🏛️' if row['is_capital'] else '🗺️'} **{row['territory_name']}** · Land Lv {row['level']}"
+             for row in rows]
+    total = db.execute("SELECT COUNT(*) total FROM map_territories WHERE owner_user_id=?", (user_id,)).fetchone()["total"]
+    if total > len(rows):
+        lines.append(f"…and **{total-len(rows)}** more Land regions.")
+    return "\n".join(lines)
+
+
 def build_tactical_summary_map(db, user_id):
     """Phone-safe map for real ADM1/CAP codes; never assumes the legacy grid format."""
     try:
@@ -1585,20 +1614,21 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         target = nation or interaction.user
         create_player(target)
         await interaction.response.defer()
-        image = build_tactical_map_safe(db, target.id)
+        image, detailed = build_nation_map_resilient(db, target.id)
         if image is None:
-            await interaction.followup.send(
-                f"❌ **{target.display_name}** does not have a mapped Nation territory yet.",
-                ephemeral=True,
-            )
+            embed = discord.Embed(title=f"🧭 {target.display_name}'s Territory Overview",
+                                  description=nation_land_summary(db, target.id), colour=discord.Colour.gold())
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
-        file = discord.File(image, filename="xbot-tactical-map.png")
+        filename = "xbot-tactical-map.png" if detailed else "xbot-world-map.png"
+        file = discord.File(image, filename=filename)
         embed = discord.Embed(
             title=f"🧭 {target.display_name}'s Tactical Map",
-            description="Each coloured real province/state is **1 Land**. The star marks the Nation's Capital.",
+            description=("Each coloured real province/state is **1 Land**. The star marks the Nation's Capital."
+                         if detailed else "The detailed phone map was unavailable, so X BOT opened the World map.\n\n" + nation_land_summary(db, target.id, 8)),
             colour=discord.Colour.gold(),
         )
-        embed.set_image(url="attachment://xbot-tactical-map.png")
+        embed.set_image(url=f"attachment://{filename}")
         embed.set_footer(text="Use /map for the clean World overview.")
         await interaction.followup.send(embed=embed, file=file)
 
@@ -1633,30 +1663,25 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 # View with the City Centre LayoutView in one edit can make
                 # Discord ignore the component interaction on mobile.
                 await interaction.response.defer()
-                image = build_tactical_map_safe(db, self.owner_id)
-                if image is None:
-                    await interaction.followup.send(
-                        "❌ Your Nation does not have a mapped Land yet. Ask an administrator to set your Nation Land location first.",
-                        ephemeral=True,
-                    )
-                    return
+                image, detailed = build_nation_map_resilient(db, self.owner_id)
                 player = db.execute("SELECT nation_name,capital_name FROM players WHERE user_id=?", (self.owner_id,)).fetchone()
-                file = discord.File(image, filename="xbot-my-nation-map.png")
                 embed = discord.Embed(
-                    title=f"🗺️ {player['nation_name']} — Tactical Map",
+                    title=f"🗺️ {player['nation_name']} — Territory Overview",
                     description=(
                         f"🏛️ Capital: **{player['capital_name']}**\n"
-                        "Every coloured province/state is one of your Land regions. Tap the image to zoom in."
+                        + ("Every coloured province/state is one of your Land regions. Tap the image to zoom in."
+                           if detailed else "The detailed phone map was unavailable. Your saved Land is listed below.\n\n" + nation_land_summary(db, self.owner_id, 8))
                     ),
                     colour=discord.Colour.teal(),
                 )
-                embed.set_image(url="attachment://xbot-my-nation-map.png")
                 embed.set_footer(text="Use City Centre to collect income, build, upgrade, or rename Cities.")
-                await interaction.followup.send(
-                    embed=embed,
-                    file=file,
-                    view=CityMapView(self.owner_id),
-                )
+                if image is None:
+                    await interaction.followup.send(embed=embed, view=CityMapView(self.owner_id), ephemeral=True)
+                else:
+                    filename = "xbot-my-nation-map.png" if detailed else "xbot-world-map.png"
+                    file = discord.File(image, filename=filename)
+                    embed.set_image(url=f"attachment://{filename}")
+                    await interaction.followup.send(embed=embed, file=file, view=CityMapView(self.owner_id))
                 return
             await interaction.response.edit_message(view=CitySystemView(self.owner_id, show_costs=self.action == "costs"))
 
