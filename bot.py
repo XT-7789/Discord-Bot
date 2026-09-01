@@ -261,7 +261,7 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 # the Lobby panels, without filling Discord's slash-command picker.
 PUBLIC_PLAYER_COMMANDS = {
     "lobby", "war", "economy", "casino", "craft", "collect", "mine",
-    "sell_item", "map_detail", "map", "declare_war", "attack", "balance",
+    "sell_item", "map_detail", "map", "claim_land", "declare_war", "attack", "balance",
     "code_redeem", "daily",
 }
 

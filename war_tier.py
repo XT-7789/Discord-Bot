@@ -1495,7 +1495,18 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         target = nation or interaction.user
         create_player(target)
         await interaction.response.defer()
-        image = build_real_tactical_map(db, target.id)
+        try:
+            image = build_real_tactical_map(db, target.id)
+        except Exception as error:
+            # Some Android Pillow builds can fail while drawing a complex real
+            # province shape. Keep the command playable with the compact map
+            # rather than returning Discord's generic Command Error panel.
+            print(f"Real tactical map fallback for {target.id}: {error}")
+            try:
+                image = build_tactical_map(db, target.id)
+            except Exception as fallback_error:
+                print(f"Tactical map fallback also failed for {target.id}: {fallback_error}")
+                image = None
         if image is None:
             await interaction.followup.send(
                 f"❌ **{target.display_name}** does not have a mapped Nation territory yet.",
