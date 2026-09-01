@@ -6,6 +6,7 @@ import random
 import sqlite3
 import io
 import hashlib
+import calendar
 
 import discord
 from discord import app_commands
@@ -1016,6 +1017,7 @@ def initialise(db):
         "reward_xc_3": "INTEGER NOT NULL DEFAULT 0",
         "reward_war_credits_3": "INTEGER NOT NULL DEFAULT 0",
         "scheduled_ends_at": "INTEGER",
+        "ended_at": "INTEGER",
         "participation_xc": "INTEGER NOT NULL DEFAULT 0",
         "land_hold_awarded": "INTEGER NOT NULL DEFAULT 0",
     }.items():
@@ -1049,6 +1051,14 @@ def initialise(db):
         season_id INTEGER NOT NULL,user_id INTEGER NOT NULL,rank INTEGER NOT NULL,
         reward_xc INTEGER NOT NULL DEFAULT 0,reward_war_credits INTEGER NOT NULL DEFAULT 0,
         paid_at INTEGER NOT NULL,PRIMARY KEY(season_id,user_id)
+    )""")
+    # Weekly missions are deliberately stored separately from the score board.
+    # A player can claim each mission once per UTC week without changing the
+    # competitive Season ranking.
+    db.execute("""CREATE TABLE IF NOT EXISTS war_season_weekly_claims(
+        season_id INTEGER NOT NULL,user_id INTEGER NOT NULL,week_key TEXT NOT NULL,
+        mission_key TEXT NOT NULL,claimed_at INTEGER NOT NULL,
+        PRIMARY KEY(season_id,user_id,week_key,mission_key)
     )""")
     for key, value in DEFAULTS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, value))
@@ -1195,6 +1205,123 @@ def active_season(db):
     return db.execute(
         "SELECT * FROM war_seasons WHERE status='active' ORDER BY id DESC LIMIT 1"
     ).fetchone()
+
+
+def _season_week_key(now=None):
+    """Stable UTC week key, so weekly missions reset at Monday 00:00 UTC."""
+    stamp = time.gmtime(now or time.time())
+    return time.strftime("%G-W%V", stamp)
+
+
+def _season_week_start(now=None):
+    stamp = time.gmtime(now or time.time())
+    return int(calendar.timegm((stamp.tm_year, stamp.tm_mon, stamp.tm_mday - stamp.tm_wday,
+                                0, 0, 0, 0, 0, 0)))
+
+
+def weekly_season_missions(db, user_id, season=None, now=None):
+    """Return simple, visible missions with reliable data from existing systems."""
+    season = season or active_season(db)
+    if not season:
+        return []
+    current = int(now or time.time())
+    week_key = _season_week_key(current)
+    week_start = _season_week_start(current)
+    battles = db.execute("""SELECT COUNT(*) total FROM battle_history
+        WHERE created_at>=? AND (attacker_id=? OR defender_id=?)""",
+        (week_start, user_id, user_id)).fetchone()["total"]
+    land = db.execute("SELECT COUNT(*) total FROM map_territories WHERE owner_user_id=? AND acquired_at>=?",
+                      (user_id, week_start)).fetchone()["total"]
+    cities = db.execute("SELECT COUNT(*) total FROM player_cities WHERE user_id=? AND created_at>=?",
+                        (user_id, week_start)).fetchone()["total"]
+    raw = (
+        ("battle", "⚔️ First Clash", "Complete 1 battle this week.", int(battles), 1, 75, 40),
+        ("land", "🗺️ Expand the Nation", "Claim or capture 1 Land this week.", int(land), 1, 100, 60),
+        ("city", "🏙️ Develop Home", "Build 1 City this week.", int(cities), 1, 100, 60),
+    )
+    missions = []
+    for key, title, description, progress, target, xc, credits in raw:
+        claimed = db.execute("""SELECT 1 FROM war_season_weekly_claims
+            WHERE season_id=? AND user_id=? AND week_key=? AND mission_key=?""",
+            (season["id"], user_id, week_key, key)).fetchone() is not None
+        missions.append({"key": key, "title": title, "description": description,
+                         "progress": progress, "target": target, "xc": xc,
+                         "credits": credits, "claimed": claimed})
+    return missions
+
+
+def claim_weekly_season_mission(db, user_id, mission_key):
+    season = active_season(db)
+    if not season:
+        return False, "There is no active War Season."
+    mission = next((row for row in weekly_season_missions(db, user_id, season) if row["key"] == mission_key), None)
+    if not mission:
+        return False, "That weekly mission is not available."
+    if mission["claimed"]:
+        return False, "You already claimed that weekly mission."
+    if mission["progress"] < mission["target"]:
+        return False, f"Mission progress is **{mission['progress']}/{mission['target']}**."
+    try:
+        db.execute("""INSERT INTO war_season_weekly_claims(season_id,user_id,week_key,mission_key,claimed_at)
+            VALUES(?,?,?,?,?)""", (season["id"], user_id, _season_week_key(), mission_key, int(time.time())))
+    except sqlite3.IntegrityError:
+        return False, "You already claimed that weekly mission."
+    db.execute("UPDATE players SET xc=xc+?,money=money+? WHERE user_id=?",
+               (mission["xc"], mission["credits"], user_id))
+    db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
+               (user_id, "season_weekly_mission", f"{mission['title']}: +{mission['xc']} XC, +{mission['credits']} War Credits", int(time.time())))
+    db.commit()
+    return True, f"✅ Claimed **{mission['title']}**: **+{mission['xc']} XC** and **+{mission['credits']} War Credits**."
+
+
+def settle_expired_seasons(db, now=None):
+    """Safely end due Seasons and pay ranked rewards once. Returns settlement summaries."""
+    current = int(now or time.time())
+    expired = db.execute("""SELECT * FROM war_seasons WHERE status='active'
+        AND scheduled_ends_at IS NOT NULL AND scheduled_ends_at>0 AND scheduled_ends_at<=?""", (current,)).fetchall()
+    summaries = []
+    for season in expired:
+        ranks = db.execute("""SELECT s.*,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(s.user_id AS TEXT)) player_name
+            FROM war_season_scores s LEFT JOIN players p ON p.user_id=s.user_id
+            WHERE s.season_id=? ORDER BY s.points DESC,s.wins DESC,s.land_captured DESC,s.user_id ASC""", (season["id"],)).fetchall()
+        rewards = ((1, season["reward_xc"], season["reward_war_credits"]),
+                   (2, season["reward_xc_2"], season["reward_war_credits_2"]),
+                   (3, season["reward_xc_3"], season["reward_war_credits_3"]))
+        paid = 0
+        for rank, xc, credits in rewards:
+            if len(ranks) < rank:
+                continue
+            user_id = ranks[rank - 1]["user_id"]
+            existing = db.execute("SELECT 1 FROM war_season_payouts WHERE season_id=? AND user_id=?", (season["id"], user_id)).fetchone()
+            if existing:
+                continue
+            db.execute("UPDATE players SET xc=xc+?,money=money+? WHERE user_id=?", (int(xc), int(credits), user_id))
+            db.execute("INSERT INTO war_season_payouts(season_id,user_id,rank,reward_xc,reward_war_credits,paid_at) VALUES(?,?,?,?,?,?)",
+                       (season["id"], user_id, rank, int(xc), int(credits), current))
+            paid += 1
+        minimum = setting(db, "war_season_participation_min_battles")
+        participation = int(season["participation_xc"] or setting(db, "war_season_participation_xc"))
+        for row in ranks:
+            if int(row["battles"]) < minimum:
+                continue
+            already = db.execute("SELECT 1 FROM economy_logs WHERE user_id=? AND action='season_participation' AND detail=?",
+                                 (row["user_id"], f"Season {season['id']} participation")).fetchone()
+            if not already:
+                db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (participation, row["user_id"]))
+                db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
+                           (row["user_id"], "season_participation", f"Season {season['id']} participation", current))
+        champion = ranks[0] if ranks else None
+        if champion:
+            trophy = db.execute("SELECT id FROM items WHERE name='Season 1 Champion Trophy' COLLATE NOCASE").fetchone()
+            if trophy:
+                db.execute("INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,1) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+1",
+                           (champion["user_id"], trophy["id"]))
+        db.execute("UPDATE war_seasons SET status='ended',ended_at=?,champion_user_id=? WHERE id=?",
+                   (current, champion["user_id"] if champion else None, season["id"]))
+        summaries.append(f"{season['name']} ended · {paid} ranked rewards paid")
+    if expired:
+        db.commit()
+    return summaries
 
 
 def record_season_battle(db, attacker_id, defender_id, winner_id, *, land_captured=0,
@@ -2046,7 +2173,18 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         # This must be an interactive page, rather than a one-way result panel.
         # WarDetailView keeps the player inside their original message and supplies
         # both Back to War Centre and Lobby navigation buttons.
-        return WarDetailView(user_id, "🏁 X BOT War Season", body, discord.Color.gold())
+        return WarDetailView(user_id, "🏁 X BOT War Season", body, discord.Color.gold(), season_page=True)
+
+    def season_missions_view(user_id, notice=""):
+        season = active_season(db)
+        if not season:
+            return WarDetailView(user_id, "📜 Weekly Season Missions", "There is no active War Season right now.", discord.Color.gold())
+        missions = weekly_season_missions(db, user_id, season)
+        lines = []
+        for mission in missions:
+            state = "🎁 Claimed" if mission["claimed"] else "✅ Ready to claim" if mission["progress"] >= mission["target"] else "⬜ In progress"
+            lines.append(f"**{mission['title']}** — {mission['progress']}/{mission['target']}\n{mission['description']}\n{state} · Reward: **{mission['xc']} XC + {mission['credits']} War Credits**")
+        return SeasonMissionsView(user_id, "\n\n".join(lines), notice)
 
     @bot.tree.command(name="season", description="View the active War Season, rewards and rankings", **player_command_kwargs)
     async def season_command(interaction: discord.Interaction):
@@ -2076,27 +2214,8 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
     @bot.tree.command(name="season_missions", description="View your Season 1 war and development missions", **player_command_kwargs)
     async def season_missions(interaction: discord.Interaction):
-        player = create_player(interaction.user)
-        season = active_season(db)
-        score = db.execute("SELECT * FROM war_season_scores WHERE season_id=? AND user_id=?",
-            (season["id"], interaction.user.id)).fetchone() if season else None
-        cities = db.execute("SELECT COUNT(*) AS total FROM player_cities WHERE user_id=?", (interaction.user.id,)).fetchone()["total"]
-        wins = int(score["wins"]) if score else 0
-        defences = int(score["defences"]) if score else 0
-        missions = [
-            ("Found a City", cities >= 1, f"{cities}/1 Cities"),
-            ("Grow Your Nation", int(player["land"]) >= 2, f"{player['land']}/2 Land"),
-            ("Win a Battle", wins >= 1, f"{wins}/1 victories"),
-            ("Defend Your Nation", defences >= 1, f"{defences}/1 successful defence"),
-        ]
-        lines = [f"{'✅' if complete else '⬜'} **{name}** — {progress}" for name, complete, progress in missions]
-        completed = sum(1 for _name, complete, _progress in missions if complete)
-        await interaction.response.send_message(view=xbot_ui.panel(
-            "📜 Season 1 Campaign Missions",
-            f"**Progress:** {completed}/{len(missions)} missions completed\n\n" + "\n".join(lines) +
-            "\n\nComplete missions to build a stronger Nation, then compete for the Season trophy and leaderboard rewards.",
-            colour=discord.Color.gold(), footer="Use /season for points and rewards · /war_objectives for battle goals"
-        ))
+        create_player(interaction.user)
+        await interaction.response.send_message(view=season_missions_view(interaction.user.id))
 
     @bot.tree.command(name="declare_war", description="Declare war on a bordering Nation", **player_command_kwargs)
     @app_commands.describe(target="Choose a neighbouring Nation to declare war on")
@@ -2445,18 +2564,62 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
     class WarDetailView(discord.ui.LayoutView):
         """A temporary page inside the original War message, never a new output."""
-        def __init__(self, owner_id: int, title: str, body: str, colour=discord.Color.dark_red()):
+        def __init__(self, owner_id: int, title: str, body: str, colour=discord.Color.dark_red(), season_page=False):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             container = discord.ui.Container(accent_color=colour)
             container.add_item(discord.ui.TextDisplay(f"## {title}\n{body}"))
-            container.add_item(discord.ui.ActionRow(WarBackButton(owner_id), WarLobbyButton(owner_id)))
+            buttons = [WarBackButton(owner_id), WarLobbyButton(owner_id)]
+            if season_page:
+                buttons.insert(0, SeasonMissionsButton(owner_id))
+            container.add_item(discord.ui.ActionRow(*buttons))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
             await interaction.response.send_message("This War panel belongs to another player. Open `/lobby` for your own panel.", ephemeral=True)
+            return False
+
+    class SeasonMissionsButton(discord.ui.Button):
+        def __init__(self, owner_id):
+            super().__init__(label="Weekly Missions", emoji="📜", style=discord.ButtonStyle.primary)
+            self.owner_id = owner_id
+
+        async def callback(self, interaction):
+            await interaction.response.edit_message(view=season_missions_view(self.owner_id))
+
+    class SeasonMissionClaimButton(discord.ui.Button):
+        def __init__(self, owner_id, mission):
+            ready = mission["progress"] >= mission["target"] and not mission["claimed"]
+            super().__init__(label=mission["title"][:80], emoji="🎁" if ready else "📜",
+                             style=discord.ButtonStyle.success if ready else discord.ButtonStyle.secondary,
+                             disabled=not ready)
+            self.owner_id = owner_id
+            self.mission_key = mission["key"]
+
+        async def callback(self, interaction):
+            success, message = claim_weekly_season_mission(db, interaction.user.id, self.mission_key)
+            await interaction.response.edit_message(view=season_missions_view(self.owner_id, message))
+
+    class SeasonMissionsView(discord.ui.LayoutView):
+        def __init__(self, owner_id, body, notice=""):
+            super().__init__(timeout=300)
+            self.owner_id = owner_id
+            container = discord.ui.Container(accent_color=discord.Color.gold())
+            suffix = f"\n\n-# {notice}" if notice else ""
+            container.add_item(discord.ui.TextDisplay("## 📜 Weekly Season Missions\n" + body + suffix))
+            season = active_season(db)
+            missions = weekly_season_missions(db, owner_id, season) if season else []
+            if missions:
+                container.add_item(discord.ui.ActionRow(*(SeasonMissionClaimButton(owner_id, mission) for mission in missions)))
+            container.add_item(discord.ui.ActionRow(SeasonMissionsButton(owner_id), WarBackButton(owner_id), WarLobbyButton(owner_id)))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id == self.owner_id:
+                return True
+            await interaction.response.send_message("This Season panel belongs to another player. Open `/war` for your own panel.", ephemeral=True)
             return False
 
     class WarOperationsButton(discord.ui.Button):

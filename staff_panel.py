@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 
 import applications
+import tester_feedback
 
 
 def _setting(db, key, default="0"):
@@ -86,6 +87,39 @@ class RewardCodeSelect(discord.ui.Select):
         await self.view.refresh(interaction)
 
 
+class TesterFeedbackSelect(discord.ui.Select):
+    def __init__(self, rows, selected_id=None):
+        options = [discord.SelectOption(label=f"#{row['id']} · {row['user_name']} · {row['title']}"[:100],
+                                        value=str(row['id']), description=f"{row['kind'].title()} · {row['status'].title()}"[:100],
+                                        default=int(row['id']) == int(selected_id or 0)) for row in rows[:25]]
+        super().__init__(placeholder="Choose a Tester report…", options=options, row=1)
+
+    async def callback(self, interaction):
+        self.view.selected_feedback_id = int(self.values[0])
+        await self.view.refresh(interaction)
+
+
+class FeedbackRewardModal(discord.ui.Modal, title="Accept Tester report and reward"):
+    xc = discord.ui.TextInput(label="XC reward", default="0", max_length=10)
+    war_credits = discord.ui.TextInput(label="War Credits reward", default="0", max_length=10)
+    note = discord.ui.TextInput(label="Staff note", placeholder="Optional thank-you note", required=False, max_length=300)
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction):
+        try:
+            xc, credits = max(0, int(str(self.xc))), max(0, int(str(self.war_credits)))
+        except ValueError:
+            await interaction.response.send_message("XC and War Credits must be whole numbers.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        notice = self.panel.review_feedback(interaction, "accepted", str(self.note).strip(), xc, credits)
+        replacement = self.panel.clone(notice=notice, selected_feedback_id=None)
+        await interaction.edit_original_response(embed=replacement.build_embed(), view=replacement)
+
+
 class ApplicationDecisionModal(discord.ui.Modal):
     reason = discord.ui.TextInput(
         label="Reason / staff note",
@@ -152,7 +186,7 @@ class RewardCodeModal(discord.ui.Modal, title="Create reward code"):
 
 
 class AdminPanel(discord.ui.View):
-    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, notice=""):
+    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice=""):
         super().__init__(timeout=900)
         self.bot = bot
         self.db = db
@@ -162,6 +196,7 @@ class AdminPanel(discord.ui.View):
         self.selected_form_id = selected_form_id
         self.selected_application_id = selected_application_id
         self.selected_code_id = selected_code_id
+        self.selected_feedback_id = selected_feedback_id
         self.notice = notice
         self._build_controls()
 
@@ -171,6 +206,7 @@ class AdminPanel(discord.ui.View):
             "selected_form_id": self.selected_form_id,
             "selected_application_id": self.selected_application_id,
             "selected_code_id": self.selected_code_id,
+            "selected_feedback_id": self.selected_feedback_id,
             "notice": "",
         }
         values.update(changes)
@@ -186,6 +222,7 @@ class AdminPanel(discord.ui.View):
         navigation = (
             ("home", "Home", "🏠"),
             ("applications", "Applications", "📋"),
+            ("tester", "Tester Reports", "🐛"),
             ("verification", "Verification", "✅"),
             ("codes", "Reward Codes", "🎟️"),
         )
@@ -208,6 +245,14 @@ class AdminPanel(discord.ui.View):
         elif self.page == "verification":
             self.add_item(AdminActionButton("post_verification", "Post Verification Here", emoji="✅", style=discord.ButtonStyle.success, row=1))
             self.add_item(AdminActionButton("toggle_verification", "Open / Close", emoji="🔁", row=1))
+        elif self.page == "tester":
+            reports = self.pending_feedback()
+            if reports:
+                self.add_item(TesterFeedbackSelect(reports, self.selected_feedback_id))
+            self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel Here", emoji="📨", style=discord.ButtonStyle.primary, row=2))
+            if self.selected_feedback():
+                self.add_item(AdminActionButton("accept_feedback", "Accept + Reward", emoji="🎁", style=discord.ButtonStyle.success, row=2))
+                self.add_item(AdminActionButton("reject_feedback", "Reject", emoji="❌", style=discord.ButtonStyle.danger, row=2))
         elif self.page == "codes":
             codes = self.reward_codes()
             if codes:
@@ -251,6 +296,14 @@ class AdminPanel(discord.ui.View):
             return None
         return self.db.execute("SELECT * FROM reward_codes WHERE id=?", (self.selected_code_id,)).fetchone()
 
+    def pending_feedback(self):
+        return self.db.execute("SELECT * FROM tester_feedback WHERE status='pending' ORDER BY created_at LIMIT 25").fetchall()
+
+    def selected_feedback(self):
+        if not self.selected_feedback_id:
+            return None
+        return self.db.execute("SELECT * FROM tester_feedback WHERE id=? AND status='pending'", (self.selected_feedback_id,)).fetchone()
+
     def build_embed(self):
         embed = discord.Embed(title="🛡️ X BOT Staff Control Centre", colour=discord.Color.blurple())
         if self.notice:
@@ -262,6 +315,8 @@ class AdminPanel(discord.ui.View):
             embed.add_field(name="📋 Pending applications", value=str(pending), inline=True)
             embed.add_field(name="🎟️ Active reward codes", value=str(active_codes), inline=True)
             embed.add_field(name="✅ Verification", value="Open" if _setting(self.db, "verification_enabled", "1") == "1" else "Closed", inline=True)
+            reports = self.db.execute("SELECT COUNT(*) FROM tester_feedback WHERE status='pending'").fetchone()[0]
+            embed.add_field(name="🐛 Tester reports", value=str(reports), inline=True)
         elif self.page == "applications":
             embed.description = f"Applications are **{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}**. Choose any open form to post, or review a pending submission."
             form = self.selected_form()
@@ -279,6 +334,14 @@ class AdminPanel(discord.ui.View):
             embed.add_field(name="Unverified role", value=f"<@&{_setting(self.db, 'verification_unverified_role_id')}>", inline=True)
             embed.add_field(name="Guest role", value=f"<@&{_setting(self.db, 'verification_guest_role_id')}>", inline=True)
             embed.add_field(name="Member role", value=f"<@&{_setting(self.db, 'verification_member_role_id')}>", inline=True)
+        elif self.page == "tester":
+            embed.description = "Post a simple bug/suggestion panel for Testers. Review each report and optionally reward useful testing."
+            report = self.selected_feedback()
+            if report:
+                embed.add_field(name=f"#{report['id']} · {report['kind'].title()} · {report['user_name']}",
+                                value=f"**{report['title']}**\n{report['details']}"[:1024], inline=False)
+            elif not self.pending_feedback():
+                embed.add_field(name="Queue", value="No pending Tester reports.", inline=False)
         elif self.page == "codes":
             embed.description = "Create currency reward codes or enable/disable an existing code. Players redeem them with `/code_redeem`."
             selected = self.selected_code()
@@ -300,7 +363,7 @@ class AdminPanel(discord.ui.View):
 
     async def handle_action(self, interaction, action):
         if action.startswith("page:"):
-            replacement = self.clone(page=action.split(":", 1)[1], selected_application_id=None, selected_code_id=None)
+            replacement = self.clone(page=action.split(":", 1)[1], selected_application_id=None, selected_code_id=None, selected_feedback_id=None)
             await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
             return
         if action == "toggle_applications":
@@ -331,6 +394,21 @@ class AdminPanel(discord.ui.View):
         if action == "post_verification":
             await interaction.channel.send(view=applications.VerificationView(self.bot, self.db))
             await self.refresh(interaction, notice=f"✅ Verification panel posted in <#{interaction.channel_id}>.")
+            return
+        if action == "post_tester_feedback":
+            embed = discord.Embed(title="🧪 X BOT Tester Feedback", description="Testers: report a bug or suggest an improvement. Staff review every report in `/admin`.", colour=discord.Color.teal())
+            await interaction.channel.send(embed=embed, view=tester_feedback.TesterFeedbackView(self.db))
+            await self.refresh(interaction, notice=f"✅ Tester feedback panel posted in <#{interaction.channel_id}>.")
+            return
+        if action == "accept_feedback":
+            if not self.selected_feedback():
+                await self.refresh(interaction, notice="❌ Choose a Tester report first.")
+                return
+            await interaction.response.send_modal(FeedbackRewardModal(self))
+            return
+        if action == "reject_feedback":
+            notice = self.review_feedback(interaction, "rejected", "", 0, 0)
+            await self.refresh(interaction, notice=notice)
             return
         if action == "create_code":
             await interaction.response.send_modal(RewardCodeModal(self))
@@ -379,6 +457,19 @@ class AdminPanel(discord.ui.View):
             except discord.HTTPException:
                 pass
         return f"✅ Application #{row['id']} is now **{decision_name}**."
+
+    def review_feedback(self, interaction, decision, note, xc, credits):
+        row = self.selected_feedback()
+        if not row:
+            return "❌ That Tester report is no longer pending."
+        self.db.execute("""UPDATE tester_feedback SET status=?,reviewer_id=?,reviewer_name=?,review_note=?,reward_xc=?,reward_war_credits=?,reviewed_at=? WHERE id=?""",
+                        (decision, interaction.user.id, interaction.user.display_name, note, xc, credits, int(time.time()), row['id']))
+        if decision == "accepted" and (xc or credits):
+            self.db.execute("UPDATE players SET xc=xc+?,money=money+? WHERE user_id=?", (xc, credits, row['user_id']))
+            self.db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
+                            (row['user_id'], 'tester_feedback_reward', f"Tester report #{row['id']}", int(time.time())))
+        self.db.commit()
+        return f"✅ Tester report #{row['id']} {decision}." + (f" Rewarded {xc:,} XC and {credits:,} War Credits." if xc or credits else "")
 
 
 def register_commands(bot, db, staff_check, command_kwargs):

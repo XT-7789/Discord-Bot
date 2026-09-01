@@ -9,6 +9,7 @@ from typing import Optional
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 from dotenv import load_dotenv
 import economy
 import casino
@@ -20,6 +21,7 @@ import advanced_systems
 import leveling
 import applications
 import staff_panel
+import tester_feedback
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -122,6 +124,7 @@ economy_extra.initialise(db)
 advanced_systems.initialise(db)
 leveling.initialise(db)
 applications.initialise(db)
+tester_feedback.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -397,6 +400,7 @@ class XBot(discord.Client):
 
     async def setup_hook(self):
         applications.setup_persistent_views(self, db)
+        tester_feedback.setup_persistent_views(self, db)
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
 
         def hide_panel_commands(command_guild, allowed_names):
@@ -454,6 +458,18 @@ class XBot(discord.Client):
 
 
 bot = XBot()
+
+
+@tasks.loop(minutes=10)
+async def season_settlement_loop():
+    """Close due Seasons even when nobody presses a command."""
+    for summary in war_tier.settle_expired_seasons(db):
+        print(f"Season settlement: {summary}")
+
+
+@season_settlement_loop.before_loop
+async def before_season_settlement_loop():
+    await bot.wait_until_ready()
 
 
 class XBPrefixResponse:
@@ -644,6 +660,10 @@ async def run_xb_prefix(message: discord.Message):
 @bot.event
 async def on_ready():
     print(f"Bot is online: {bot.user}")
+    for summary in war_tier.settle_expired_seasons(db):
+        print(f"Season settlement: {summary}")
+    if not season_settlement_loop.is_running():
+        season_settlement_loop.start()
 
 
 @bot.event
