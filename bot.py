@@ -415,22 +415,37 @@ class XBot(discord.Client):
             print(f"Published {len(visible_names)} X BOT commands to {scope_name}: {', '.join(visible_names)}")
             print(f"Kept {len(hidden)} panel-only commands hidden from {scope_name}.")
 
-        # Filter the global catalogue first. copy_global_to must only see this
-        # small player list; copying all internal panel callbacks would exceed
-        # Discord's 100-command guild limit.
-        global_hidden = hide_panel_commands(None, PUBLIC_PLAYER_COMMANDS)
-        await self.tree.sync()
-        report_sync(None, global_hidden)
-
         if _staff_guild_id:
             staff_guild = discord.Object(id=_staff_guild_id)
-            self.tree.copy_global_to(guild=staff_guild)
+
+            # X BOT is a single-server game. Keep the public entry commands in
+            # the configured guild catalogue so Discord refreshes them at once,
+            # and clear the global catalogue to prevent every command appearing
+            # twice (one global copy plus one guild copy).
+            global_commands = list(self.tree.get_commands())
+            for command in global_commands:
+                if command.name in published:
+                    self.tree.add_command(command, guild=staff_guild, override=True)
+
+            removed_global = []
+            for command in list(self.tree.get_commands()):
+                removed = self.tree.remove_command(command.name)
+                if removed is not None:
+                    removed_global.append(removed)
+            await self.tree.sync()
+            print("Cleared global X BOT commands; this server uses the immediate guild catalogue.")
+
             guild_hidden = hide_panel_commands(staff_guild, published)
             await self.tree.sync(guild=staff_guild)
             report_sync(staff_guild, guild_hidden)
             restore_panel_commands(staff_guild, guild_hidden)
-
-        restore_panel_commands(None, global_hidden)
+            restore_panel_commands(None, removed_global)
+        else:
+            # Fallback for installations that have not configured a server ID.
+            global_hidden = hide_panel_commands(None, PUBLIC_PLAYER_COMMANDS)
+            await self.tree.sync()
+            report_sync(None, global_hidden)
+            restore_panel_commands(None, global_hidden)
         casino.start_vip_cleanup_task(self, db)
         leveling.start_voice_task(self, db)
 
