@@ -43,10 +43,28 @@ class PendingApplicationSelect(discord.ui.Select):
             )
             for row in rows[:25]
         ]
-        super().__init__(placeholder="Choose a pending application…", options=options, row=1)
+        super().__init__(placeholder="Choose a pending application…", options=options, row=2)
 
     async def callback(self, interaction: discord.Interaction):
         self.view.selected_application_id = int(self.values[0])
+        await self.view.refresh(interaction)
+
+
+class ApplicationFormSelect(discord.ui.Select):
+    def __init__(self, rows, selected_id=None):
+        options = [
+            discord.SelectOption(
+                label=f"{row['emoji']} {row['name']}"[:100],
+                value=str(row["id"]),
+                description=(row["description"] or "Open application form")[:100],
+                default=int(row["id"]) == int(selected_id or rows[0]["id"]),
+            )
+            for row in rows[:25]
+        ]
+        super().__init__(placeholder="Choose an application form to post…", options=options, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.view.selected_form_id = int(self.values[0])
         await self.view.refresh(interaction)
 
 
@@ -134,13 +152,14 @@ class RewardCodeModal(discord.ui.Modal, title="Create reward code"):
 
 
 class AdminPanel(discord.ui.View):
-    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_application_id=None, selected_code_id=None, notice=""):
+    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, notice=""):
         super().__init__(timeout=900)
         self.bot = bot
         self.db = db
         self.staff_check = staff_check
         self.owner_id = owner_id
         self.page = page
+        self.selected_form_id = selected_form_id
         self.selected_application_id = selected_application_id
         self.selected_code_id = selected_code_id
         self.notice = notice
@@ -149,6 +168,7 @@ class AdminPanel(discord.ui.View):
     def clone(self, **changes):
         values = {
             "page": self.page,
+            "selected_form_id": self.selected_form_id,
             "selected_application_id": self.selected_application_id,
             "selected_code_id": self.selected_code_id,
             "notice": "",
@@ -173,15 +193,18 @@ class AdminPanel(discord.ui.View):
             self.add_item(AdminActionButton(f"page:{page}", label, emoji=emoji, style=discord.ButtonStyle.primary if self.page == page else discord.ButtonStyle.secondary, row=0))
 
         if self.page == "applications":
+            forms = self.application_forms()
+            if forms:
+                self.add_item(ApplicationFormSelect(forms, self.selected_form_id))
             pending = self.pending_applications()
             if pending:
                 self.add_item(PendingApplicationSelect(pending, self.selected_application_id))
-            self.add_item(AdminActionButton("post_application", "Post Tester Panel Here", emoji="📨", style=discord.ButtonStyle.primary, row=2))
-            self.add_item(AdminActionButton("toggle_applications", "Open / Close", emoji="🔁", row=2))
+            self.add_item(AdminActionButton("post_application", "Post Selected Form Here", emoji="📨", style=discord.ButtonStyle.primary, row=3))
+            self.add_item(AdminActionButton("toggle_applications", "Open / Close", emoji="🔁", row=3))
             if self.selected_application():
-                self.add_item(AdminActionButton("review:accepted", "Accept", emoji="✅", style=discord.ButtonStyle.success, row=3))
-                self.add_item(AdminActionButton("review:hold", "Hold", emoji="⏸️", row=3))
-                self.add_item(AdminActionButton("review:denied", "Deny", emoji="❌", style=discord.ButtonStyle.danger, row=3))
+                self.add_item(AdminActionButton("review:accepted", "Accept", emoji="✅", style=discord.ButtonStyle.success, row=4))
+                self.add_item(AdminActionButton("review:hold", "Hold", emoji="⏸️", row=4))
+                self.add_item(AdminActionButton("review:denied", "Deny", emoji="❌", style=discord.ButtonStyle.danger, row=4))
         elif self.page == "verification":
             self.add_item(AdminActionButton("post_verification", "Post Verification Here", emoji="✅", style=discord.ButtonStyle.success, row=1))
             self.add_item(AdminActionButton("toggle_verification", "Open / Close", emoji="🔁", row=1))
@@ -199,6 +222,16 @@ class AdminPanel(discord.ui.View):
                JOIN application_forms f ON f.id=s.form_id WHERE s.status IN ('pending','hold')
                ORDER BY s.created_at LIMIT 25"""
         ).fetchall()
+
+    def application_forms(self):
+        return self.db.execute("SELECT * FROM application_forms WHERE enabled=1 ORDER BY name LIMIT 25").fetchall()
+
+    def selected_form(self):
+        forms = self.application_forms()
+        if not forms:
+            return None
+        selected_id = self.selected_form_id or forms[0]["id"]
+        return self.db.execute("SELECT * FROM application_forms WHERE id=? AND enabled=1", (selected_id,)).fetchone() or forms[0]
 
     def selected_application(self):
         if not self.selected_application_id:
@@ -230,7 +263,10 @@ class AdminPanel(discord.ui.View):
             embed.add_field(name="🎟️ Active reward codes", value=str(active_codes), inline=True)
             embed.add_field(name="✅ Verification", value="Open" if _setting(self.db, "verification_enabled", "1") == "1" else "Closed", inline=True)
         elif self.page == "applications":
-            embed.description = f"Applications are **{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}**. Post the Tester form or review a pending submission."
+            embed.description = f"Applications are **{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}**. Choose any open form to post, or review a pending submission."
+            form = self.selected_form()
+            if form:
+                embed.add_field(name="Form selected to post", value=f"{form['emoji']} **{form['name']}**\n{form['description'] or 'No description.'}"[:1024], inline=False)
             selected = self.selected_application()
             if selected:
                 answers = self.db.execute("SELECT question,answer FROM application_answers WHERE submission_id=? ORDER BY question_id", (selected["id"],)).fetchall()
@@ -273,13 +309,13 @@ class AdminPanel(discord.ui.View):
             await self.refresh(interaction, notice=f"✅ Applications are now {'open' if value == '1' else 'closed'}.")
             return
         if action == "post_application":
-            form = self.db.execute("SELECT * FROM application_forms WHERE name=? COLLATE NOCASE", (applications.TESTER_FORM_NAME,)).fetchone()
+            form = self.selected_form()
             if not form:
-                await self.refresh(interaction, notice="❌ Tester Application was not found.")
+                await self.refresh(interaction, notice="❌ No open Application Form was found.")
                 return
             embed = discord.Embed(title=f"{form['emoji']} {form['name']}", description=form["description"], colour=discord.Color.blue())
             await interaction.channel.send(embed=embed, view=applications.ApplicationStartView(self.bot, self.db, form))
-            await self.refresh(interaction, notice=f"✅ Tester Application posted in <#{interaction.channel_id}>.")
+            await self.refresh(interaction, notice=f"✅ {form['name']} posted in <#{interaction.channel_id}>.")
             return
         if action.startswith("review:"):
             if not self.selected_application():

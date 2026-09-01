@@ -22,6 +22,97 @@ TESTER_REVIEWER_ROLE_IDS = "1523954152701431848,1531176720097476708"
 TESTER_FORM_NAME = "Tester Application"
 
 
+def _seed_tester_questions(db, form_id):
+    tester_questions = [
+        ("Why would you like to become an X BOT Tester?", "Tell us what you want to help test.", 1, 1, 10, "long"),
+        ("Which device do you mainly use?", "For example: Android, iPhone, Windows, Discord desktop.", 0, 1, 20, "short"),
+        ("How often can you test and send feedback?", "For example: daily, weekends, a few times per week.", 0, 1, 30, "short"),
+        ("How would you report a bug?", "Explain the steps, expected result, and what happened instead.", 1, 1, 40, "long"),
+    ]
+    db.executemany(
+        """INSERT INTO application_questions(form_id,label,placeholder,paragraph,required,position,question_type)
+           VALUES(?,?,?,?,?,?,?)""",
+        [(form_id, *question) for question in tester_questions],
+    )
+
+
+def _ensure_single_tester_form(db):
+    """Merge old Tester forms without deleting historical submissions."""
+    forms = db.execute("SELECT * FROM application_forms ORDER BY id").fetchall()
+    tester_forms = []
+    for form in forms:
+        accepted = set(filter(None, (form["accepted_role_ids"] or form["accepted_role_id"] or "").split(",")))
+        if TESTER_ROLE_ID in accepted or "tester" in form["name"].casefold():
+            tester_forms.append(form)
+
+    if not tester_forms:
+        cursor = db.execute(
+            """INSERT INTO application_forms(name,emoji,description,reviewer_role_ids,accepted_role_ids,cooldown_seconds,enabled)
+               VALUES(?,?,?,?,?,?,1)""",
+            (
+                TESTER_FORM_NAME,
+                "🧪",
+                "Help test upcoming X BOT features, report clear bugs, and give useful feedback. Testers do not receive staff or Dashboard permissions.",
+                TESTER_REVIEWER_ROLE_IDS,
+                TESTER_ROLE_ID,
+                7 * 86400,
+            ),
+        )
+        _seed_tester_questions(db, cursor.lastrowid)
+        return
+
+    def submission_count(form):
+        return db.execute("SELECT COUNT(*) FROM application_submissions WHERE form_id=?", (form["id"],)).fetchone()[0]
+
+    def question_count(form):
+        return db.execute("SELECT COUNT(*) FROM application_questions WHERE form_id=?", (form["id"],)).fetchone()[0]
+
+    # Prefer the form that owns real history as the permanent record. Use the
+    # most complete current question set for future applications.
+    canonical = max(tester_forms, key=lambda form: (submission_count(form), -int(form["id"])))
+    question_source = max(tester_forms, key=lambda form: (question_count(form), int(form["id"])))
+    canonical_id = int(canonical["id"])
+    source_id = int(question_source["id"])
+
+    for form in tester_forms:
+        form_id = int(form["id"])
+        if form_id != canonical_id:
+            db.execute("UPDATE application_submissions SET form_id=? WHERE form_id=?", (canonical_id, form_id))
+
+    if source_id != canonical_id:
+        old_question_ids = [row[0] for row in db.execute("SELECT id FROM application_questions WHERE form_id=?", (canonical_id,))]
+        if old_question_ids:
+            db.executemany("DELETE FROM application_question_options WHERE question_id=?", [(question_id,) for question_id in old_question_ids])
+        db.execute("DELETE FROM application_questions WHERE form_id=?", (canonical_id,))
+        db.execute("UPDATE application_questions SET form_id=? WHERE form_id=?", (canonical_id, source_id))
+
+    for form in tester_forms:
+        form_id = int(form["id"])
+        if form_id == canonical_id:
+            continue
+        remaining_question_ids = [row[0] for row in db.execute("SELECT id FROM application_questions WHERE form_id=?", (form_id,))]
+        if remaining_question_ids:
+            db.executemany("DELETE FROM application_question_options WHERE question_id=?", [(question_id,) for question_id in remaining_question_ids])
+        db.execute("DELETE FROM application_questions WHERE form_id=?", (form_id,))
+        db.execute("DELETE FROM application_forms WHERE id=?", (form_id,))
+
+    db.execute(
+        """UPDATE application_forms SET name=?,emoji=?,description=?,reviewer_role_ids=?,accepted_role_ids=?,
+           cooldown_seconds=?,enabled=1 WHERE id=?""",
+        (
+            TESTER_FORM_NAME,
+            "🧪",
+            "Help test upcoming X BOT features, report clear bugs, and give useful feedback. Testers do not receive staff or Dashboard permissions.",
+            TESTER_REVIEWER_ROLE_IDS,
+            TESTER_ROLE_ID,
+            7 * 86400,
+            canonical_id,
+        ),
+    )
+    if question_count({"id": canonical_id}) == 0:
+        _seed_tester_questions(db, canonical_id)
+
+
 def initialise(db):
     for key, value in DEFAULTS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, value))
@@ -60,32 +151,7 @@ def initialise(db):
     )""")
     db.execute("UPDATE application_forms SET reviewer_role_ids=reviewer_role_id WHERE reviewer_role_ids='' AND reviewer_role_id!=''")
     db.execute("UPDATE application_forms SET accepted_role_ids=accepted_role_id WHERE accepted_role_ids='' AND accepted_role_id!=''")
-    tester_form = db.execute("SELECT id FROM application_forms WHERE name=? COLLATE NOCASE", (TESTER_FORM_NAME,)).fetchone()
-    if tester_form is None:
-        cursor = db.execute(
-            """INSERT INTO application_forms(name,emoji,description,reviewer_role_ids,accepted_role_ids,cooldown_seconds,enabled)
-               VALUES(?,?,?,?,?,?,1)""",
-            (
-                TESTER_FORM_NAME,
-                "🧪",
-                "Help test upcoming X BOT features, report clear bugs, and give useful feedback. Testers do not receive staff or Dashboard permissions.",
-                TESTER_REVIEWER_ROLE_IDS,
-                TESTER_ROLE_ID,
-                7 * 86400,
-            ),
-        )
-        tester_form_id = cursor.lastrowid
-        tester_questions = [
-            ("Why would you like to become an X BOT Tester?", "Tell us what you want to help test.", 1, 1, 10, "long"),
-            ("Which device do you mainly use?", "For example: Android, iPhone, Windows, Discord desktop.", 0, 1, 20, "short"),
-            ("How often can you test and send feedback?", "For example: daily, weekends, a few times per week.", 0, 1, 30, "short"),
-            ("How would you report a bug?", "Explain the steps, expected result, and what happened instead.", 1, 1, 40, "long"),
-        ]
-        db.executemany(
-            """INSERT INTO application_questions(form_id,label,placeholder,paragraph,required,position,question_type)
-               VALUES(?,?,?,?,?,?,?)""",
-            [(tester_form_id, *question) for question in tester_questions],
-        )
+    _ensure_single_tester_form(db)
     db.commit()
 
 
