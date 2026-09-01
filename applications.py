@@ -14,6 +14,13 @@ DEFAULTS = {
     "verification_min_account_days": "0", "applications_enabled": "1",
 }
 
+# Testers are players who help try new content and report problems. They are
+# not staff: this role grants no Dashboard, moderation, economy, or war-admin
+# access. The two existing senior roles review tester applications.
+TESTER_ROLE_ID = "1534196579794161784"
+TESTER_REVIEWER_ROLE_IDS = "1523954152701431848,1531176720097476708"
+TESTER_FORM_NAME = "Tester Application"
+
 
 def initialise(db):
     for key, value in DEFAULTS.items():
@@ -53,6 +60,32 @@ def initialise(db):
     )""")
     db.execute("UPDATE application_forms SET reviewer_role_ids=reviewer_role_id WHERE reviewer_role_ids='' AND reviewer_role_id!=''")
     db.execute("UPDATE application_forms SET accepted_role_ids=accepted_role_id WHERE accepted_role_ids='' AND accepted_role_id!=''")
+    tester_form = db.execute("SELECT id FROM application_forms WHERE name=? COLLATE NOCASE", (TESTER_FORM_NAME,)).fetchone()
+    if tester_form is None:
+        cursor = db.execute(
+            """INSERT INTO application_forms(name,emoji,description,reviewer_role_ids,accepted_role_ids,cooldown_seconds,enabled)
+               VALUES(?,?,?,?,?,?,1)""",
+            (
+                TESTER_FORM_NAME,
+                "🧪",
+                "Help test upcoming X BOT features, report clear bugs, and give useful feedback. Testers do not receive staff or Dashboard permissions.",
+                TESTER_REVIEWER_ROLE_IDS,
+                TESTER_ROLE_ID,
+                7 * 86400,
+            ),
+        )
+        tester_form_id = cursor.lastrowid
+        tester_questions = [
+            ("Why would you like to become an X BOT Tester?", "Tell us what you want to help test.", 1, 1, 10, "long"),
+            ("Which device do you mainly use?", "For example: Android, iPhone, Windows, Discord desktop.", 0, 1, 20, "short"),
+            ("How often can you test and send feedback?", "For example: daily, weekends, a few times per week.", 0, 1, 30, "short"),
+            ("How would you report a bug?", "Explain the steps, expected result, and what happened instead.", 1, 1, 40, "long"),
+        ]
+        db.executemany(
+            """INSERT INTO application_questions(form_id,label,placeholder,paragraph,required,position,question_type)
+               VALUES(?,?,?,?,?,?,?)""",
+            [(tester_form_id, *question) for question in tester_questions],
+        )
     db.commit()
 
 

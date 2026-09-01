@@ -258,7 +258,7 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 PUBLIC_PLAYER_COMMANDS = {
     "lobby", "war", "economy", "casino", "craft", "collect", "mine",
     "sell_item", "map_detail", "map", "declare_war", "attack", "balance",
-    "code_redeem",
+    "code_redeem", "daily",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -267,8 +267,7 @@ STAFF_SLASH_COMMANDS = {
     "inrole", "role", "code_create", "code_disable",
     "spawn", "remove_item", "economy_adjust", "job_log_channel", "inventory_check",
     "lottery_draw", "verification_panel", "application_panel", "application_review",
-    "setlevel", "setannouncement", "announcementshow", "setannouncementchat",
-    "war_start", "war_end", "forces_check",
+    "setlevel", "server_settings", "say", "war_start", "war_end", "forces_check",
 }
 
 
@@ -282,6 +281,82 @@ def is_council_or_admin(interaction: discord.Interaction) -> bool:
     if permissions and permissions.moderate_members:
         return True
     return bool({role.id for role in getattr(interaction.user, "roles", [])} & STAFF_ROLE_IDS)
+
+
+def _server_settings_embed() -> discord.Embed:
+    """A compact, single-page view of the server chat settings."""
+    enabled = leveling.setting(db, "xp_announcement_enabled") == "1"
+    channel_id = leveling.setting(db, "xp_announcement_channel_id")
+    channel_text = f"<#{channel_id}>" if channel_id.isdigit() and channel_id != "0" else "Not selected"
+    template = leveling.setting(db, "xp_announcement_template")
+    embed = discord.Embed(title="⚙️ X BOT Server Settings", colour=discord.Color.blurple())
+    embed.description = "Manage level-up chat notices here. Use `/say` when you want X BOT to post a normal announcement."
+    embed.add_field(name="Level-up notices", value="🟢 Enabled" if enabled else "🔴 Disabled", inline=True)
+    embed.add_field(name="Announcement channel", value=channel_text, inline=True)
+    embed.add_field(name="Current message", value=f"```{template[:900]}```", inline=False)
+    embed.set_footer(text="Only Administrators and Moderators can use these controls.")
+    return embed
+
+
+class AnnouncementChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent):
+        super().__init__(placeholder="Choose the level-up announcement channel…", channel_types=[discord.ChannelType.text])
+        self.parent_panel = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message("Only Administrators and Moderators can change settings.", ephemeral=True)
+            return
+        channel = self.values[0]
+        db.execute("INSERT INTO economy_settings(key,value) VALUES('xp_announcement_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(channel.id),))
+        db.commit()
+        await interaction.response.edit_message(embed=_server_settings_embed(), view=self.parent_panel)
+
+
+class AnnouncementTemplateModal(discord.ui.Modal, title="Level-up announcement message"):
+    message = discord.ui.TextInput(
+        label="Message",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=True,
+        placeholder="Use {mention}, {user}, {level}, and {reward}",
+    )
+
+    def __init__(self):
+        super().__init__()
+        self.message.default = leveling.setting(db, "xp_announcement_template")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message("Only Administrators and Moderators can change settings.", ephemeral=True)
+            return
+        db.execute("INSERT INTO economy_settings(key,value) VALUES('xp_announcement_template',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(self.message),))
+        db.commit()
+        await interaction.response.send_message(view=xbot_ui.success("📣 Announcement Saved", "The level-up message was updated."), ephemeral=True)
+
+
+class ServerSettingsView(discord.ui.View):
+    def __init__(self, owner_id: int):
+        super().__init__(timeout=600)
+        self.owner_id = owner_id
+        self.add_item(AnnouncementChannelSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id and is_council_or_admin(interaction):
+            return True
+        await interaction.response.send_message("This settings panel belongs to another staff member.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Edit level-up message", emoji="✏️", style=discord.ButtonStyle.primary)
+    async def edit_message(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(AnnouncementTemplateModal())
+
+    @discord.ui.button(label="Enable / disable notices", emoji="🔔", style=discord.ButtonStyle.secondary)
+    async def toggle_notices(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        current = leveling.setting(db, "xp_announcement_enabled") == "1"
+        db.execute("INSERT INTO economy_settings(key,value) VALUES('xp_announcement_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("0" if current else "1",))
+        db.commit()
+        await interaction.response.edit_message(embed=_server_settings_embed(), view=self)
 
 # ---------- Bot ----------
 
@@ -555,6 +630,38 @@ async def ping(interaction: discord.Interaction):
     await interaction.response.send_message(view=xbot_ui.success("🏓 X BOT Online", "X BOT V2 · New War Tier is running."))
 
 
+@bot.tree.command(name="server_settings", description="Admin: manage X BOT announcement settings", **STAFF_COMMAND_KWARGS)
+async def server_settings(interaction: discord.Interaction):
+    if not is_council_or_admin(interaction):
+        await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Moderators can manage server settings."), ephemeral=True)
+        return
+    await interaction.response.send_message(embed=_server_settings_embed(), view=ServerSettingsView(interaction.user.id), ephemeral=True)
+
+
+@bot.tree.command(name="say", description="Admin: make X BOT post an announcement", **STAFF_COMMAND_KWARGS)
+@app_commands.describe(message="Text that X BOT should post", channel="Optional destination; defaults to this channel")
+async def say(interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None):
+    if not is_council_or_admin(interaction):
+        await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Moderators can post as X BOT."), ephemeral=True)
+        return
+    text = message.strip()
+    if not text:
+        await interaction.response.send_message(view=xbot_ui.danger("Message Required", "Write the message that X BOT should post."), ephemeral=True)
+        return
+    destination = channel or interaction.channel
+    if not isinstance(destination, discord.TextChannel):
+        await interaction.response.send_message(view=xbot_ui.danger("Channel Required", "Choose a normal text channel for this announcement."), ephemeral=True)
+        return
+    try:
+        await destination.send(text, allowed_mentions=discord.AllowedMentions.none())
+    except discord.Forbidden:
+        await interaction.response.send_message(view=xbot_ui.danger("Cannot Post", f"X BOT cannot send messages in {destination.mention}."), ephemeral=True)
+        return
+    economy.log(db, interaction.user.id, "staff_say", f"Posted in #{destination.name}: {text[:120]}")
+    db.commit()
+    await interaction.response.send_message(view=xbot_ui.success("📣 Announcement Posted", f"X BOT posted your message in {destination.mention}."), ephemeral=True)
+
+
 @bot.tree.command(name="inrole", description="Show the members who have a Discord role (Council/Admin)", **STAFF_COMMAND_KWARGS)
 @app_commands.describe(role="The Discord role to inspect")
 async def inrole(interaction: discord.Interaction, role: discord.Role):
@@ -816,9 +923,11 @@ applications.register_commands(bot, db)
 # database tables for old logs, but do not publish these commands any more.
 for _retired_command in (
     "job_list", "job_apply", "work",
-    "daily", "bank", "deposit", "withdraw",
+    "bank", "deposit", "withdraw",
     "armed_forces", "army_recruit",
     "prepare", "rally", "supply_buy", "army", "navy", "airforce",
+    # Replaced by the single interactive /server_settings panel.
+    "setannouncement", "announcementshow", "setannouncementchat",
 ):
     bot.tree.remove_command(_retired_command)
 
