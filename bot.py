@@ -397,7 +397,12 @@ class XBot(discord.Client):
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
         scopes = [None]
         if _staff_guild_id:
-            scopes.append(discord.Object(id=_staff_guild_id))
+            staff_guild = discord.Object(id=_staff_guild_id)
+            # Publish the player entry commands to this server as well as
+            # globally. Guild commands refresh immediately, while Discord may
+            # cache a changed global catalogue for a while.
+            self.tree.copy_global_to(guild=staff_guild)
+            scopes.append(staff_guild)
 
         # Temporarily remove panel-only commands, sync the small public list,
         # then restore the Python command objects without syncing them.  This
@@ -414,7 +419,12 @@ class XBot(discord.Client):
             for command in hidden_commands:
                 self.tree.add_command(command, guild=command_guild)
             scope_name = "global" if command_guild is None else f"guild {command_guild.id}"
-            print(f"Published {len(self.tree.get_commands(guild=command_guild)) - len(hidden_commands)} X BOT commands to {scope_name}; {len(hidden_commands)} panel-only commands hidden.")
+            visible_names = sorted(
+                command.name for command in self.tree.get_commands(guild=command_guild)
+                if command.name in published
+            )
+            print(f"Published {len(visible_names)} X BOT commands to {scope_name}: {', '.join(visible_names)}")
+            print(f"Kept {len(hidden_commands)} panel-only commands hidden from {scope_name}.")
         casino.start_vip_cleanup_task(self, db)
         leveling.start_voice_task(self, db)
 
