@@ -19,6 +19,7 @@ import economy_extra
 import advanced_systems
 import leveling
 import applications
+import staff_panel
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -264,10 +265,12 @@ PUBLIC_PLAYER_COMMANDS = {
 # These commands are deliberately retained for Administration / Moderators.
 # Their own permission checks and Dashboard Command Access rules still apply.
 STAFF_SLASH_COMMANDS = {
-    "inrole", "role", "code_create", "code_disable",
-    "spawn", "remove_item", "economy_adjust", "job_log_channel", "inventory_check",
-    "lottery_draw", "verification_panel", "application_panel", "application_review",
-    "setlevel", "server_settings", "say", "war_start", "war_end", "forces_check",
+    "admin", "say",
+    # Kept temporarily until the second Staff Centre migration. These tools
+    # must not disappear before their button-driven replacements are ready.
+    "inrole", "role", "spawn", "remove_item", "economy_adjust",
+    "inventory_check", "lottery_draw", "setlevel", "server_settings",
+    "war_start", "war_end", "forces_check",
 }
 
 
@@ -949,6 +952,7 @@ war_tier.register_commands(bot, db, create_player, get_active_war, get_alliance_
 advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db)
 applications.register_commands(bot, db)
+staff_panel.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 # X Community has retired the old company/job economy.  Keep the historical
 # database tables for old logs, but do not publish these commands any more.
