@@ -11,6 +11,10 @@ Tier 4 turns diplomacy into a button-driven system inside the existing War panel
 - Added short direct commands for every major player panel: `/shop`, `/backpack`, `/market`, `/mining`, `/city`, `/army`, `/recruit`, and `/diplomacy`.
 - Expanded `/lobby` with a second shortcut row for City, Army, Mining, Shop, and Market.
 - City collection and City building now show their result inside the original City panel instead of posting extra result messages.
+- Added **Build Many**: create up to 50 Civilian/Industrial Cities in one transaction, with automatic Land allocation and generated names.
+- Added **Upgrade Many**: multi-select up to 25 Cities, review one combined cost, then upgrade the selected Cities together.
+- Added **Upgrade Every City** inside the multi-upgrade page for Nations that want to raise all eligible Cities, including more than 25.
+- City Centre skips full world-map processing after a Nation already has mapped Land, making repeated City actions much faster on Termux phones.
 
 ## Player features
 

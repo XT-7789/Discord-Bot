@@ -1817,6 +1817,80 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         db.commit()
         return f"✅ Built **{clean_name}** in **{territory['territory_name']}** for **{cost:,} War Credits**."
 
+    def bulk_city_build_plan(user_id: int, civilian_count: int, industrial_count: int, prefix: str):
+        civilian_count = max(0, civilian_count)
+        industrial_count = max(0, industrial_count)
+        total_count = civilian_count + industrial_count
+        clean_prefix = prefix.strip()[:24] or "City"
+        if total_count < 1:
+            return None, "Choose at least one Civilian or Industrial City."
+        if total_count > 50:
+            return None, "A bulk build can create at most 50 Cities at once."
+        lands = db.execute(
+            """SELECT t.territory_code,t.territory_name,t.level,t.is_capital,COUNT(c.id) city_count
+               FROM map_territories t LEFT JOIN player_cities c
+                 ON c.territory_code=t.territory_code AND c.user_id=t.owner_user_id
+               WHERE t.owner_user_id=? GROUP BY t.territory_code
+               ORDER BY t.is_capital DESC,t.territory_name""",
+            (user_id,),
+        ).fetchall()
+        slots = []
+        for land in lands:
+            for _ in range(max(0, int(land["level"]) - int(land["city_count"]))):
+                slots.append((land["territory_code"], land["territory_name"]))
+        if total_count > len(slots):
+            return None, f"Your Nation only has **{len(slots)}** free City slot(s). Upgrade Land or build fewer Cities."
+        civilian_cost = setting(db, "city_civilian_build_cost")
+        industrial_cost = setting(db, "city_industrial_build_cost")
+        total_cost = civilian_count * civilian_cost + industrial_count * industrial_cost
+        player = db.execute("SELECT money FROM players WHERE user_id=?", (user_id,)).fetchone()
+        if not player or int(player["money"]) < total_cost:
+            balance = int(player["money"]) if player else 0
+            return None, f"This bulk build costs **{total_cost:,} War Credits**; you have **{balance:,}**."
+        existing = {row["name"].casefold() for row in db.execute("SELECT name FROM player_cities WHERE user_id=?", (user_id,)).fetchall()}
+        names = []
+        number = 1
+        while len(names) < total_count:
+            candidate = f"{clean_prefix} {number}"[:40]
+            number += 1
+            if candidate.casefold() not in existing:
+                existing.add(candidate.casefold())
+                names.append(candidate)
+        types = ["civilian"] * civilian_count + ["industrial"] * industrial_count
+        entries = [
+            {"city_type": city_type, "name": names[index], "territory_code": slots[index][0], "territory_name": slots[index][1]}
+            for index, city_type in enumerate(types)
+        ]
+        return {
+            "entries": entries,
+            "civilian_count": civilian_count,
+            "industrial_count": industrial_count,
+            "prefix": clean_prefix,
+            "total_cost": total_cost,
+        }, None
+
+    def bulk_city_upgrade_plan(user_id: int, city_ids=None):
+        all_rows = db.execute(
+            "SELECT id,name,level,city_type FROM player_cities WHERE user_id=? AND level<10 ORDER BY level,name",
+            (user_id,),
+        ).fetchall()
+        if city_ids is None:
+            rows = all_rows
+        else:
+            selected_ids = {int(city_id) for city_id in city_ids}
+            rows = [row for row in all_rows if int(row["id"]) in selected_ids]
+            if len(rows) != len(selected_ids):
+                return None, "One selected City is unavailable or already Level 10. Refresh the list and try again."
+        if not rows:
+            return None, "Choose at least one City below Level 10."
+        base_cost = setting(db, "city_upgrade_base_cost")
+        total_cost = sum(base_cost * int(row["level"]) for row in rows)
+        player = db.execute("SELECT money FROM players WHERE user_id=?", (user_id,)).fetchone()
+        if not player or int(player["money"]) < total_cost:
+            balance = int(player["money"]) if player else 0
+            return None, f"Upgrading all **{len(rows)}** Cities costs **{total_cost:,} War Credits**; you have **{balance:,}**."
+        return {"rows": rows, "total_cost": total_cost}, None
+
     class CityMenuButton(discord.ui.Button):
         def __init__(self, owner_id: int, action: str, label: str, emoji: str, style: discord.ButtonStyle):
             super().__init__(label=label, emoji=emoji, style=style)
@@ -1834,8 +1908,14 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             if self.action == "build":
                 await interaction.response.edit_message(view=CityBuildView(self.owner_id))
                 return
+            if self.action == "bulk_build":
+                await interaction.response.send_modal(BulkCityBuildModal(self.owner_id))
+                return
             if self.action == "upgrade":
                 await interaction.response.edit_message(view=CityUpgradeView(self.owner_id))
+                return
+            if self.action == "bulk_upgrade":
+                await interaction.response.edit_message(view=BulkCityUpgradeSelectView(self.owner_id))
                 return
             if self.action == "land":
                 await interaction.response.edit_message(view=LandUpgradeView(self.owner_id))
@@ -1934,6 +2014,210 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 self.territory_code,
             )
             await interaction.edit_original_response(view=CitySystemView(interaction.user.id, notice=notice))
+
+    class BulkCityBuildModal(discord.ui.Modal, title="Build Many Cities"):
+        civilian_count = discord.ui.TextInput(label="Civilian Cities", default="0", max_length=2)
+        industrial_count = discord.ui.TextInput(label="Industrial Cities", default="0", max_length=2)
+        name_prefix = discord.ui.TextInput(label="City name prefix", default="New City", min_length=2, max_length=24)
+
+        def __init__(self, owner_id: int):
+            super().__init__()
+            self.owner_id = owner_id
+
+        async def on_submit(self, interaction: discord.Interaction):
+            try:
+                civilian_count = int(str(self.civilian_count).strip() or "0")
+                industrial_count = int(str(self.industrial_count).strip() or "0")
+                if civilian_count < 0 or industrial_count < 0:
+                    raise ValueError
+            except ValueError:
+                await interaction.response.send_message("Enter whole numbers of 0 or more.", ephemeral=True)
+                return
+            plan, error = bulk_city_build_plan(
+                self.owner_id,
+                civilian_count,
+                industrial_count,
+                str(self.name_prefix),
+            )
+            if error:
+                await interaction.response.edit_message(view=CitySystemView(self.owner_id, notice=f"❌ {error}"))
+                return
+            await interaction.response.edit_message(view=BulkCityBuildConfirmView(self.owner_id, plan))
+
+    class BulkCityBuildConfirmButton(discord.ui.Button):
+        def __init__(self, owner_id: int, plan):
+            super().__init__(label="Confirm Build All", emoji="✅", style=discord.ButtonStyle.success)
+            self.owner_id = owner_id
+            self.civilian_count = plan["civilian_count"]
+            self.industrial_count = plan["industrial_count"]
+            self.prefix = plan["prefix"]
+            self.completed = False
+
+        async def callback(self, interaction: discord.Interaction):
+            if self.completed:
+                await interaction.response.send_message("This bulk build was already completed.", ephemeral=True)
+                return
+            self.completed = True
+            await interaction.response.defer()
+            plan, error = bulk_city_build_plan(
+                self.owner_id, self.civilian_count, self.industrial_count, self.prefix
+            )
+            if error:
+                await interaction.edit_original_response(view=CitySystemView(self.owner_id, notice=f"❌ {error}"))
+                return
+            now = int(time.time())
+            db.executemany(
+                "INSERT INTO player_cities(user_id,city_type,name,level,created_at,territory_code) VALUES(?,?,?,?,?,?)",
+                [(self.owner_id, entry["city_type"], entry["name"], 1, now, entry["territory_code"]) for entry in plan["entries"]],
+            )
+            db.execute("UPDATE players SET money=money-? WHERE user_id=?", (plan["total_cost"], self.owner_id))
+            city_log(db, self.owner_id, "city_bulk_build", f"Built {len(plan['entries'])} Cities for {plan['total_cost']} War Credits")
+            db.commit()
+            await interaction.edit_original_response(view=CitySystemView(
+                self.owner_id,
+                notice=f"✅ Built **{len(plan['entries'])} Cities** for **{plan['total_cost']:,} War Credits**.",
+            ))
+
+    class BulkCityBuildConfirmView(discord.ui.LayoutView):
+        def __init__(self, owner_id: int, plan):
+            super().__init__(timeout=180)
+            self.owner_id = owner_id
+            locations = {}
+            for entry in plan["entries"]:
+                locations[entry["territory_name"]] = locations.get(entry["territory_name"], 0) + 1
+            location_text = " · ".join(f"{name} ×{count}" for name, count in locations.items())
+            container = discord.ui.Container(accent_color=discord.Color.gold())
+            container.add_item(discord.ui.TextDisplay(
+                "## 🏗️ Confirm Bulk City Build\n"
+                f"🏙️ Civilian Cities: **{plan['civilian_count']}**\n"
+                f"🏭 Industrial Cities: **{plan['industrial_count']}**\n"
+                f"📍 Automatic Land allocation: {location_text}\n"
+                f"🏷️ Names: **{plan['prefix']} 1, {plan['prefix']} 2, ...**\n\n"
+                f"💰 Total cost: **{plan['total_cost']:,} War Credits**\n"
+                "-# Nothing is charged until you confirm."
+            ))
+            container.add_item(discord.ui.ActionRow(BulkCityBuildConfirmButton(owner_id, plan), CityBackButton(owner_id)))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction):
+            return interaction.user.id == self.owner_id
+
+    class BulkCityUpgradeSelect(discord.ui.Select):
+        def __init__(self, owner_id: int, rows):
+            base_cost = setting(db, "city_upgrade_base_cost")
+            options = [discord.SelectOption(
+                label=row["name"][:100],
+                value=str(row["id"]),
+                description=f"Level {row['level']} → {int(row['level']) + 1} · {base_cost * int(row['level']):,} WC",
+                emoji="🏙️" if row["city_type"] == "civilian" else "🏭",
+            ) for row in rows[:25]]
+            super().__init__(
+                placeholder="Select one or more Cities to upgrade…",
+                options=options,
+                min_values=1,
+                max_values=len(options),
+                disabled=not options,
+            )
+            self.owner_id = owner_id
+
+        async def callback(self, interaction: discord.Interaction):
+            city_ids = [int(value) for value in self.values]
+            plan, error = bulk_city_upgrade_plan(self.owner_id, city_ids)
+            if error:
+                await interaction.response.edit_message(view=CitySystemView(self.owner_id, notice=f"❌ {error}"))
+                return
+            await interaction.response.edit_message(view=BulkCityUpgradeConfirmView(self.owner_id, plan, city_ids))
+
+    class UpgradeEveryCityButton(discord.ui.Button):
+        def __init__(self, owner_id: int):
+            super().__init__(label="Upgrade Every City", emoji="⏫", style=discord.ButtonStyle.primary)
+            self.owner_id = owner_id
+
+        async def callback(self, interaction: discord.Interaction):
+            plan, error = bulk_city_upgrade_plan(self.owner_id)
+            if error:
+                await interaction.response.edit_message(view=CitySystemView(self.owner_id, notice=f"❌ {error}"))
+                return
+            await interaction.response.edit_message(view=BulkCityUpgradeConfirmView(self.owner_id, plan, None))
+
+    class BulkCityUpgradeSelectView(discord.ui.LayoutView):
+        def __init__(self, owner_id: int):
+            super().__init__(timeout=300)
+            self.owner_id = owner_id
+            rows = db.execute(
+                "SELECT id,name,level,city_type FROM player_cities WHERE user_id=? AND level<10 ORDER BY level,name LIMIT 25",
+                (owner_id,),
+            ).fetchall()
+            total = db.execute(
+                "SELECT COUNT(*) count FROM player_cities WHERE user_id=? AND level<10",
+                (owner_id,),
+            ).fetchone()["count"]
+            container = discord.ui.Container(accent_color=discord.Color.teal())
+            container.add_item(discord.ui.TextDisplay(
+                "## ⏫ Upgrade Many Cities\n"
+                "Select several Cities from the list, or upgrade every eligible City at once.\n"
+                f"🏙️ **{total}** Cities can currently be upgraded."
+            ))
+            if rows:
+                container.add_item(discord.ui.ActionRow(BulkCityUpgradeSelect(owner_id, rows)))
+                container.add_item(discord.ui.ActionRow(UpgradeEveryCityButton(owner_id), CityBackButton(owner_id)))
+            else:
+                container.add_item(discord.ui.ActionRow(CityBackButton(owner_id)))
+            container.add_item(discord.ui.TextDisplay(
+                "-# The multi-select shows up to 25 Cities. Upgrade Every City also handles Nations with more than 25."
+            ))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction):
+            return interaction.user.id == self.owner_id
+
+    class BulkCityUpgradeConfirmButton(discord.ui.Button):
+        def __init__(self, owner_id: int, city_ids):
+            super().__init__(label="Confirm Selected Upgrades", emoji="✅", style=discord.ButtonStyle.success)
+            self.owner_id = owner_id
+            self.city_ids = city_ids
+            self.completed = False
+
+        async def callback(self, interaction: discord.Interaction):
+            if self.completed:
+                await interaction.response.send_message("This bulk upgrade was already completed.", ephemeral=True)
+                return
+            self.completed = True
+            await interaction.response.defer()
+            plan, error = bulk_city_upgrade_plan(self.owner_id, self.city_ids)
+            if error:
+                await interaction.edit_original_response(view=CitySystemView(self.owner_id, notice=f"❌ {error}"))
+                return
+            db.executemany("UPDATE player_cities SET level=level+1 WHERE id=?", [(row["id"],) for row in plan["rows"]])
+            db.execute("UPDATE players SET money=money-? WHERE user_id=?", (plan["total_cost"], self.owner_id))
+            city_log(db, self.owner_id, "city_bulk_upgrade", f"Upgraded {len(plan['rows'])} Cities for {plan['total_cost']} War Credits")
+            db.commit()
+            await interaction.edit_original_response(view=CitySystemView(
+                self.owner_id,
+                notice=f"✅ Upgraded **{len(plan['rows'])} Cities** by one level for **{plan['total_cost']:,} War Credits**.",
+            ))
+
+    class BulkCityUpgradeConfirmView(discord.ui.LayoutView):
+        def __init__(self, owner_id: int, plan, city_ids):
+            super().__init__(timeout=180)
+            self.owner_id = owner_id
+            preview = "\n".join(
+                f"{'🏙️' if row['city_type']=='civilian' else '🏭'} **{row['name']}** · Lv {row['level']} → {int(row['level']) + 1}"
+                for row in plan["rows"][:12]
+            )
+            if len(plan["rows"]) > 12:
+                preview += f"\n…and {len(plan['rows']) - 12} more Cities"
+            container = discord.ui.Container(accent_color=discord.Color.gold())
+            container.add_item(discord.ui.TextDisplay(
+                "## ⬆️ Confirm City Upgrades\n"
+                f"{preview}\n\n💰 Total cost: **{plan['total_cost']:,} War Credits**\n"
+                "-# Every eligible City gains exactly one level. Nothing is charged until you confirm."
+            ))
+            container.add_item(discord.ui.ActionRow(BulkCityUpgradeConfirmButton(owner_id, city_ids), CityBackButton(owner_id)))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction):
+            return interaction.user.id == self.owner_id
 
     class CityBuildLandSelect(discord.ui.Select):
         def __init__(self, owner_id: int, city_type: str):
@@ -2188,7 +2472,15 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 container.add_item(discord.ui.TextDisplay("## ⚠️ City Centre\nYour player profile could not be found. Run `/city` again."))
                 self.add_item(container)
                 return
-            sync_map_ownership(db, world_city_tiles(_province_features()))
+            # Loading and walking the complete map is expensive on an older
+            # Termux phone. Existing Nations already have mapped territory, so
+            # only run the full recovery sync when this player has none.
+            mapped_land = db.execute(
+                "SELECT 1 FROM map_territories WHERE owner_user_id=? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if not mapped_land:
+                sync_map_ownership(db, world_city_tiles(_province_features()))
             ensure_city_locations(db, user_id)
             db.execute("INSERT OR IGNORE INTO player_city_state(user_id) VALUES(?)", (user_id,))
             state = db.execute("SELECT last_collect FROM player_city_state WHERE user_id=?", (user_id,)).fetchone()
@@ -2243,11 +2535,15 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 CityMenuButton(user_id, "costs", "Costs", "🧾", discord.ButtonStyle.primary),
             ))
             container.add_item(discord.ui.ActionRow(
+                CityMenuButton(user_id, "bulk_build", "Build Many", "🏗️", discord.ButtonStyle.success),
+                CityMenuButton(user_id, "bulk_upgrade", "Upgrade Many", "⏫", discord.ButtonStyle.primary),
                 CityMenuButton(user_id, "rename", "Rename City", "🏷️", discord.ButtonStyle.secondary),
                 CityMenuButton(user_id, "overview", "Overview", "🏙️", discord.ButtonStyle.secondary),
                 CityWarBackButton(user_id),
             ))
-            container.add_item(discord.ui.TextDisplay("-# Use the buttons above — you do not need to type City commands."))
+            container.add_item(discord.ui.TextDisplay(
+                "-# Build/Upgrade controls one City. Build Many and Upgrade Many process several Cities in one confirmed transaction."
+            ))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
