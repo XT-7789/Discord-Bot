@@ -23,6 +23,7 @@ import applications
 import staff_panel
 import tester_feedback
 import tier4
+import tier5
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -127,6 +128,7 @@ leveling.initialise(db)
 applications.initialise(db)
 tester_feedback.initialise(db)
 tier4.initialise(db)
+tier5.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -976,6 +978,7 @@ casino.register_commands(bot, db, create_player)
 economy_extra.register_commands(bot, db, create_player, economy.find_item)
 war_tier.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
 tier4.register_commands(bot, db, create_player)
+tier5.register_commands(bot, db, create_player)
 advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db)
 applications.register_commands(bot, db)

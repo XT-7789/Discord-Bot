@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 
 import xbot_ui
+import tier5
 
 
 DEFAULTS = {
@@ -234,10 +235,14 @@ def register_commands(bot, db, create_player, find_item):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             player = create_player_from_id(owner_id)
+            progress = tier5.lobby_snapshot(db, owner_id)
+            xp_text = "MAX" if progress["next_threshold"] is None else f"{progress['xp']}/{progress['next_threshold']} XP"
             container = discord.ui.Container(accent_color=discord.Color.blurple())
             container.add_item(discord.ui.TextDisplay(
                 f"## ✨ X BOT Lobby\n"
                 f"🏳️ **{player['nation_name']}** · 🪙 **{player['xc']:,} XC** · ⚔️ **{player['money']:,} War Credits**\n"
+                f"⭐ Nation Level **{progress['level']} — {progress['rank']}** · **{xp_text}**\n"
+                f"🧭 Next: **{progress['label']}**\n"
                 f"Choose a system below. Every page stays in this same panel."
             ))
             container.add_item(discord.ui.Separator())
@@ -254,8 +259,12 @@ def register_commands(bot, db, create_player, find_item):
                 XBotLobbyButton(owner_id, "shop", "Shop", "🏪", discord.ButtonStyle.primary),
                 XBotLobbyButton(owner_id, "market", "Market", "🏷️", discord.ButtonStyle.secondary),
             ))
+            container.add_item(discord.ui.ActionRow(
+                XBotLobbyButton(owner_id, "missions", "Missions", "🎯", discord.ButtonStyle.success),
+                XBotLobbyButton(owner_id, progress["destination"], "Continue", "▶️", discord.ButtonStyle.primary),
+            ))
             container.add_item(discord.ui.TextDisplay(
-                "-# Fast commands: /economy · /city · /army · /recruit · /mining · /shop · /market · /diplomacy"
+                "-# Missions guide your next action. Fast commands remain available for experienced players."
             ))
             self.add_item(container)
 

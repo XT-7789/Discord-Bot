@@ -263,6 +263,7 @@ class AdminPanel(discord.ui.View):
         elif self.page == "home":
             self.add_item(AdminActionButton("system_status", "System Status", emoji="📡", style=discord.ButtonStyle.primary, row=1))
             self.add_item(AdminActionButton("backup_now", "Backup Now", emoji="💾", style=discord.ButtonStyle.success, row=1))
+            self.add_item(AdminActionButton("tier5_repair", "Repair Missions", emoji="🛠️", style=discord.ButtonStyle.secondary, row=1))
 
     def pending_applications(self):
         return self.db.execute(
@@ -371,7 +372,14 @@ class AdminPanel(discord.ui.View):
             return
         if action == "system_status":
             health = getattr(self.bot, "xbot_tier4_health", None)
-            await self.refresh(interaction, notice=health() if health else "System status is unavailable.")
+            tier5_health = getattr(self.bot, "xbot_tier5_health", None)
+            reports = [health() if health else "Tier 4 status is unavailable."]
+            reports.append(tier5_health() if tier5_health else "Tier 5 status is unavailable.")
+            await self.refresh(interaction, notice=" | ".join(reports))
+            return
+        if action == "tier5_repair":
+            repair = getattr(self.bot, "xbot_tier5_repair", None)
+            await self.refresh(interaction, notice=repair() if repair else "❌ Tier 5 repair service is unavailable.")
             return
         if action == "backup_now":
             backup = getattr(self.bot, "xbot_tier4_backup", None)
