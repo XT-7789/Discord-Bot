@@ -262,9 +262,12 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 # Public player catalogue.  All other player actions stay available through
 # the Lobby panels, without filling Discord's slash-command picker.
 PUBLIC_PLAYER_COMMANDS = {
-    "lobby", "war", "economy", "casino", "craft", "collect", "mine",
-    "sell_item", "map_detail", "map", "claim_land", "declare_war", "attack", "balance",
-    "code_redeem", "daily",
+    # Main panels: short, memorable direct access for ordinary players.
+    "lobby", "economy", "shop", "backpack", "market", "mining",
+    "war", "city", "army", "recruit", "diplomacy", "casino", "craft",
+    # Fast actions that are still useful without opening a panel first.
+    "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
+    "declare_war", "attack", "balance", "code_redeem", "daily",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -989,6 +992,49 @@ for _retired_command in (
     "setannouncement", "announcementshow", "setannouncementchat",
 ):
     bot.tree.remove_command(_retired_command)
+
+
+async def open_quick_player_panel(interaction: discord.Interaction, builder):
+    """Open a main player page safely on slower phone-hosted instances."""
+    await interaction.response.defer()
+    create_player(interaction.user)
+    await interaction.edit_original_response(view=builder(interaction.user.id))
+
+
+@bot.tree.command(name="army", description="Open your Land Army, Air Force and Navy")
+async def army_shortcut(interaction: discord.Interaction):
+    builder = getattr(bot, "xbot_armed_forces_builder", None)
+    if builder is None:
+        await interaction.response.send_message("The Armed Forces panel is loading. Please try again.", ephemeral=True)
+        return
+    await open_quick_player_panel(interaction, builder)
+
+
+@bot.tree.command(name="recruit", description="Open the Army Recruit Centre")
+async def recruit_shortcut(interaction: discord.Interaction):
+    builder = getattr(bot, "xbot_army_recruit_builder", None)
+    if builder is None:
+        await interaction.response.send_message("The Recruit panel is loading. Please try again.", ephemeral=True)
+        return
+    await open_quick_player_panel(interaction, builder)
+
+
+@bot.tree.command(name="backpack", description="Open your item Backpack")
+async def backpack_shortcut(interaction: discord.Interaction):
+    builder = getattr(bot, "xbot_player_panel_builders", {}).get("inventory")
+    if builder is None:
+        await interaction.response.send_message("The Backpack panel is loading. Please try again.", ephemeral=True)
+        return
+    await open_quick_player_panel(interaction, builder)
+
+
+@bot.tree.command(name="diplomacy", description="Open Nation relations, Alliances, trade and diplomatic inbox")
+async def diplomacy_shortcut(interaction: discord.Interaction):
+    builder = getattr(bot, "xbot_player_panel_builders", {}).get("diplomacy")
+    if builder is None:
+        await interaction.response.send_message("The Diplomacy panel is loading. Please try again.", ephemeral=True)
+        return
+    await open_quick_player_panel(interaction, builder)
 
 
 # ---------- Tier 4 Alliance ----------

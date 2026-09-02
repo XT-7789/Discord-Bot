@@ -507,8 +507,9 @@ def register_commands(bot, db, create_player) -> None:
 
     @bot.tree.command(name="casino", description="View X BOT Casino games and bet limits")
     async def casino(interaction: discord.Interaction):
+        await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.response.send_message(view=CasinoHubView(interaction.user.id))
+        await interaction.edit_original_response(view=CasinoHubView(interaction.user.id))
 
     # The app is at Discord's 100 global command limit, so this server-only
     # feature deliberately lives in the configured Discord server.

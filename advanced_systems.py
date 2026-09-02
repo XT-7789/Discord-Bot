@@ -451,8 +451,9 @@ def register_commands(bot, db, create_player):
     async def craft(interaction: discord.Interaction):
         if not setting(db, "recipes_enabled"):
             await interaction.response.send_message(view=xbot_ui.warning("🧪 Recipes Closed", "Crafting is currently disabled."), ephemeral=True); return
+        await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.response.send_message(view=CraftingCentreView(interaction.user.id))
+        await interaction.edit_original_response(view=CraftingCentreView(interaction.user.id))
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
     bot.xbot_player_panel_builders["craft"] = lambda owner_id: CraftingCentreView(owner_id)

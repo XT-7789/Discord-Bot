@@ -8,6 +8,9 @@ Tier 4 turns diplomacy into a button-driven system inside the existing War panel
 - War and Economy now share one registered Army Recruit panel, keeping all three military branches and the return-to-War button connected.
 - Fixed **War Centre → City Centre** returning Discord `10062 Unknown interaction` on slower Termux phones.
 - Database/map-heavy City and Recruit pages now acknowledge the button immediately, then replace the original panel after loading.
+- Added short direct commands for every major player panel: `/shop`, `/backpack`, `/market`, `/mining`, `/city`, `/army`, `/recruit`, and `/diplomacy`.
+- Expanded `/lobby` with a second shortcut row for City, Army, Mining, Shop, and Market.
+- City collection and City building now show their result inside the original City panel instead of posting extra result messages.
 
 ## Player features
 

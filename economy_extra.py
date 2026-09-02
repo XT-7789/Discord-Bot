@@ -225,7 +225,8 @@ def register_commands(bot, db, create_player, find_item):
             if builder is None:
                 await interaction.response.send_message("This panel is loading. Please try again in a moment.", ephemeral=True)
                 return
-            await interaction.response.edit_message(view=builder(self.owner_id))
+            await interaction.response.defer()
+            await interaction.edit_original_response(view=builder(self.owner_id))
 
     class XBotLobbyView(discord.ui.LayoutView):
         """The player home screen: one starting command, then button navigation."""
@@ -246,8 +247,15 @@ def register_commands(bot, db, create_player, find_item):
                 XBotLobbyButton(owner_id, "casino", "Casino", "🎰", discord.ButtonStyle.primary),
                 XBotLobbyButton(owner_id, "craft", "Crafting", "🧪", discord.ButtonStyle.secondary),
             ))
+            container.add_item(discord.ui.ActionRow(
+                XBotLobbyButton(owner_id, "city", "City", "🏙️", discord.ButtonStyle.success),
+                XBotLobbyButton(owner_id, "army", "Army", "🪖", discord.ButtonStyle.danger),
+                XBotLobbyButton(owner_id, "mining", "Mining", "⛏️", discord.ButtonStyle.secondary),
+                XBotLobbyButton(owner_id, "shop", "Shop", "🏪", discord.ButtonStyle.primary),
+                XBotLobbyButton(owner_id, "market", "Market", "🏷️", discord.ButtonStyle.secondary),
+            ))
             container.add_item(discord.ui.TextDisplay(
-                "-# Economy: wallet, shop, mining, market and exchange · War: cities, forces and season · Casino: games and records."
+                "-# Fast commands: /economy · /city · /army · /recruit · /mining · /shop · /market · /diplomacy"
             ))
             self.add_item(container)
 
@@ -326,14 +334,16 @@ def register_commands(bot, db, create_player, find_item):
 
     @bot.tree.command(name="lobby", description="Open your X BOT player lobby")
     async def lobby(interaction: discord.Interaction):
+        await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.response.send_message(view=XBotLobbyView(interaction.user.id))
+        await interaction.edit_original_response(view=XBotLobbyView(interaction.user.id))
 
     @bot.tree.command(name="economy", description="Open your X BOT Economy Centre")
     async def economy_centre(interaction: discord.Interaction):
         """Fast shortcut to the Economy page; /lobby remains the main home."""
+        await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.response.send_message(view=EconomyCentreView(interaction.user.id))
+        await interaction.edit_original_response(view=EconomyCentreView(interaction.user.id))
 
     @bot.tree.command(name="bank", description="View your XC wallet and bank balance")
     async def bank(interaction: discord.Interaction):
@@ -510,8 +520,9 @@ def register_commands(bot, db, create_player, find_item):
     async def market(interaction: discord.Interaction):
         if not setting(db, "market_enabled"):
             await interaction.response.send_message(view=xbot_ui.warning("🛒 Market Closed", "The player market is currently closed."), ephemeral=True); return
+        await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.response.send_message(view=MarketView(interaction.user.id))
+        await interaction.edit_original_response(view=MarketView(interaction.user.id))
 
     @bot.tree.command(name="market_mine", description="View and cancel your own active market listings")
     async def market_mine(interaction: discord.Interaction):

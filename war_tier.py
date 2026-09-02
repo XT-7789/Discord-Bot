@@ -1761,6 +1761,62 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             return False
         return True
 
+    def collect_city_for_panel(user) -> str:
+        """Collect production and return a compact notice for the same panel."""
+        create_player(user)
+        db.execute("INSERT OR IGNORE INTO player_city_state(user_id) VALUES(?)", (user.id,))
+        state = db.execute("SELECT last_collect FROM player_city_state WHERE user_id=?", (user.id,)).fetchone()
+        cooldown = setting(db, "city_collect_cooldown")
+        remaining = cooldown - (int(time.time()) - int(state["last_collect"]))
+        if remaining > 0:
+            return f"⏳ Production will be ready <t:{int(time.time()) + remaining}:R>."
+        credits, supply_gain, cities = city_income(db, user.id)
+        db.execute("INSERT OR IGNORE INTO player_war_settings(user_id) VALUES(?)", (user.id,))
+        war_state = db.execute("SELECT supply FROM player_war_settings WHERE user_id=?", (user.id,)).fetchone()
+        maximum = setting(db, "war_max_supply")
+        actual_supply = min(supply_gain, max(0, maximum - int(war_state["supply"])))
+        now = int(time.time())
+        db.execute("UPDATE players SET money=money+? WHERE user_id=?", (credits, user.id))
+        db.execute("UPDATE player_war_settings SET supply=supply+? WHERE user_id=?", (actual_supply, user.id))
+        db.execute("UPDATE player_city_state SET last_collect=? WHERE user_id=?", (now, user.id))
+        city_log(db, user.id, "city_collect", f"Collected {credits} War Credits and {actual_supply}/{supply_gain} Supply from {len(cities) + 1} cities")
+        db.commit()
+        cap_note = f" · storage capped at {maximum:,}" if actual_supply < supply_gain else ""
+        return f"✅ Collected **+{credits:,} War Credits** and **+{actual_supply:,} Supply**{cap_note}."
+
+    def build_city_for_panel(user, city_type: str, name: str, territory_code: str) -> str:
+        """Build a City from its modal and return to the original City panel."""
+        player = create_player(user)
+        clean_name = name.strip()
+        if not 3 <= len(clean_name) <= 40:
+            return "❌ City names must be 3–40 characters."
+        territory = db.execute(
+            "SELECT territory_code,territory_name,level FROM map_territories WHERE owner_user_id=? AND territory_code=?",
+            (user.id, territory_code),
+        ).fetchone()
+        if not territory:
+            return "❌ That Land is no longer owned by your Nation."
+        built = db.execute(
+            "SELECT COUNT(*) count FROM player_cities WHERE user_id=? AND territory_code=?",
+            (user.id, territory_code),
+        ).fetchone()["count"]
+        if built >= int(territory["level"]):
+            return f"❌ **{territory['territory_name']}** has no free City slot. Upgrade its Land level first."
+        cost = setting(db, f"city_{city_type}_build_cost")
+        if int(player["money"]) < cost:
+            return f"❌ Building this City costs **{cost:,} War Credits**; you have **{player['money']:,}**."
+        try:
+            db.execute(
+                "INSERT INTO player_cities(user_id,city_type,name,level,created_at,territory_code) VALUES(?,?,?,?,?,?)",
+                (user.id, city_type, clean_name, 1, int(time.time()), territory_code),
+            )
+        except sqlite3.IntegrityError:
+            return "❌ You already have a City with that name."
+        db.execute("UPDATE players SET money=money-? WHERE user_id=?", (cost, user.id))
+        city_log(db, user.id, "city_build", f"Built {city_type} city {clean_name} in {territory['territory_name']} for {cost} War Credits")
+        db.commit()
+        return f"✅ Built **{clean_name}** in **{territory['territory_name']}** for **{cost:,} War Credits**."
+
     class CityMenuButton(discord.ui.Button):
         def __init__(self, owner_id: int, action: str, label: str, emoji: str, style: discord.ButtonStyle):
             super().__init__(label=label, emoji=emoji, style=style)
@@ -1771,7 +1827,9 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 await interaction.response.send_message("This City menu belongs to another player. Use `/city` for your own Nation.", ephemeral=True)
                 return
             if self.action == "collect":
-                await city_collect.callback(interaction)
+                await interaction.response.defer()
+                notice = collect_city_for_panel(interaction.user)
+                await interaction.edit_original_response(view=CitySystemView(self.owner_id, notice=notice))
                 return
             if self.action == "build":
                 await interaction.response.edit_message(view=CityBuildView(self.owner_id))
@@ -1868,8 +1926,14 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             self.add_item(self.name_input)
 
         async def on_submit(self, interaction: discord.Interaction):
-            choice = app_commands.Choice(name=f"{self.city_type.title()} City", value=self.city_type)
-            await city_build.callback(interaction, choice, str(self.name_input.value), self.territory_code)
+            await interaction.response.defer()
+            notice = build_city_for_panel(
+                interaction.user,
+                self.city_type,
+                str(self.name_input.value),
+                self.territory_code,
+            )
+            await interaction.edit_original_response(view=CitySystemView(interaction.user.id, notice=notice))
 
     class CityBuildLandSelect(discord.ui.Select):
         def __init__(self, owner_id: int, city_type: str):
@@ -2113,7 +2177,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
     class CitySystemView(discord.ui.LayoutView):
         """A player-friendly City dashboard; prices are visible before a command is used."""
-        def __init__(self, user_id: int, show_costs: bool = False):
+        def __init__(self, user_id: int, show_costs: bool = False, notice: str | None = None):
             super().__init__(timeout=300)
             self.owner_id = user_id
             # /city always creates the profile before opening this panel.  Querying
@@ -2168,6 +2232,8 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                     f"### Cities\n" + "\n".join(city_lines)
                 )
             container.add_item(discord.ui.TextDisplay(body))
+            if notice:
+                container.add_item(discord.ui.TextDisplay(f"-# {notice}"))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(
                 CityMenuButton(user_id, "collect", "Collect", "💰", discord.ButtonStyle.success),
@@ -3061,12 +3127,14 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             return False
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
+    bot.xbot_player_panel_builders["city"] = lambda owner_id: CitySystemView(owner_id)
     bot.xbot_player_panel_builders["war"] = lambda owner_id: WarCommandView(owner_id)
 
     @bot.tree.command(name="war", description="Open your X BOT War Centre")
     async def war(interaction: discord.Interaction):
+        await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.response.send_message(view=WarCommandView(interaction.user.id))
+        await interaction.edit_original_response(view=WarCommandView(interaction.user.id))
 
     def is_war_staff(interaction: discord.Interaction) -> bool:
         if interaction.guild is None:

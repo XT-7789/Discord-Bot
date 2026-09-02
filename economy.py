@@ -1051,9 +1051,10 @@ def register_commands(bot, db, create_player) -> None:
         if not categories:
             await interaction.response.send_message("🏪 The Economy Shop is empty. An administrator can add shop-visible items in the Dashboard.")
             return
+        await interaction.response.defer()
         create_player(interaction.user)
         view = ShopView(interaction.user.id, categories[0]['id'])
-        await interaction.response.send_message(view=view)
+        await interaction.edit_original_response(view=view)
 
     @bot.tree.command(name="inventory", description="View your X BOT inventory")
     async def inventory(interaction: discord.Interaction):
@@ -1249,6 +1250,7 @@ def register_commands(bot, db, create_player) -> None:
             container = discord.ui.Container(accent_color=discord.Color.blurple())
             if selected is None:
                 container.add_item(discord.ui.TextDisplay("## 🎒 X BOT Backpack\nYour inventory is empty."))
+                container.add_item(discord.ui.ActionRow(EconomyCentreButton(owner_id, "Economy")))
                 self.add_item(container)
                 return
             equipped = db.execute("SELECT equipped_pickaxe_id FROM players WHERE user_id=?", (owner_id,)).fetchone()
@@ -1517,13 +1519,14 @@ def register_commands(bot, db, create_player) -> None:
 
     @bot.tree.command(name="mining", description="Open the X BOT interactive Mining Hub")
     async def mining(interaction: discord.Interaction):
+        await interaction.response.defer()
         player = create_player(interaction.user)
         energy = refresh_mining_energy(db, interaction.user.id)
         db.commit()
         player = db.execute("SELECT * FROM players WHERE user_id=?", (interaction.user.id,)).fetchone()
         area = db.execute("SELECT * FROM mining_areas WHERE id=? AND enabled=1", (player['mining_area_id'],)).fetchone()
         pickaxe = db.execute("SELECT * FROM items WHERE id=?", (player['equipped_pickaxe_id'],)).fetchone()
-        await interaction.response.send_message(view=MiningHubView(interaction.user.id, player, area, pickaxe, energy))
+        await interaction.edit_original_response(view=MiningHubView(interaction.user.id, player, area, pickaxe, energy))
 
     class RecruitQuantityModal(discord.ui.Modal):
         def __init__(self, unit_id: int):
@@ -1787,6 +1790,7 @@ def register_commands(bot, db, create_player) -> None:
                 ArmedForcesServiceButton(owner_id, "land", branch == "land"),
                 ArmedForcesServiceButton(owner_id, "air", branch == "air"),
                 ArmedForcesServiceButton(owner_id, "navy", branch == "navy"),
+                ArmyWarCentreButton(owner_id),
             ))
             container.add_item(discord.ui.Separator())
             if units:
@@ -1807,6 +1811,8 @@ def register_commands(bot, db, create_player) -> None:
                 return True
             await interaction.response.send_message("This Armed Forces menu belongs to another player.", ephemeral=True)
             return False
+
+    bot.xbot_armed_forces_builder = lambda owner_id: ArmedForcesView(owner_id)
 
     # Discord's global command catalogue is already full, therefore this
     # player command is registered directly to X Community like the staff
@@ -1919,4 +1925,6 @@ def register_commands(bot, db, create_player) -> None:
         "inventory": lambda owner_id: InventoryView(owner_id),
         "mining": _mining_panel,
         "exchange": lambda owner_id: ExchangeView(owner_id),
+        "army": lambda owner_id: ArmedForcesView(owner_id),
+        "recruit": lambda owner_id: ArmyShopView(owner_id),
     })
