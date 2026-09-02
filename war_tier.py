@@ -1742,6 +1742,25 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         embed.set_footer(text="Use /map for the clean World overview.")
         await interaction.followup.send(embed=embed, file=file)
 
+    async def replace_slow_panel(interaction: discord.Interaction, view_factory):
+        """Acknowledge a component before building a database/map-heavy page.
+
+        Discord component tokens expire after roughly three seconds. City and
+        recruit pages can exceed that on an older Termux phone, so defer the
+        message update first and then replace the original panel.
+        """
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except discord.NotFound:
+            return False
+        view = view_factory()
+        try:
+            await interaction.edit_original_response(view=view)
+        except discord.NotFound:
+            return False
+        return True
+
     class CityMenuButton(discord.ui.Button):
         def __init__(self, owner_id: int, action: str, label: str, emoji: str, style: discord.ButtonStyle):
             super().__init__(label=label, emoji=emoji, style=style)
@@ -1793,7 +1812,10 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                     embed.set_image(url=f"attachment://{filename}")
                     await interaction.followup.send(embed=embed, file=file, view=CityMapView(self.owner_id))
                 return
-            await interaction.response.edit_message(view=CitySystemView(self.owner_id, show_costs=self.action == "costs"))
+            await replace_slow_panel(
+                interaction,
+                lambda: CitySystemView(self.owner_id, show_costs=self.action == "costs"),
+            )
 
     class CityBackButton(discord.ui.Button):
         def __init__(self, owner_id: int):
@@ -1801,7 +1823,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             self.owner_id = owner_id
 
         async def callback(self, interaction: discord.Interaction):
-            await interaction.response.edit_message(view=CitySystemView(self.owner_id))
+            await replace_slow_panel(interaction, lambda: CitySystemView(self.owner_id))
 
     class CityWarBackButton(discord.ui.Button):
         """Return from City Centre to the same player's main War panel."""
@@ -2170,8 +2192,9 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
     @bot.tree.command(name="city", description="Open your Nation City Centre and 12-hour income", **player_command_kwargs)
     async def city(interaction: discord.Interaction):
+        await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.response.send_message(view=CitySystemView(interaction.user.id))
+        await interaction.edit_original_response(view=CitySystemView(interaction.user.id))
 
     @bot.tree.command(name="city_build", description="Build a Civilian or Industrial City using War Credits", **player_command_kwargs)
     @app_commands.choices(city_type=[
@@ -2924,10 +2947,10 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                         ephemeral=True,
                     )
                     return
-                await interaction.response.edit_message(view=builder(interaction.user.id))
+                await replace_slow_panel(interaction, lambda: builder(interaction.user.id))
                 return
             if self.action == "city":
-                await interaction.response.edit_message(view=CitySystemView(interaction.user.id))
+                await replace_slow_panel(interaction, lambda: CitySystemView(interaction.user.id))
                 return
 
             player = create_player(interaction.user)

@@ -6,6 +6,8 @@ Tier 4 turns diplomacy into a button-driven system inside the existing War panel
 
 - Fixed **War Centre → Operations → Recruit** failing with `ArmyShopView is not defined`.
 - War and Economy now share one registered Army Recruit panel, keeping all three military branches and the return-to-War button connected.
+- Fixed **War Centre → City Centre** returning Discord `10062 Unknown interaction` on slower Termux phones.
+- Database/map-heavy City and Recruit pages now acknowledge the button immediately, then replace the original panel after loading.
 
 ## Player features
 
