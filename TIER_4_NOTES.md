@@ -14,6 +14,7 @@ Tier 4 turns diplomacy into a button-driven system inside the existing War panel
 - Added **Build Many**: create up to 50 Civilian/Industrial Cities in one transaction, with automatic Land allocation and generated names.
 - Added **Upgrade Many**: multi-select up to 25 Cities, review one combined cost, then upgrade the selected Cities together.
 - Added **Upgrade Every City** inside the multi-upgrade page for Nations that want to raise all eligible Cities, including more than 25.
+- Simplified City Centre: one **Build** button now offers one-City or several-City building, and one **Upgrade** button accepts one or multiple selected Cities.
 - City Centre skips full world-map processing after a Nation already has mapped Land, making repeated City actions much faster on Termux phones.
 
 ## Player features

@@ -1912,7 +1912,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 await interaction.response.send_modal(BulkCityBuildModal(self.owner_id))
                 return
             if self.action == "upgrade":
-                await interaction.response.edit_message(view=CityUpgradeView(self.owner_id))
+                await interaction.response.edit_message(view=BulkCityUpgradeSelectView(self.owner_id))
                 return
             if self.action == "bulk_upgrade":
                 await interaction.response.edit_message(view=BulkCityUpgradeSelectView(self.owner_id))
@@ -2154,8 +2154,8 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             ).fetchone()["count"]
             container = discord.ui.Container(accent_color=discord.Color.teal())
             container.add_item(discord.ui.TextDisplay(
-                "## ⏫ Upgrade Many Cities\n"
-                "Select several Cities from the list, or upgrade every eligible City at once.\n"
+                "## ⏫ Upgrade Cities\n"
+                "Select one or several Cities from the list, or upgrade every eligible City at once.\n"
                 f"🏙️ **{total}** Cities can currently be upgraded."
             ))
             if rows:
@@ -2164,7 +2164,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             else:
                 container.add_item(discord.ui.ActionRow(CityBackButton(owner_id)))
             container.add_item(discord.ui.TextDisplay(
-                "-# The multi-select shows up to 25 Cities. Upgrade Every City also handles Nations with more than 25."
+                "-# Select 1–25 Cities. Upgrade Every City also handles Nations with more than 25."
             ))
             self.add_item(container)
 
@@ -2248,11 +2248,19 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             super().__init__(timeout=300); self.owner_id = owner_id
             container = discord.ui.Container(accent_color=discord.Color.teal())
             container.add_item(discord.ui.TextDisplay(
-                "## 🏗️ Build a City\nChoose the city type first. The next screen asks for your Land and city name.\n\n"
+                "## 🏗️ Build Cities\nChoose whether to build one City or several Cities at once.\n\n"
                 f"🏙️ Civilian: **{setting(db, 'city_civilian_build_cost'):,} War Credits** · more credits\n"
                 f"🏭 Industrial: **{setting(db, 'city_industrial_build_cost'):,} War Credits** · more supply"
             ))
-            container.add_item(discord.ui.ActionRow(CityBuildTypeButton(owner_id, "civilian"), CityBuildTypeButton(owner_id, "industrial"), CityBackButton(owner_id)))
+            container.add_item(discord.ui.ActionRow(
+                CityBuildTypeButton(owner_id, "civilian"),
+                CityBuildTypeButton(owner_id, "industrial"),
+                CityMenuButton(owner_id, "bulk_build", "Build Several", "🏗️", discord.ButtonStyle.success),
+                CityBackButton(owner_id),
+            ))
+            container.add_item(discord.ui.TextDisplay(
+                "-# Civilian/Industrial builds one City. Build Several creates a mixed group and assigns available Land automatically."
+            ))
             self.add_item(container)
 
         async def interaction_check(self, interaction):
@@ -2535,14 +2543,12 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 CityMenuButton(user_id, "costs", "Costs", "🧾", discord.ButtonStyle.primary),
             ))
             container.add_item(discord.ui.ActionRow(
-                CityMenuButton(user_id, "bulk_build", "Build Many", "🏗️", discord.ButtonStyle.success),
-                CityMenuButton(user_id, "bulk_upgrade", "Upgrade Many", "⏫", discord.ButtonStyle.primary),
                 CityMenuButton(user_id, "rename", "Rename City", "🏷️", discord.ButtonStyle.secondary),
                 CityMenuButton(user_id, "overview", "Overview", "🏙️", discord.ButtonStyle.secondary),
                 CityWarBackButton(user_id),
             ))
             container.add_item(discord.ui.TextDisplay(
-                "-# Build/Upgrade controls one City. Build Many and Upgrade Many process several Cities in one confirmed transaction."
+                "-# Open Build or Upgrade, then choose one City or several Cities in the same page."
             ))
             self.add_item(container)
 
