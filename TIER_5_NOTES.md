@@ -29,6 +29,6 @@ Tier 5 makes the existing game easier to learn and faster to continue without ad
 - `/admin` includes **Repair Missions**, which creates missing profiles and normalises invalid Nation progress safely.
 - The existing Tester Feedback panel remains the one-click route for bugs and suggestions.
 
-## Tier 6 target — Economy
+## Tier 6
 
-Tier 6 will focus on the Economy: rebalance income and prices, improve item value and sinks, add clearer market history, make jobs/business activity worthwhile, and provide administrators with an Economy health and balancing dashboard.
+The Economy target is now implemented. See `TIER_6_NOTES.md` for the unified Economy Centre, Contracts, Production Queue, virtual Stocks, Market history, and Dashboard balancing controls.

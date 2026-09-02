@@ -50,6 +50,37 @@ def log(db, user_id, action, detail):
     db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (user_id, action, detail, int(time.time())))
 
 
+def tier6_setting(db, key, fallback):
+    row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
+    return int(row["value"]) if row else int(fallback)
+
+
+def expire_market_listings(db, now=None):
+    """Close old listings once and return every unsold item to its seller."""
+    now = int(now or time.time())
+    cutoff = now - max(1, tier6_setting(db, "tier6_market_expiry_days", 7)) * 86400
+    rows = db.execute(
+        "SELECT * FROM market_listings WHERE active=1 AND quantity>0 AND created_at<=?",
+        (cutoff,),
+    ).fetchall()
+    for row in rows:
+        changed = db.execute(
+            "UPDATE market_listings SET active=0 WHERE id=? AND active=1",
+            (row["id"],),
+        )
+        if not changed.rowcount:
+            continue
+        db.execute(
+            """INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
+               ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""",
+            (row["seller_id"], row["item_id"], row["quantity"]),
+        )
+        log(db, row["seller_id"], "market_expired", f"listing {row['id']}: returned {row['quantity']} item(s)")
+    if rows:
+        db.commit()
+    return len(rows)
+
+
 def register_commands(bot, db, create_player, find_item):
     def panel_command(interaction: discord.Interaction, name: str):
         """Find a command regardless of whether Discord registered it globally or to this server."""
@@ -57,6 +88,12 @@ def register_commands(bot, db, create_player, find_item):
         if command is None and interaction.guild:
             command = bot.tree.get_command(name, guild=interaction.guild)
         return command
+
+    def economy_home_view(owner_id: int, notice: str | None = None):
+        builder = getattr(bot, "xbot_tier6_economy_builder", None)
+        if builder is not None:
+            return builder(owner_id, notice or "")
+        return EconomyCentreView(owner_id, notice)
 
     class EconomyAmountModal(discord.ui.Modal):
         def __init__(self, action: str, source_message: discord.Message):
@@ -115,7 +152,7 @@ def register_commands(bot, db, create_player, find_item):
             if self.action == "refresh":
                 # Refresh in place: the player stays in the same Economy
                 # Centre instead of receiving another Discord message.
-                await interaction.response.edit_message(view=EconomyCentreView(self.owner_id))
+                await interaction.response.edit_message(view=economy_home_view(self.owner_id))
                 return
             if self.action == "lobby":
                 await interaction.response.edit_message(view=XBotLobbyView(self.owner_id))
@@ -134,7 +171,7 @@ def register_commands(bot, db, create_player, find_item):
                 remaining = setting(db, "daily_cooldown") - (int(time.time()) - int(player["last_daily"]))
                 if remaining > 0:
                     hours, remainder = divmod(remaining, 3600)
-                    await interaction.response.edit_message(view=EconomyCentreView(
+                    await interaction.response.edit_message(view=economy_home_view(
                         self.owner_id,
                         notice=f"⏳ Daily reward is ready in **{hours}h {remainder // 60}m**.",
                     ))
@@ -143,7 +180,7 @@ def register_commands(bot, db, create_player, find_item):
                 db.execute("UPDATE players SET xc=xc+?,last_daily=? WHERE user_id=?", (reward, int(time.time()), self.owner_id))
                 log(db, self.owner_id, "daily", f"+{reward} XC")
                 db.commit()
-                await interaction.response.edit_message(view=EconomyCentreView(
+                await interaction.response.edit_message(view=economy_home_view(
                     self.owner_id, notice=f"✅ Daily reward collected: **+{reward:,} XC**."
                 ))
                 return
@@ -170,7 +207,7 @@ def register_commands(bot, db, create_player, find_item):
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message("Open `/lobby` for your own Economy Centre.", ephemeral=True)
                 return
-            await interaction.response.edit_message(view=EconomyCentreView(self.owner_id))
+            await interaction.response.edit_message(view=economy_home_view(self.owner_id))
 
     class EconomyBankView(discord.ui.LayoutView):
         def __init__(self, owner_id: int):
@@ -219,7 +256,7 @@ def register_commands(bot, db, create_player, find_item):
                 await interaction.response.send_message("Open your own X BOT panel with `/lobby`.", ephemeral=True)
                 return
             if self.destination == "economy":
-                await interaction.response.edit_message(view=EconomyCentreView(self.owner_id))
+                await interaction.response.edit_message(view=economy_home_view(self.owner_id))
                 return
             builders = getattr(bot, "xbot_player_panel_builders", {})
             builder = builders.get(self.destination)
@@ -282,6 +319,7 @@ def register_commands(bot, db, create_player, find_item):
         def __init__(self, owner_id: int, notice: str | None = None):
             super().__init__(timeout=300)
             self.owner_id = owner_id
+            expire_market_listings(db)
             player = create_player_from_id(owner_id)
             inventory = db.execute("SELECT COALESCE(SUM(quantity),0) total FROM inventories WHERE user_id=?", (owner_id,)).fetchone()["total"]
             listings = db.execute("SELECT COUNT(*) total FROM market_listings WHERE seller_id=? AND active=1", (owner_id,)).fetchone()["total"]
@@ -352,7 +390,7 @@ def register_commands(bot, db, create_player, find_item):
         """Fast shortcut to the Economy page; /lobby remains the main home."""
         await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.edit_original_response(view=EconomyCentreView(interaction.user.id))
+        await interaction.edit_original_response(view=economy_home_view(interaction.user.id))
 
     @bot.tree.command(name="bank", description="View your XC wallet and bank balance")
     async def bank(interaction: discord.Interaction):
@@ -422,6 +460,9 @@ def register_commands(bot, db, create_player, find_item):
                 if quantity <= 0: raise ValueError
             except ValueError:
                 await interaction.response.send_message(view=xbot_ui.danger("Invalid Quantity", "Enter a whole number greater than 0."), ephemeral=True); return
+            if not setting(db, "market_enabled"):
+                await interaction.response.send_message(view=xbot_ui.warning("🛒 Market Closed", "The player market is currently closed."), ephemeral=True); return
+            expire_market_listings(db)
             listing = db.execute("""SELECT l.*,i.name,i.emoji FROM market_listings l JOIN items i ON i.id=l.item_id
                 WHERE l.id=? AND l.active=1""", (self.listing_id,)).fetchone()
             if listing is None or listing["quantity"] < quantity:
@@ -438,6 +479,13 @@ def register_commands(bot, db, create_player, find_item):
                 ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""", (interaction.user.id, listing["item_id"], quantity))
             db.execute("UPDATE market_listings SET quantity=quantity-?,active=CASE WHEN quantity-?<=0 THEN 0 ELSE 1 END WHERE id=?", (quantity, quantity, listing["id"]))
             log(db, interaction.user.id, "market_buy", f"listing {listing['id']}: {quantity}x {listing['name']} for {total} XC")
+            log(db, listing["seller_id"], "market_sale", f"listing {listing['id']}: sold {quantity}x {listing['name']} for {seller_payment} XC")
+            db.execute(
+                """INSERT INTO tier6_market_trades
+                   (listing_id,buyer_id,seller_id,item_id,quantity,price_each,fee,total,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (listing["id"], interaction.user.id, listing["seller_id"], listing["item_id"], quantity, listing["price_each"], fee, total, int(time.time())),
+            )
             db.commit()
             await interaction.response.send_message(view=xbot_ui.success("🛒 Market Purchase", f"Bought **{quantity}x {listing['emoji']} {listing['name']}** for **{total:,} XC**."), ephemeral=True)
 
@@ -469,6 +517,7 @@ def register_commands(bot, db, create_player, find_item):
         def __init__(self, owner_id: int):
             super().__init__(timeout=300)
             self.owner_id = owner_id
+            expire_market_listings(db)
             rows = db.execute("""SELECT l.*,i.name,i.emoji FROM market_listings l JOIN items i ON i.id=l.item_id
                 WHERE l.seller_id=? AND l.active=1 AND l.quantity>0 ORDER BY l.id DESC LIMIT 10""", (owner_id,)).fetchall()
             container = discord.ui.Container(accent_color=discord.Color.orange())
@@ -479,6 +528,7 @@ def register_commands(bot, db, create_player, find_item):
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=MyListingCancelButton(row)))
             if not rows:
                 container.add_item(discord.ui.TextDisplay("You have no active listings. Use `/market_sell` to list a tradeable Backpack item."))
+            container.add_item(discord.ui.ActionRow(MarketLobbyButton(owner_id)))
             container.add_item(discord.ui.TextDisplay("-# Your latest 10 active listings."))
             self.add_item(container)
 
@@ -497,12 +547,13 @@ def register_commands(bot, db, create_player, find_item):
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message("This market panel belongs to another player.", ephemeral=True)
                 return
-            await interaction.response.edit_message(view=EconomyCentreView(self.owner_id))
+            await interaction.response.edit_message(view=economy_home_view(self.owner_id))
 
     class MarketView(discord.ui.LayoutView):
         def __init__(self, owner_id: int):
             super().__init__(timeout=300)
             self.owner_id = owner_id
+            expire_market_listings(db)
             rows = db.execute("""SELECT l.*,i.name,i.emoji,i.description,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(l.seller_id AS TEXT)) seller_name
                 FROM market_listings l JOIN items i ON i.id=l.item_id LEFT JOIN players p ON p.user_id=l.seller_id
                 WHERE l.active=1 AND l.quantity>0 ORDER BY l.id DESC LIMIT 10""").fetchall()
@@ -542,6 +593,18 @@ def register_commands(bot, db, create_player, find_item):
     @app_commands.autocomplete(item=tradeable_backpack_autocomplete)
     async def market_sell(interaction: discord.Interaction, item: str, quantity: int, price_each: int):
         create_player(interaction.user)
+        expire_market_listings(db)
+        active_listings = int(db.execute(
+            "SELECT COUNT(*) FROM market_listings WHERE seller_id=? AND active=1",
+            (interaction.user.id,),
+        ).fetchone()[0])
+        listing_limit = max(1, tier6_setting(db, "tier6_market_max_listings", 20))
+        if active_listings >= listing_limit:
+            await interaction.response.send_message(
+                view=xbot_ui.warning("Listing Limit Reached", f"You may have up to **{listing_limit} active listings**. Cancel or sell one first."),
+                ephemeral=True,
+            )
+            return
         found = find_item(db, item, interaction.user.id)
         if found is None or found["quantity"] < quantity or quantity <= 0:
             await interaction.response.send_message(view=xbot_ui.danger("Listing Rejected", "You do not own that quantity."), ephemeral=True); return

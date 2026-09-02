@@ -24,6 +24,7 @@ import staff_panel
 import tester_feedback
 import tier4
 import tier5
+import tier6
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -129,6 +130,7 @@ applications.initialise(db)
 tester_feedback.initialise(db)
 tier4.initialise(db)
 tier5.initialise(db)
+tier6.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -265,7 +267,7 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 # the Lobby panels, without filling Discord's slash-command picker.
 PUBLIC_PLAYER_COMMANDS = {
     # Main panels: short, memorable direct access for ordinary players.
-    "lobby", "economy", "shop", "backpack", "market", "mining",
+    "lobby", "economy", "shop", "backpack", "market", "mining", "stock",
     "war", "city", "army", "recruit", "diplomacy", "casino", "craft",
     # Fast actions that are still useful without opening a panel first.
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
@@ -979,6 +981,7 @@ economy_extra.register_commands(bot, db, create_player, economy.find_item)
 war_tier.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
 tier4.register_commands(bot, db, create_player)
 tier5.register_commands(bot, db, create_player)
+tier6.register_commands(bot, db, create_player)
 advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db)
 applications.register_commands(bot, db)

@@ -1,4 +1,4 @@
-"""X BOT V2 Tier 4 administration dashboard."""
+"""X BOT V2 Tier 6 administration dashboard."""
 import hashlib
 import hmac
 import json
@@ -25,6 +25,8 @@ import advanced_systems
 import leveling
 import applications
 import tier4
+import tier5
+import tier6
 
 load_dotenv()
 DATABASE_PATH = Path(__file__).resolve().parent / "xwar.db"
@@ -43,6 +45,15 @@ OAUTH_CONFIGURED = all((DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRE
 app = Flask(__name__)
 fallback_secret = hashlib.sha256(("xbot-dashboard:" + DISCORD_CLIENT_SECRET + DASHBOARD_PASSWORD).encode()).digest()
 app.secret_key = os.getenv("DASHBOARD_SECRET") or fallback_secret
+
+
+@app.template_filter("timestamp")
+def format_timestamp(value):
+    if not value:
+        return "—"
+    return datetime.fromtimestamp(int(value)).strftime("%d %b %Y, %H:%M")
+
+
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -93,6 +104,8 @@ with get_db() as startup_db:
     leveling.initialise(startup_db)
     applications.initialise(startup_db)
     tier4.initialise(startup_db)
+    tier5.initialise(startup_db)
+    tier6.initialise(startup_db)
     startup_db.execute("""CREATE TABLE IF NOT EXISTS dashboard_role_access(
         role_id TEXT PRIMARY KEY, access_level TEXT NOT NULL,
         label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
@@ -329,11 +342,12 @@ table{border-radius:12px;overflow:hidden}th{background:#181b20;color:#bec6d1;let
 
 HEADER = """
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ title }} · X BOT</title>""" + STYLE + """</head><body>
-<header><div><h1>⚔️ X BOT Admin</h1><span class="version">V2 · Tier 4 · {{session.get('discord_name','Owner')}} ({{session.get('dashboard_role','owner')}})</span></div><button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button></header><nav id="dashboard-nav">
+<header><div><h1>⚔️ X BOT Admin</h1><span class="version">V2 · Tier 6 · {{session.get('discord_name','Owner')}} ({{session.get('dashboard_role','owner')}})</span></div><button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button></header><nav id="dashboard-nav">
 <a href="{{ url_for('home') }}">Overview</a><a href="{{ url_for('players') }}">Users</a><a href="{{ url_for('dashboard_users') }}">Dashboard Online</a><a href="{{ url_for('leveling_control') }}">Levels & XP</a><a href="{{ url_for('mining_control') }}">Mining</a><a href="{{ url_for('items') }}">Items & Categories</a><a href="{{ url_for('item_shop_control') }}">Item Shop</a><a href="{{ url_for('recipes_control') }}">Recipes</a><a href="{{ url_for('finance_control') }}">Bills & Income</a><a href="{{ url_for('role_shop_control') }}">Role Shop</a><a href="{{ url_for('reward_codes_control') }}">Reward Codes</a><a href="{{ url_for('market_control') }}">Market</a><a href="{{ url_for('auction_control') }}">Auction</a><a href="{{ url_for('casino_control') }}">Casino</a><a href="{{ url_for('war_control') }}">War</a><a href="{{ url_for('diplomacy_control') }}">Diplomacy</a><a href="{{ url_for('command_access') }}">Command Access</a><a href="{{ url_for('log_settings_control') }}">Log Settings</a><a href="{{ url_for('dashboard_access') }}">Dashboard Access</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('logs') }}">Logs</a><a class="secondary" href="{{ url_for('logout') }}">Log out</a>
 </nav><main>{% with messages=get_flashed_messages() %}{% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}{% endwith %}
 """
 HEADER = HEADER.replace('<a href="{{ url_for(\'leveling_control\') }}">Levels & XP</a>', '<a href="{{ url_for(\'leveling_control\') }}">Levels & XP</a><a href="{{ url_for(\'applications_control\') }}">Applications & Verification</a>')
+HEADER = HEADER.replace('<a href="{{ url_for(\'mining_control\') }}">Mining</a>', '<a href="{{ url_for(\'tier6_economy_control\') }}">Tier 6 Economy</a><a href="{{ url_for(\'mining_control\') }}">Mining</a>')
 FOOTER = r"""
 </main><script>
 (() => {
@@ -915,6 +929,9 @@ def delete_player_data(user_id):
         ("casino_stats", "user_id"), ("casino_vip_members", "user_id"),
         ("lottery_entries", "user_id"), ("reward_code_redemptions", "user_id"),
         ("war_season_scores", "user_id"), ("dashboard_sessions", "user_id"),
+        ("tier5_profiles", "user_id"), ("tier5_mission_claims", "user_id"),
+        ("tier6_stock_holdings", "user_id"), ("tier6_stock_trades", "user_id"),
+        ("tier6_contract_claims", "user_id"), ("tier6_production_queue", "user_id"),
     )
     for table, column in one_user_tables:
         db.execute(f"DELETE FROM {table} WHERE {column}=?", (user_id,))
@@ -922,6 +939,7 @@ def delete_player_data(user_id):
     db.execute("DELETE FROM division_templates WHERE user_id=?", (user_id,))
     db.execute("DELETE FROM battle_history WHERE attacker_id=? OR defender_id=? OR winner_id=?", (user_id, user_id, user_id))
     db.execute("DELETE FROM scout_history WHERE scout_id=? OR target_id=?", (user_id, user_id))
+    db.execute("DELETE FROM tier6_market_trades WHERE buyer_id=? OR seller_id=?", (user_id, user_id))
     db.execute("DELETE FROM players WHERE user_id=?", (user_id,))
     record_dashboard_audit(db, "DELETED", f"Deleted X BOT data for {player['display_name'] or player['nation_name']} ({user_id})")
     db.commit(); db.close(); g.skip_dashboard_audit = True
@@ -1536,6 +1554,235 @@ def admin_cancel_market(listing_id):
             ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""", (row['seller_id'], row['item_id'], row['quantity']))
         db.commit(); flash("Listing cancelled and items returned to the seller.")
     db.close(); return redirect(url_for("market_control"))
+
+
+@app.route("/tier6-economy")
+@login_required
+def tier6_economy_control():
+    db = get_db()
+    setting_keys = list(tier6.DEFAULTS) + [
+        "daily_reward", "daily_cooldown", "transfer_tax_percent",
+        "market_enabled", "market_fee_percent", "market_min_price", "market_max_price",
+    ]
+    settings = {row["key"]: row["value"] for row in db.execute(
+        f"SELECT key,value FROM economy_settings WHERE key IN ({','.join('?' for _ in setting_keys)})", setting_keys
+    ).fetchall()}
+    totals = db.execute("""SELECT COUNT(*) players,COALESCE(SUM(xc),0) wallet,
+        COALESCE(SUM(bank_xc),0) bank,COALESCE(SUM(money),0) war_credits,
+        COALESCE(SUM(xcrystals),0) crystals FROM players""").fetchone()
+    stock_value = int(db.execute("""SELECT COALESCE(SUM(h.quantity*c.price),0)
+        FROM tier6_stock_holdings h JOIN tier6_stock_companies c ON c.id=h.company_id""").fetchone()[0])
+    companies = db.execute("""SELECT c.*,
+        COALESCE((SELECT SUM(quantity) FROM tier6_stock_holdings h WHERE h.company_id=c.id),0) held,
+        COALESCE((SELECT COUNT(*) FROM tier6_stock_trades t WHERE t.company_id=c.id),0) trades
+        FROM tier6_stock_companies c ORDER BY c.symbol""").fetchall()
+    contracts = db.execute("""SELECT c.*,i.name item_name,i.emoji item_emoji,
+        COALESCE((SELECT COUNT(*) FROM tier6_contract_claims x WHERE x.contract_id=c.id),0) claims
+        FROM tier6_contracts c LEFT JOIN items i ON i.id=c.reward_item_id ORDER BY c.period,c.id""").fetchall()
+    items = db.execute("SELECT id,name,emoji FROM items WHERE enabled=1 ORDER BY name").fetchall()
+    recent_trades = db.execute("""SELECT t.*,c.symbol,c.name company_name,
+        COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(t.user_id AS TEXT)) player_name
+        FROM tier6_stock_trades t JOIN tier6_stock_companies c ON c.id=t.company_id
+        LEFT JOIN players p ON p.user_id=t.user_id ORDER BY t.id DESC LIMIT 100""").fetchall()
+    market_trades = db.execute("""SELECT t.*,i.name item_name,i.emoji item_emoji,
+        COALESCE(NULLIF(b.display_name,''),b.nation_name,CAST(t.buyer_id AS TEXT)) buyer_name,
+        COALESCE(NULLIF(s.display_name,''),s.nation_name,CAST(t.seller_id AS TEXT)) seller_name
+        FROM tier6_market_trades t JOIN items i ON i.id=t.item_id
+        LEFT JOIN players b ON b.user_id=t.buyer_id LEFT JOIN players s ON s.user_id=t.seller_id
+        ORDER BY t.id DESC LIMIT 100""").fetchall()
+    production = db.execute("""SELECT q.*,COALESCE(r.name,'Archived Recipe') recipe_name,
+        COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(q.user_id AS TEXT)) player_name
+        FROM tier6_production_queue q LEFT JOIN recipes r ON r.id=q.recipe_id
+        LEFT JOIN players p ON p.user_id=q.user_id ORDER BY q.id DESC LIMIT 100""").fetchall()
+    activity = db.execute("""SELECT action,COUNT(*) count FROM economy_logs
+        WHERE created_at>=? GROUP BY action ORDER BY count DESC LIMIT 12""", (int(time.time()) - 86400,)).fetchall()
+    health = tier6.health_report(db)
+    db.close()
+    body = """
+    <section class="panel"><h2>💰 Tier 6 Economy Control Centre</h2><div class="pad">
+      <div class="notice">Every Tier 6 rule is stored in the shared Bot database. Changes apply after the next panel refresh; no code edit is required.</div>
+      <div class="grid">
+        <div class="card"><small>Players</small><strong>{{totals['players']}}</strong></div>
+        <div class="card"><small>Wallet + Bank XC</small><strong>{{totals['wallet']+totals['bank']}}</strong></div>
+        <div class="card"><small>War Credits</small><strong>{{totals['war_credits']}}</strong></div>
+        <div class="card"><small>Stock Market Value</small><strong>{{stock_value}} XC</strong></div>
+      </div>
+      <p class="notice">{{health}}</p>
+      <div class="actions">
+        <form method="post" action="{{url_for('tier6_force_stock_update')}}"><button class="purple">Update Stock Prices Now</button></form>
+        <form method="post" action="{{url_for('tier6_repair')}}" onsubmit="return confirm('Run safe Tier 6 Economy repair?')"><button class="teal">Health Check & Repair</button></form>
+      </div>
+    </div></section>
+
+    <section class="panel"><h2>⚙️ Master Settings</h2><form class="fields" method="post" action="{{url_for('tier6_save_settings')}}"><div class="fields-grid">
+      <label>Tier 6 Economy<select name="tier6_economy_enabled"><option value="1" {% if settings.get('tier6_economy_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_economy_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
+      <label>Daily Reward (XC)<input type="number" min="0" name="daily_reward" value="{{settings.get('daily_reward','50')}}"></label>
+      <label>Daily Cooldown Seconds<input type="number" min="60" name="daily_cooldown" value="{{settings.get('daily_cooldown','86400')}}"></label>
+      <label>Transfer Tax %<input type="number" min="0" max="100" name="transfer_tax_percent" value="{{settings.get('transfer_tax_percent','0')}}"></label>
+      <label>Contracts<select name="tier6_contracts_enabled"><option value="1" {% if settings.get('tier6_contracts_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_contracts_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
+      <label>Production Queue<select name="tier6_production_enabled"><option value="1" {% if settings.get('tier6_production_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_production_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
+      <label>Seconds per Production Batch<input type="number" min="30" name="tier6_production_seconds_per_item" value="{{settings.get('tier6_production_seconds_per_item','300')}}"></label>
+      <label>Queue Slots per Player<input type="number" min="1" max="25" name="tier6_production_queue_limit" value="{{settings.get('tier6_production_queue_limit','5')}}"></label>
+      <label>Industrial Speed per Level %<input type="number" min="0" max="100" name="tier6_industrial_speed_percent" value="{{settings.get('tier6_industrial_speed_percent','5')}}"></label>
+      <label>Industrial Speed Cap %<input type="number" min="0" max="95" name="tier6_industrial_speed_cap_percent" value="{{settings.get('tier6_industrial_speed_cap_percent','50')}}"></label>
+      <label>Player Market<select name="market_enabled"><option value="1" {% if settings.get('market_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('market_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
+      <label>Market Fee %<input type="number" min="0" max="100" name="market_fee_percent" value="{{settings.get('market_fee_percent','5')}}"></label>
+      <label>Market Minimum Price<input type="number" min="1" name="market_min_price" value="{{settings.get('market_min_price','1')}}"></label>
+      <label>Market Maximum Price<input type="number" min="1" name="market_max_price" value="{{settings.get('market_max_price','1000000')}}"></label>
+      <label>Listing Expiry Days<input type="number" min="1" max="365" name="tier6_market_expiry_days" value="{{settings.get('tier6_market_expiry_days','7')}}"></label>
+      <label>Max Listings per Player<input type="number" min="1" max="100" name="tier6_market_max_listings" value="{{settings.get('tier6_market_max_listings','20')}}"></label>
+      <label>Stock Market<select name="tier6_stock_enabled"><option value="1" {% if settings.get('tier6_stock_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_stock_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
+      <label>Stock Trading Fee %<input type="number" min="0" max="100" name="tier6_stock_fee_percent" value="{{settings.get('tier6_stock_fee_percent','2')}}"></label>
+      <label>Price Update Seconds<input type="number" min="60" name="tier6_stock_update_seconds" value="{{settings.get('tier6_stock_update_seconds','3600')}}"></label>
+      <label>Maximum Price Change %<input type="number" min="1" max="50" name="tier6_stock_max_change_percent" value="{{settings.get('tier6_stock_max_change_percent','12')}}"></label>
+      <label>Holding Limit per Company<input type="number" min="1" name="tier6_stock_holding_limit" value="{{settings.get('tier6_stock_holding_limit','100000')}}"></label>
+      <label>Player Trade Price Impact<input type="number" min="0" max="100" name="tier6_stock_price_impact" value="{{settings.get('tier6_stock_price_impact','20')}}"></label>
+    </div><div class="actions"><button>Save All Economy Settings</button></div></form></section>
+
+    <section class="panel"><h2>🔗 Detailed Economy Editors</h2><div class="library">
+      <a class="library-card" href="{{url_for('mining_control')}}"><h3>⛏️ Mining</h3><p>Areas, energy, drops, tools, probabilities and yield.</p></a>
+      <a class="library-card" href="{{url_for('items')}}"><h3>📦 Items</h3><p>Prices, effects, stock, sell-back value and trade rules.</p></a>
+      <a class="library-card" href="{{url_for('recipes_control')}}"><h3>🧪 Recipes</h3><p>Ingredients, outputs, quantity, XC cost and availability.</p></a>
+      <a class="library-card" href="{{url_for('market_control')}}"><h3>🏷️ Player Market</h3><p>Open listings, seller details and administrative cancellation.</p></a>
+      <a class="library-card" href="{{url_for('finance_control')}}"><h3>🏦 Bills & Income</h3><p>Recurring XC sources and optional currency sinks.</p></a>
+    </div></section>
+
+    <details class="creator"><summary class="btn purple">＋ Create Stock Company</summary><section class="panel"><h2>New Virtual Company</h2>
+      <form class="fields" method="post" action="{{url_for('tier6_save_company')}}"><div class="fields-grid">
+        <label>Symbol<input name="symbol" maxlength="8" required></label><label>Name<input name="name" required></label>
+        <label>Emoji<input name="emoji" value="📈"></label><label>Industry<input name="industry" value="Industry" required></label>
+        <label>Description<textarea name="description"></textarea></label><label>Starting Price<input type="number" min="1" name="price" value="100"></label>
+        <label>Minimum Price<input type="number" min="1" name="min_price" value="10"></label><label>Maximum Price<input type="number" min="1" name="max_price" value="1000"></label>
+        <label>Total Shares<input type="number" min="1" name="total_shares" value="100000"></label><label>Volatility %<input type="number" min="1" max="50" name="volatility" value="8"></label>
+        <label>Trend % per Update<input type="number" min="-20" max="20" name="trend" value="0"></label><label>Status<select name="enabled"><option value="1">Open</option><option value="0">Paused</option></select></label>
+      </div><button>Create Company</button></form></section></details>
+
+    <section class="panel"><h2>📈 Virtual Stock Companies</h2><div class="library">{% for c in companies %}<article class="library-card"><form class="fields" method="post" action="{{url_for('tier6_save_company')}}">
+      <input type="hidden" name="id" value="{{c['id']}}"><h3>{{c['emoji']}} {{c['symbol']}} · {{c['name']}}</h3>
+      <div class="statline">Price {{c['price']}} XC · Previous {{c['previous_price']}}<br>Held {{c['held']}} / {{c['total_shares']}} · Trades {{c['trades']}}</div>
+      <div class="fields-grid"><label>Symbol<input name="symbol" value="{{c['symbol']}}" required></label><label>Name<input name="name" value="{{c['name']}}" required></label>
+      <label>Emoji<input name="emoji" value="{{c['emoji']}}"></label><label>Industry<input name="industry" value="{{c['industry']}}"></label>
+      <label>Description<textarea name="description">{{c['description']}}</textarea></label><label>Current Price<input type="number" min="1" name="price" value="{{c['price']}}"></label>
+      <label>Minimum<input type="number" min="1" name="min_price" value="{{c['min_price']}}"></label><label>Maximum<input type="number" min="1" name="max_price" value="{{c['max_price']}}"></label>
+      <label>Total Shares<input type="number" min="1" name="total_shares" value="{{c['total_shares']}}"></label><label>Volatility %<input type="number" min="1" max="50" name="volatility" value="{{c['volatility']}}"></label>
+      <label>Trend<input type="number" min="-20" max="20" name="trend" value="{{c['trend']}}"></label><label>Status<select name="enabled"><option value="1" {% if c['enabled'] %}selected{% endif %}>Open</option><option value="0" {% if not c['enabled'] %}selected{% endif %}>Paused</option></select></label></div>
+      <button>Save Company</button></form></article>{% endfor %}</div></section>
+
+    <details class="creator"><summary class="btn teal">＋ Create Contract</summary><section class="panel"><h2>New Economy Contract</h2>
+      <form class="fields" method="post" action="{{url_for('tier6_save_contract')}}"><div class="fields-grid">
+        <label>Unique Key<input name="contract_key" required></label><label>Title<input name="title" required></label><label>Emoji<input name="emoji" value="📋"></label>
+        <label>Description<textarea name="description"></textarea></label><label>Action<select name="action_type">{% for a in ['mine','sell','collect','develop','trade','recruit','craft','stock_trade'] %}<option>{{a}}</option>{% endfor %}</select></label>
+        <label>Target<input type="number" min="1" name="target" value="1"></label><label>Reward XC<input type="number" min="0" name="reward_xc" value="50"></label>
+        <label>Reward War Credits<input type="number" min="0" name="reward_war_credits" value="100"></label><label>Reward Item<select name="reward_item_id"><option value="">None</option>{% for i in items %}<option value="{{i['id']}}">{{i['emoji']}} {{i['name']}}</option>{% endfor %}</select></label>
+        <label>Item Quantity<input type="number" min="0" name="reward_item_quantity" value="0"></label><label>Period<select name="period"><option>daily</option><option>weekly</option><option>once</option></select></label>
+        <label>Minimum Nation Level<input type="number" min="1" max="10" name="minimum_level" value="1"></label><label>Status<select name="enabled"><option value="1">Open</option><option value="0">Closed</option></select></label>
+      </div><button>Create Contract</button></form></section></details>
+
+    <section class="panel"><h2>📋 Contracts</h2><div class="library">{% for c in contracts %}<article class="library-card"><form class="fields" method="post" action="{{url_for('tier6_save_contract')}}">
+      <input type="hidden" name="id" value="{{c['id']}}"><h3>{{c['emoji']}} {{c['title']}}</h3><div class="statline">{{c['period']}} · {{c['action_type']}} ×{{c['target']}} · {{c['claims']}} claims</div>
+      <div class="fields-grid"><label>Unique Key<input name="contract_key" value="{{c['contract_key']}}"></label><label>Title<input name="title" value="{{c['title']}}"></label><label>Emoji<input name="emoji" value="{{c['emoji']}}"></label>
+      <label>Description<textarea name="description">{{c['description']}}</textarea></label><label>Action<select name="action_type">{% for a in ['mine','sell','collect','develop','trade','recruit','craft','stock_trade'] %}<option {% if c['action_type']==a %}selected{% endif %}>{{a}}</option>{% endfor %}</select></label>
+      <label>Target<input type="number" min="1" name="target" value="{{c['target']}}"></label><label>Reward XC<input type="number" min="0" name="reward_xc" value="{{c['reward_xc']}}"></label>
+      <label>Reward WC<input type="number" min="0" name="reward_war_credits" value="{{c['reward_war_credits']}}"></label><label>Reward Item<select name="reward_item_id"><option value="">None</option>{% for i in items %}<option value="{{i['id']}}" {% if c['reward_item_id']==i['id'] %}selected{% endif %}>{{i['emoji']}} {{i['name']}}</option>{% endfor %}</select></label>
+      <label>Item Quantity<input type="number" min="0" name="reward_item_quantity" value="{{c['reward_item_quantity']}}"></label><label>Period<select name="period">{% for p in ['daily','weekly','once'] %}<option {% if c['period']==p %}selected{% endif %}>{{p}}</option>{% endfor %}</select></label>
+      <label>Minimum Level<input type="number" min="1" max="10" name="minimum_level" value="{{c['minimum_level']}}"></label><label>Status<select name="enabled"><option value="1" {% if c['enabled'] %}selected{% endif %}>Open</option><option value="0" {% if not c['enabled'] %}selected{% endif %}>Closed</option></select></label></div>
+      <button>Save Contract</button></form></article>{% endfor %}</div></section>
+
+    <section class="panel"><h2>📊 Last 24 Hours Activity</h2><table><tr><th>Action</th><th>Count</th></tr>{% for a in activity %}<tr><td>{{a['action']}}</td><td>{{a['count']}}</td></tr>{% else %}<tr><td colspan="2">No Economy activity.</td></tr>{% endfor %}</table></section>
+    <section class="panel"><h2>💹 Recent Stock Trades</h2><table><tr><th>Player</th><th>Company</th><th>Side</th><th>Quantity</th><th>Price</th><th>Fee</th><th>Time</th></tr>{% for t in recent_trades %}<tr><td>{{t['player_name']}}</td><td>{{t['symbol']}}</td><td>{{t['side']}}</td><td>{{t['quantity']}}</td><td>{{t['price']}} XC</td><td>{{t['fee']}}</td><td>{{t['created_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="7">No trades.</td></tr>{% endfor %}</table></section>
+    <section class="panel"><h2>🏷️ Recent Player Market Trades</h2><table><tr><th>Buyer</th><th>Seller</th><th>Item</th><th>Quantity</th><th>Price</th><th>Fee</th><th>Time</th></tr>{% for t in market_trades %}<tr><td>{{t['buyer_name']}}</td><td>{{t['seller_name']}}</td><td>{{t['item_emoji']}} {{t['item_name']}}</td><td>{{t['quantity']}}</td><td>{{t['price_each']}} XC</td><td>{{t['fee']}}</td><td>{{t['created_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="7">No player market trades.</td></tr>{% endfor %}</table></section>
+    <section class="panel"><h2>🏭 Production Queue</h2><table><tr><th>Player</th><th>Recipe</th><th>Quantity</th><th>Status</th><th>Ready</th></tr>{% for q in production %}<tr><td>{{q['player_name']}}</td><td>{{q['recipe_name']}}</td><td>{{q['quantity']}}</td><td>{{q['status']}}</td><td>{{q['ready_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="5">No production jobs.</td></tr>{% endfor %}</table></section>
+    """
+    return admin_page("Tier 6 Economy", body, settings=settings, totals=totals, stock_value=stock_value,
+                      companies=companies, contracts=contracts, items=items, recent_trades=recent_trades,
+                      market_trades=market_trades, production=production, activity=activity, health=health)
+
+
+@app.post("/tier6-economy/settings")
+@login_required
+def tier6_save_settings():
+    allowed = set(tier6.DEFAULTS) | {"daily_reward", "daily_cooldown", "transfer_tax_percent", "market_enabled", "market_fee_percent", "market_min_price", "market_max_price"}
+    db = get_db()
+    for key in allowed:
+        if key not in request.form:
+            continue
+        value = int(request.form[key])
+        if "percent" in key or key == "tier6_stock_price_impact":
+            value = max(0, min(100, value))
+        else:
+            value = max(0, value)
+        db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+    db.commit(); db.close(); flash("Tier 6 Economy settings saved.")
+    return redirect(url_for("tier6_economy_control"))
+
+
+@app.post("/tier6-economy/company/save")
+@login_required
+def tier6_save_company():
+    db = get_db(); company_id = request.form.get("id")
+    symbol = request.form["symbol"].strip().upper()[:8]
+    name = request.form["name"].strip()[:80]
+    price = max(1, int(request.form.get("price", 100)))
+    minimum = max(1, int(request.form.get("min_price", 1)))
+    maximum = max(minimum, int(request.form.get("max_price", 1000)))
+    price = min(maximum, max(minimum, price))
+    total = max(1, int(request.form.get("total_shares", 100000)))
+    values = (symbol, name, request.form.get("emoji", "📈").strip() or "📈", request.form.get("industry", "Industry").strip()[:60],
+              request.form.get("description", "").strip()[:500], price, minimum, maximum, total,
+              max(1, min(50, int(request.form.get("volatility", 8)))), max(-20, min(20, int(request.form.get("trend", 0)))), int(request.form.get("enabled", 1)))
+    try:
+        if company_id:
+            held = int(db.execute("SELECT COALESCE(SUM(quantity),0) FROM tier6_stock_holdings WHERE company_id=?", (int(company_id),)).fetchone()[0])
+            total = max(total, held)
+            values = values[:8] + (total,) + values[9:]
+            db.execute("""UPDATE tier6_stock_companies SET symbol=?,name=?,emoji=?,industry=?,description=?,price=?,min_price=?,max_price=?,total_shares=?,available_shares=?,volatility=?,trend=?,enabled=? WHERE id=?""",
+                       values[:9] + (total - held,) + values[9:] + (int(company_id),))
+        else:
+            now = int(time.time())
+            db.execute("""INSERT INTO tier6_stock_companies(symbol,name,emoji,industry,description,price,previous_price,min_price,max_price,total_shares,available_shares,volatility,trend,enabled,last_update)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", values[:6] + (price,) + values[6:9] + (total,) + values[9:] + (now,))
+        db.commit(); flash(f"Stock company {symbol} saved.")
+    except (ValueError, sqlite3.IntegrityError) as error:
+        db.rollback(); flash(str(error))
+    db.close(); return redirect(url_for("tier6_economy_control"))
+
+
+@app.post("/tier6-economy/contract/save")
+@login_required
+def tier6_save_contract():
+    db = get_db(); contract_id = request.form.get("id")
+    item_id = request.form.get("reward_item_id")
+    values = (request.form["contract_key"].strip()[:80], request.form["title"].strip()[:100], request.form.get("emoji", "📋").strip() or "📋",
+              request.form.get("description", "").strip()[:500], request.form.get("action_type", "mine"), max(1, int(request.form.get("target", 1))),
+              max(0, int(request.form.get("reward_xc", 0))), max(0, int(request.form.get("reward_war_credits", 0))), int(item_id) if item_id else None,
+              max(0, int(request.form.get("reward_item_quantity", 0))), request.form.get("period", "daily"), max(1, min(10, int(request.form.get("minimum_level", 1)))), int(request.form.get("enabled", 1)))
+    try:
+        if contract_id:
+            db.execute("""UPDATE tier6_contracts SET contract_key=?,title=?,emoji=?,description=?,action_type=?,target=?,reward_xc=?,reward_war_credits=?,reward_item_id=?,reward_item_quantity=?,period=?,minimum_level=?,enabled=? WHERE id=?""", values + (int(contract_id),))
+        else:
+            db.execute("""INSERT INTO tier6_contracts(contract_key,title,emoji,description,action_type,target,reward_xc,reward_war_credits,reward_item_id,reward_item_quantity,period,minimum_level,enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", values)
+        db.commit(); flash("Economy Contract saved.")
+    except (ValueError, sqlite3.IntegrityError) as error:
+        db.rollback(); flash(str(error))
+    db.close(); return redirect(url_for("tier6_economy_control"))
+
+
+@app.post("/tier6-economy/stocks/update")
+@login_required
+def tier6_force_stock_update():
+    db = get_db()
+    interval = max(60, tier6.setting(db, "tier6_stock_update_seconds"))
+    db.execute("UPDATE tier6_stock_companies SET last_update=MAX(0,last_update-?) WHERE enabled=1", (interval,))
+    changed = tier6.update_stock_prices(db)
+    db.close(); flash(f"Updated {changed} Stock price(s).")
+    return redirect(url_for("tier6_economy_control"))
+
+
+@app.post("/tier6-economy/repair")
+@login_required
+def tier6_repair():
+    db = get_db(); message = tier6.repair(db); db.close(); flash(message)
+    return redirect(url_for("tier6_economy_control"))
 
 
 @app.route("/logs")
@@ -2418,6 +2665,13 @@ def save_recipe():
 def delete_recipe(recipe_id):
     db = get_db(); recipe = db.execute("SELECT name FROM recipes WHERE id=?", (recipe_id,)).fetchone()
     if recipe:
+        active = int(db.execute(
+            "SELECT COUNT(*) FROM tier6_production_queue WHERE recipe_id=? AND status='working'",
+            (recipe_id,),
+        ).fetchone()[0])
+        if active:
+            db.close(); flash(f"Cannot delete {recipe['name']}: {active} active Production job(s) still use it. Disable it first.")
+            return redirect(url_for("recipes_control"))
         db.execute("DELETE FROM recipe_ingredients WHERE recipe_id=?", (recipe_id,))
         db.execute("DELETE FROM recipes WHERE id=?", (recipe_id,)); db.commit()
         flash(f"Recipe {recipe['name']} deleted.")
