@@ -1,4 +1,4 @@
-"""X BOT V2 Beta 1.5 administration dashboard."""
+"""X BOT V2 Tier 4 administration dashboard."""
 import hashlib
 import hmac
 import json
@@ -24,6 +24,7 @@ import economy_extra
 import advanced_systems
 import leveling
 import applications
+import tier4
 
 load_dotenv()
 DATABASE_PATH = Path(__file__).resolve().parent / "xwar.db"
@@ -91,6 +92,7 @@ with get_db() as startup_db:
     advanced_systems.initialise(startup_db)
     leveling.initialise(startup_db)
     applications.initialise(startup_db)
+    tier4.initialise(startup_db)
     startup_db.execute("""CREATE TABLE IF NOT EXISTS dashboard_role_access(
         role_id TEXT PRIMARY KEY, access_level TEXT NOT NULL,
         label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
@@ -327,8 +329,8 @@ table{border-radius:12px;overflow:hidden}th{background:#181b20;color:#bec6d1;let
 
 HEADER = """
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ title }} · X BOT</title>""" + STYLE + """</head><body>
-<header><div><h1>⚔️ X BOT Admin</h1><span class="version">V2 · Beta 1.5 · {{session.get('discord_name','Owner')}} ({{session.get('dashboard_role','owner')}})</span></div><button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button></header><nav id="dashboard-nav">
-<a href="{{ url_for('home') }}">Overview</a><a href="{{ url_for('players') }}">Users</a><a href="{{ url_for('dashboard_users') }}">Dashboard Online</a><a href="{{ url_for('leveling_control') }}">Levels & XP</a><a href="{{ url_for('mining_control') }}">Mining</a><a href="{{ url_for('items') }}">Items & Categories</a><a href="{{ url_for('item_shop_control') }}">Item Shop</a><a href="{{ url_for('recipes_control') }}">Recipes</a><a href="{{ url_for('finance_control') }}">Bills & Income</a><a href="{{ url_for('role_shop_control') }}">Role Shop</a><a href="{{ url_for('reward_codes_control') }}">Reward Codes</a><a href="{{ url_for('market_control') }}">Market</a><a href="{{ url_for('auction_control') }}">Auction</a><a href="{{ url_for('casino_control') }}">Casino</a><a href="{{ url_for('war_control') }}">War</a><a href="{{ url_for('command_access') }}">Command Access</a><a href="{{ url_for('log_settings_control') }}">Log Settings</a><a href="{{ url_for('dashboard_access') }}">Dashboard Access</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('logs') }}">Logs</a><a class="secondary" href="{{ url_for('logout') }}">Log out</a>
+<header><div><h1>⚔️ X BOT Admin</h1><span class="version">V2 · Tier 4 · {{session.get('discord_name','Owner')}} ({{session.get('dashboard_role','owner')}})</span></div><button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button></header><nav id="dashboard-nav">
+<a href="{{ url_for('home') }}">Overview</a><a href="{{ url_for('players') }}">Users</a><a href="{{ url_for('dashboard_users') }}">Dashboard Online</a><a href="{{ url_for('leveling_control') }}">Levels & XP</a><a href="{{ url_for('mining_control') }}">Mining</a><a href="{{ url_for('items') }}">Items & Categories</a><a href="{{ url_for('item_shop_control') }}">Item Shop</a><a href="{{ url_for('recipes_control') }}">Recipes</a><a href="{{ url_for('finance_control') }}">Bills & Income</a><a href="{{ url_for('role_shop_control') }}">Role Shop</a><a href="{{ url_for('reward_codes_control') }}">Reward Codes</a><a href="{{ url_for('market_control') }}">Market</a><a href="{{ url_for('auction_control') }}">Auction</a><a href="{{ url_for('casino_control') }}">Casino</a><a href="{{ url_for('war_control') }}">War</a><a href="{{ url_for('diplomacy_control') }}">Diplomacy</a><a href="{{ url_for('command_access') }}">Command Access</a><a href="{{ url_for('log_settings_control') }}">Log Settings</a><a href="{{ url_for('dashboard_access') }}">Dashboard Access</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('logs') }}">Logs</a><a class="secondary" href="{{ url_for('logout') }}">Log out</a>
 </nav><main>{% with messages=get_flashed_messages() %}{% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}{% endwith %}
 """
 HEADER = HEADER.replace('<a href="{{ url_for(\'leveling_control\') }}">Levels & XP</a>', '<a href="{{ url_for(\'leveling_control\') }}">Levels & XP</a><a href="{{ url_for(\'applications_control\') }}">Applications & Verification</a>')
@@ -510,7 +512,7 @@ def admin_page(title, body, **context):
 
 
 LOGIN = """
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>X BOT Admin Login</title>""" + STYLE + """</head><body class="login"><div class="panel"><h1>⚔️ X BOT V2</h1><p class="muted">Beta 1.5 Multi-Admin Dashboard</p>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>X BOT Admin Login</title>""" + STYLE + """</head><body class="login"><div class="panel"><h1>⚔️ X BOT V2</h1><p class="muted">Tier 4 Multi-Admin Dashboard</p>
 {% with messages=get_flashed_messages() %}{% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}{% endwith %}
 {% if oauth_configured %}<a class="btn purple" style="display:block;text-align:center;margin:16px 0" href="{{url_for('discord_login')}}">Login with Discord</a>{% else %}<div class="notice bad">Discord OAuth is not configured.</div>{% endif %}
 <details><summary>Moderator Access Code</summary><p class="muted">Use the personal code given to you by an Administrator. Keep it private.</p><form method="post"><input type="hidden" name="login_mode" value="access_code"><label>Personal access code<input type="password" name="access_code" autocomplete="current-password" required></label><button class="purple">Login with Access Code</button></form></details><details><summary>Emergency Owner Login</summary><form method="post"><input type="hidden" name="login_mode" value="owner"><label>Dashboard password<input type="password" name="password" required></label><button>Owner Login</button></form></details></div></body></html>
@@ -1599,6 +1601,44 @@ def save_reward_code():
 def delete_reward_code(code_id):
     db = get_db(); db.execute("DELETE FROM reward_code_redemptions WHERE code_id=?", (code_id,)); db.execute("DELETE FROM reward_codes WHERE id=?", (code_id,)); db.commit(); db.close(); flash("Reward code deleted.")
     return redirect(url_for("reward_codes_control"))
+
+
+@app.route("/diplomacy")
+@login_required
+def diplomacy_control():
+    db = get_db()
+    alliances = db.execute(
+        """SELECT a.*,p.nation_name leader_name,COUNT(m.user_id) members
+           FROM alliances a LEFT JOIN players p ON p.user_id=a.leader_id
+           LEFT JOIN alliance_members m ON m.alliance_id=a.id
+           GROUP BY a.id ORDER BY members DESC,a.name"""
+    ).fetchall()
+    relations = db.execute(
+        """SELECT r.*,a.nation_name first_name,b.nation_name second_name
+           FROM nation_relations r LEFT JOIN players a ON a.user_id=r.first_user_id
+           LEFT JOIN players b ON b.user_id=r.second_user_id
+           ORDER BY r.started_at DESC LIMIT 100"""
+    ).fetchall()
+    trades = db.execute(
+        """SELECT t.*,a.nation_name proposer_name,b.nation_name target_name
+           FROM nation_trades t LEFT JOIN players a ON a.user_id=t.proposer_id
+           LEFT JOIN players b ON b.user_id=t.target_id
+           ORDER BY t.id DESC LIMIT 100"""
+    ).fetchall()
+    pending = {
+        "Alliance invites": db.execute("SELECT COUNT(*) n FROM alliance_invites WHERE status='pending'").fetchone()["n"],
+        "Relation requests": db.execute("SELECT COUNT(*) n FROM nation_relation_requests WHERE status='pending'").fetchone()["n"],
+        "Peace offers": db.execute("SELECT COUNT(*) n FROM nation_peace_offers WHERE status='pending'").fetchone()["n"],
+        "Nation trades": db.execute("SELECT COUNT(*) n FROM nation_trades WHERE status='pending'").fetchone()["n"],
+    }
+    db.close()
+    body = """
+    <div class="grid">{% for label,value in pending.items() %}<div class="card"><small>{{label}}</small><strong>{{value}}</strong></div>{% endfor %}</div>
+    <section class="panel"><h2>🤝 Alliance 2.0</h2><div class="notice">Membership now uses private invitations through the Discord Diplomacy Inbox.</div><table><tr><th>Alliance</th><th>Leader</th><th>Members</th><th>Created</th></tr>{% for row in alliances %}<tr><td><b>[{{row['tag']}}] {{row['name']}}</b></td><td>{{row['leader_name'] or row['leader_id']}}</td><td>{{row['members']}}</td><td>{{row['created_at']}}</td></tr>{% else %}<tr><td colspan="4">No Alliances yet.</td></tr>{% endfor %}</table></section>
+    <section class="panel"><h2>🕊️ Nation Relations</h2><table><tr><th>Nation A</th><th>Nation B</th><th>Relation</th><th>Ends</th></tr>{% for row in relations %}<tr><td>{{row['first_name'] or row['first_user_id']}}</td><td>{{row['second_name'] or row['second_user_id']}}</td><td>{{row['relation_type'].replace('_',' ')|title}}</td><td>{{row['ends_at'] or 'Permanent'}}</td></tr>{% else %}<tr><td colspan="4">No active relations.</td></tr>{% endfor %}</table></section>
+    <section class="panel"><h2>📦 Nation Trade Audit</h2><table><tr><th>ID</th><th>From</th><th>To</th><th>Offer</th><th>Request</th><th>Status</th></tr>{% for row in trades %}<tr><td>#{{row['id']}}</td><td>{{row['proposer_name'] or row['proposer_id']}}</td><td>{{row['target_name'] or row['target_id']}}</td><td>{{row['offer_xc']}} XC · {{row['offer_war_credits']}} WC · {{row['offer_supply']}} Supply</td><td>{{row['request_xc']}} XC · {{row['request_war_credits']}} WC · {{row['request_supply']}} Supply</td><td>{{row['status']|title}}</td></tr>{% else %}<tr><td colspan="6">No Nation trades.</td></tr>{% endfor %}</table></section>
+    """
+    return admin_page("Diplomacy", body, alliances=alliances, relations=relations, trades=trades, pending=pending)
 
 
 @app.route("/war")

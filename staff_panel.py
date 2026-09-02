@@ -260,6 +260,9 @@ class AdminPanel(discord.ui.View):
             self.add_item(AdminActionButton("create_code", "Create Code", emoji="➕", style=discord.ButtonStyle.success, row=2))
             if self.selected_code():
                 self.add_item(AdminActionButton("toggle_code", "Enable / Disable", emoji="🔁", row=2))
+        elif self.page == "home":
+            self.add_item(AdminActionButton("system_status", "System Status", emoji="📡", style=discord.ButtonStyle.primary, row=1))
+            self.add_item(AdminActionButton("backup_now", "Backup Now", emoji="💾", style=discord.ButtonStyle.success, row=1))
 
     def pending_applications(self):
         return self.db.execute(
@@ -365,6 +368,18 @@ class AdminPanel(discord.ui.View):
         if action.startswith("page:"):
             replacement = self.clone(page=action.split(":", 1)[1], selected_application_id=None, selected_code_id=None, selected_feedback_id=None)
             await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+            return
+        if action == "system_status":
+            health = getattr(self.bot, "xbot_tier4_health", None)
+            await self.refresh(interaction, notice=health() if health else "System status is unavailable.")
+            return
+        if action == "backup_now":
+            backup = getattr(self.bot, "xbot_tier4_backup", None)
+            if not backup:
+                await self.refresh(interaction, notice="❌ Backup service is unavailable.")
+                return
+            target = backup()
+            await self.refresh(interaction, notice=f"✅ Database backup created: {target.name}")
             return
         if action == "toggle_applications":
             value = "0" if _setting(self.db, "applications_enabled", "1") == "1" else "1"

@@ -22,6 +22,7 @@ import leveling
 import applications
 import staff_panel
 import tester_feedback
+import tier4
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -125,6 +126,7 @@ advanced_systems.initialise(db)
 leveling.initialise(db)
 applications.initialise(db)
 tester_feedback.initialise(db)
+tier4.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -455,6 +457,7 @@ class XBot(discord.Client):
             restore_panel_commands(None, global_hidden)
         casino.start_vip_cleanup_task(self, db)
         leveling.start_voice_task(self, db)
+        tier4.start_backup_task(self, db)
 
 
 bot = XBot()
@@ -962,13 +965,14 @@ async def capital(interaction: discord.Interaction, name: Optional[str] = None):
     await interaction.response.send_message(view=xbot_ui.panel("🏛️ Capital Command", f"## {data['capital_name']}\n❤️ **Capital Health:** {data['capital_health']} / 100\n**Status:** {status}", colour=discord.Color.gold()))
 
 
-# ---------- X BOT V2 Beta 0.4 Economy & War ----------
+# ---------- X BOT V2 Player Economy & War ----------
 # The old fixed mine commands are intentionally retired. A later beta will add
 # configurable Wabbit-style pickaxes and weighted material drops.
 economy.register_commands(bot, db, create_player)
 casino.register_commands(bot, db, create_player)
 economy_extra.register_commands(bot, db, create_player, economy.find_item)
 war_tier.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
+tier4.register_commands(bot, db, create_player)
 advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db)
 applications.register_commands(bot, db)

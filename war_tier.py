@@ -2448,41 +2448,16 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         if target.bot or target.id == interaction.user.id:
             await interaction.response.send_message("❌ Choose another player Nation.", ephemeral=True)
             return
-        attacker = create_player(interaction.user)
+        create_player(interaction.user)
         defender = db.execute("SELECT * FROM players WHERE user_id=?", (target.id,)).fetchone()
         if not defender:
             await interaction.response.send_message("❌ That player has not created a Nation yet.", ephemeral=True)
             return
-        if int(attacker["capital_health"]) <= 0 or int(defender["capital_health"]) <= 0:
-            await interaction.response.send_message("❌ A conquered Nation cannot start or receive a new declaration.", ephemeral=True)
+        view_factory = getattr(bot, "xbot_declare_war_view", None)
+        if view_factory:
+            await interaction.response.send_message(view=view_factory(interaction.user.id, target.id))
             return
-        own_alliance = get_alliance_for_user(interaction.user.id)
-        target_alliance = get_alliance_for_user(target.id)
-        if own_alliance and target_alliance and own_alliance["id"] == target_alliance["id"]:
-            await interaction.response.send_message("❌ You cannot declare war on a member of your own Alliance.", ephemeral=True)
-            return
-        tiles = world_city_tiles(_province_features())
-        sync_map_ownership(db, tiles)
-        existing = active_nation_war(db, interaction.user.id)
-        if existing:
-            await interaction.response.send_message("❌ Your Nation already has an active declaration. Use `/nation_war_status` or `/offer_peace`.", ephemeral=True)
-            return
-        if not nations_are_adjacent(db, interaction.user.id, target.id, tiles):
-            await interaction.response.send_message(view=xbot_ui.warning(
-                "🗺️ Nations Are Not Neighbours",
-                "You can only declare war on a Nation sharing a real Land border with yours. Expand with `/claim_land` or capture connecting Land first."), ephemeral=True)
-            return
-        now = int(time.time())
-        duration = max(3600, setting(db, "nation_war_duration"))
-        db.execute("""INSERT INTO nation_wars(attacker_id,defender_id,started_at,ends_at)
-            VALUES(?,?,?,?)""", (interaction.user.id, target.id, now, now + duration))
-        db.commit()
-        await interaction.response.send_message(view=xbot_ui.danger(
-            "⚔️ War Declared",
-            f"**{attacker['nation_name']}** has declared war on **{defender['nation_name']}**.\n"
-            f"🗺️ The Nations share a Land border.\n⏳ War ends <t:{now + duration}:R>.\n\n"
-            "Both sides may now use `/attack` against each other. Win the Land front to capture a connected enemy Land."
-        ))
+        await interaction.response.send_message("❌ Diplomacy Centre is temporarily unavailable.", ephemeral=True)
 
     @bot.tree.command(name="nation_war_status", description="View your current Nation war", **player_command_kwargs)
     async def nation_war_status(interaction: discord.Interaction):
@@ -2511,12 +2486,14 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         if not war:
             await interaction.response.send_message("❌ Your Nation does not have an active war to end.", ephemeral=True)
             return
-        db.execute("UPDATE nation_wars SET active=0,ended_at=?,ended_by=? WHERE id=?",
-            (int(time.time()), interaction.user.id, war["id"]))
-        db.commit()
-        await interaction.response.send_message(view=xbot_ui.success(
-            "🕊️ Peace Restored", "The Nation war has ended. Both Nations may prepare and expand again."
-        ))
+        view_factory = getattr(bot, "xbot_offer_peace", None)
+        if not view_factory:
+            await interaction.response.send_message("❌ Diplomacy Centre is temporarily unavailable.", ephemeral=True)
+            return
+        enemy_id = war["defender_id"] if war["attacker_id"] == interaction.user.id else war["attacker_id"]
+        await interaction.response.send_message(
+            view=view_factory(interaction.user.id, enemy_id), ephemeral=True,
+        )
 
     @bot.tree.command(name="division_create",description="Create a Land, Air Force, or Navy Division Template")
     @app_commands.choices(service=[
@@ -2745,6 +2722,18 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             builder = getattr(bot, "xbot_player_lobby_builder", None)
             if builder is None:
                 await interaction.response.send_message("The X BOT Lobby is loading. Please try again in a moment.", ephemeral=True)
+                return
+            await interaction.response.edit_message(view=builder(self.owner_id))
+
+    class WarDiplomacyButton(discord.ui.Button):
+        def __init__(self, owner_id: int):
+            super().__init__(label="Diplomacy", emoji="🕊️", style=discord.ButtonStyle.primary)
+            self.owner_id = owner_id
+
+        async def callback(self, interaction: discord.Interaction):
+            builder = getattr(bot, "xbot_player_panel_builders", {}).get("diplomacy")
+            if builder is None:
+                await interaction.response.send_message("The Diplomacy Centre is loading. Please try again in a moment.", ephemeral=True)
                 return
             await interaction.response.edit_message(view=builder(self.owner_id))
 
@@ -3023,6 +3012,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             ))
             container.add_item(discord.ui.ActionRow(
                 WarQuickButton("city", "City Centre", "🏙️", discord.ButtonStyle.secondary),
+                WarDiplomacyButton(user_id),
                 WarOperationsButton(user_id),
                 WarCustomiseButton(user_id),
                 WarLobbyButton(user_id),
