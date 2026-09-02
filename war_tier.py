@@ -289,6 +289,56 @@ def sync_map_ownership(db, tile_info):
     db.commit()
 
 
+def ensure_player_map_ownership(db, user_id: int, tile_info):
+    """Repair one player's missing map rows without synchronising the world.
+
+    Discord autocomplete must answer in only a few seconds.  The full map
+    synchroniser updates thousands of display names, so it must never run from
+    an autocomplete callback on a slower Termux phone.
+    """
+    player = db.execute("SELECT MAX(0,land) desired FROM players WHERE user_id=?", (user_id,)).fetchone()
+    if player is None:
+        return
+    desired = max(0, min(int(player["desired"] or 0), len(tile_info)))
+    owned = [row["territory_code"] for row in db.execute(
+        "SELECT territory_code FROM map_territories WHERE owner_user_id=? ORDER BY is_capital DESC,acquired_at",
+        (user_id,),
+    ).fetchall()]
+    if len(owned) >= desired:
+        return
+    assigned = {row["territory_code"] for row in db.execute("SELECT territory_code FROM map_territories").fetchall()}
+    available = [code for code in tile_info if code not in assigned]
+    changed = False
+    while len(owned) < desired and available:
+        valid_owned = [code for code in owned if code in tile_info]
+        if not valid_owned:
+            digest = hashlib.sha256(str(user_id).encode("ascii")).digest()
+            chosen = available[int.from_bytes(digest[:4], "big") % len(available)]
+        else:
+            owned_points = [tile_info[code][2] for code in valid_owned]
+
+            def distance(code):
+                lon, lat = tile_info[code][2]
+                return min(
+                    min(abs(lon - x), 360 - abs(lon - x)) ** 2 + (lat - y) ** 2
+                    for x, y in owned_points
+                )
+
+            chosen = min(available, key=distance)
+        code, name, _centre, _bounds = tile_info[chosen]
+        db.execute(
+            """INSERT OR IGNORE INTO map_territories
+               (territory_code,territory_name,owner_user_id,is_capital,acquired_at,level)
+               VALUES(?,?,?,?,?,1)""",
+            (code, name, user_id, 1 if not owned else 0, int(time.time())),
+        )
+        owned.append(chosen)
+        available.remove(chosen)
+        changed = True
+    if changed:
+        db.commit()
+
+
 def transfer_one_land(db, attacker_id: int, defender_id: int):
     """Move one real mapped Land after a successful battle.
 
@@ -1292,6 +1342,10 @@ def initialise(db):
     for key, value in DEFAULTS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, value))
     db.commit()
+    # Parse the bundled map during startup, outside Discord's strict
+    # autocomplete response window. Later Land pickers reuse these caches.
+    world_city_tiles(_province_features())
+    world_capital_tiles()
 
 
 def setting(db, key):
@@ -1628,10 +1682,12 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
     async def free_land_autocomplete(interaction: discord.Interaction, current: str):
         """Let a Nation choose a connected, unclaimed real province/state."""
+        # A brand-new player may open /claim_land before ever opening /lobby.
+        create_player(interaction.user)
         tiles = world_city_tiles(_province_features())
-        # Ensure older Nations that existed before the real-map system have
-        # their current Land represented before we calculate their border.
-        sync_map_ownership(db, tiles)
+        # Repair only this player. Full world synchronisation is far too slow
+        # for Discord's autocomplete response limit on Termux phones.
+        ensure_player_map_ownership(db, interaction.user.id, tiles)
         connected = connected_free_land_codes(db, interaction.user.id, tiles)
         phrase = (current or "").strip().lower()
         choices = []
@@ -1648,25 +1704,26 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
     @app_commands.autocomplete(land=free_land_autocomplete)
     async def claim_land(interaction: discord.Interaction, land: str):
         """Season 1 peaceful expansion: one free real Land each 12 hours."""
+        # Acknowledge before any map work so Discord cannot expire the command.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         player = create_player(interaction.user)
         tiles = world_city_tiles(_province_features())
-        sync_map_ownership(db, tiles)
+        ensure_player_map_ownership(db, interaction.user.id, tiles)
         selected = tiles.get(land)
         if not selected:
-            await interaction.response.send_message(
-                "❌ Choose an available Land from the command list. It may have been claimed already.",
-                ephemeral=True,
+            await interaction.edit_original_response(
+                content="❌ Choose an available Land from the command list. It may have been claimed already.",
             )
             return
         existing = db.execute("SELECT owner_user_id FROM map_territories WHERE territory_code=?", (land,)).fetchone()
         if existing:
-            await interaction.response.send_message("❌ That Land has already been claimed by another Nation.", ephemeral=True)
+            await interaction.edit_original_response(content="❌ That Land has already been claimed by another Nation.")
             return
         if land not in connected_free_land_codes(db, interaction.user.id, tiles):
-            await interaction.response.send_message(view=xbot_ui.warning(
+            await interaction.edit_original_response(view=xbot_ui.warning(
                 "🗺️ Land Must Connect to Your Nation",
                 "Choose a free province/state that touches one of your current Lands. "
-                "You cannot claim a disconnected region across the map."), ephemeral=True)
+                "You cannot claim a disconnected region across the map."))
             return
         db.execute("INSERT OR IGNORE INTO player_free_land_claims(user_id) VALUES(?)", (interaction.user.id,))
         claim_state = db.execute("SELECT last_claim_at FROM player_free_land_claims WHERE user_id=?", (interaction.user.id,)).fetchone()
@@ -1674,10 +1731,10 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         cooldown = setting(db, "free_land_claim_cooldown")
         remaining = cooldown - (now - int(claim_state["last_claim_at"]))
         if remaining > 0:
-            await interaction.response.send_message(view=xbot_ui.warning(
+            await interaction.edit_original_response(view=xbot_ui.warning(
                 "⏳ Free Land Claim Not Ready",
                 f"Your Nation may claim another free Land <t:{now + remaining}:R>.\n"
-                "Free Land does not cost War Credits or Supply."), ephemeral=True)
+                "Free Land does not cost War Credits or Supply."))
             return
         _code, land_name, _centre, _bounds = selected
         db.execute("""INSERT INTO map_territories
@@ -1687,7 +1744,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         db.execute("UPDATE player_free_land_claims SET last_claim_at=? WHERE user_id=?", (now, interaction.user.id))
         city_log(db, interaction.user.id, "free_land_claim", f"Claimed free Land: {land_name}")
         db.commit()
-        await interaction.response.send_message(view=xbot_ui.success(
+        await interaction.edit_original_response(view=xbot_ui.success(
             "🗺️ Free Land Claimed",
             f"**{land_name}** is now part of **{player['nation_name']}**.\n"
             f"🌍 Nation Land: **{int(player['land']) + 1}** · Next free claim: <t:{now + cooldown}:R>\n\n"

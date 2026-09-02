@@ -23,6 +23,8 @@ Tier 5 makes the existing game easier to learn and faster to continue without ad
 ## Reliability and staff tools
 
 - Tier 5 uses additive tables, so old databases migrate without removing or rewriting player records.
+- Fixed `/claim_land` autocomplete on slower Termux phones by preloading the map and replacing full-world synchronisation with a single-player repair path.
+- `/claim_land` now acknowledges Discord before validation, preventing the final claim from timing out after a successful selection.
 - `/admin` System Status now reports Tier 4 and Tier 5 health together.
 - `/admin` includes **Repair Missions**, which creates missing profiles and normalises invalid Nation progress safely.
 - The existing Tester Feedback panel remains the one-click route for bugs and suggestions.
@@ -30,4 +32,3 @@ Tier 5 makes the existing game easier to learn and faster to continue without ad
 ## Tier 6 target — Economy
 
 Tier 6 will focus on the Economy: rebalance income and prices, improve item value and sinks, add clearer market history, make jobs/business activity worthwhile, and provide administrators with an Economy health and balancing dashboard.
-
