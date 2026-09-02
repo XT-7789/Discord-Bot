@@ -2,6 +2,11 @@
 
 Tier 4 turns diplomacy into a button-driven system inside the existing War panel.
 
+## Tier 4 hotfixes
+
+- Fixed **War Centre → Operations → Recruit** failing with `ArmyShopView is not defined`.
+- War and Economy now share one registered Army Recruit panel, keeping all three military branches and the return-to-War button connected.
+
 ## Player features
 
 - Open `/war`, then press **Diplomacy**.

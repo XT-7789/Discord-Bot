@@ -2917,7 +2917,14 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 await interaction.response.edit_message(view=WarDetailView(interaction.user.id, "🔥 Military Rally", text, colour))
                 return
             if self.action == "recruit":
-                await interaction.response.edit_message(view=ArmyShopView(interaction.user.id))
+                builder = getattr(bot, "xbot_army_recruit_builder", None)
+                if builder is None:
+                    await interaction.response.send_message(
+                        "The Army Recruit panel is still loading. Please try again in a moment.",
+                        ephemeral=True,
+                    )
+                    return
+                await interaction.response.edit_message(view=builder(interaction.user.id))
                 return
             if self.action == "city":
                 await interaction.response.edit_message(view=CitySystemView(interaction.user.id))

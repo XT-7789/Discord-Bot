@@ -1698,6 +1698,11 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message("This Army Recruit menu belongs to another player. Use `/army_recruit` for your own menu.", ephemeral=True)
             return False
 
+    # Other player panels (especially /war -> Operations) must use this
+    # shared builder. ArmyShopView is local to economy.register_commands and
+    # cannot be referenced directly from war_tier.py.
+    bot.xbot_army_recruit_builder = lambda owner_id: ArmyShopView(owner_id)
+
     @bot.tree.command(name="army_recruit", description="Open the interactive X BOT Army Recruit menu")
     async def army_recruit(interaction: discord.Interaction):
         # Acknowledge immediately before database queries and Components V2
