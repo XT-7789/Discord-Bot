@@ -1,4 +1,4 @@
-"""X BOT V2 Tier 6 administration dashboard."""
+"""X BOT V2 Tier 7 administration dashboard."""
 import hashlib
 import hmac
 import json
@@ -27,6 +27,7 @@ import applications
 import tier4
 import tier5
 import tier6
+import tier7
 
 load_dotenv()
 DATABASE_PATH = Path(__file__).resolve().parent / "xwar.db"
@@ -106,6 +107,7 @@ with get_db() as startup_db:
     tier4.initialise(startup_db)
     tier5.initialise(startup_db)
     tier6.initialise(startup_db)
+    tier7.initialise(startup_db)
     startup_db.execute("""CREATE TABLE IF NOT EXISTS dashboard_role_access(
         role_id TEXT PRIMARY KEY, access_level TEXT NOT NULL,
         label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
@@ -342,7 +344,7 @@ table{border-radius:12px;overflow:hidden}th{background:#181b20;color:#bec6d1;let
 
 HEADER = """
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ title }} · X BOT</title>""" + STYLE + """</head><body>
-<header><div><h1>⚔️ X BOT Admin</h1><span class="version">V2 · Tier 6 · {{session.get('discord_name','Owner')}} ({{session.get('dashboard_role','owner')}})</span></div><button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button></header><nav id="dashboard-nav">
+<header><div><h1>⚔️ X BOT Admin</h1><span class="version">V2 · Tier 7 · {{session.get('discord_name','Owner')}} ({{session.get('dashboard_role','owner')}})</span></div><button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button></header><nav id="dashboard-nav">
 <a href="{{ url_for('home') }}">Overview</a><a href="{{ url_for('players') }}">Users</a><a href="{{ url_for('dashboard_users') }}">Dashboard Online</a><a href="{{ url_for('leveling_control') }}">Levels & XP</a><a href="{{ url_for('mining_control') }}">Mining</a><a href="{{ url_for('items') }}">Items & Categories</a><a href="{{ url_for('item_shop_control') }}">Item Shop</a><a href="{{ url_for('recipes_control') }}">Recipes</a><a href="{{ url_for('finance_control') }}">Bills & Income</a><a href="{{ url_for('role_shop_control') }}">Role Shop</a><a href="{{ url_for('reward_codes_control') }}">Reward Codes</a><a href="{{ url_for('market_control') }}">Market</a><a href="{{ url_for('auction_control') }}">Auction</a><a href="{{ url_for('casino_control') }}">Casino</a><a href="{{ url_for('war_control') }}">War</a><a href="{{ url_for('diplomacy_control') }}">Diplomacy</a><a href="{{ url_for('command_access') }}">Command Access</a><a href="{{ url_for('log_settings_control') }}">Log Settings</a><a href="{{ url_for('dashboard_access') }}">Dashboard Access</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('logs') }}">Logs</a><a class="secondary" href="{{ url_for('logout') }}">Log out</a>
 </nav><main>{% with messages=get_flashed_messages() %}{% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}{% endwith %}
 """
@@ -932,6 +934,7 @@ def delete_player_data(user_id):
         ("tier5_profiles", "user_id"), ("tier5_mission_claims", "user_id"),
         ("tier6_stock_holdings", "user_id"), ("tier6_stock_trades", "user_id"),
         ("tier6_contract_claims", "user_id"), ("tier6_production_queue", "user_id"),
+        ("tier7_defence_profiles", "user_id"), ("tier7_territory_defence", "owner_user_id"),
     )
     for table, column in one_user_tables:
         db.execute(f"DELETE FROM {table} WHERE {column}=?", (user_id,))
@@ -940,6 +943,16 @@ def delete_player_data(user_id):
     db.execute("DELETE FROM battle_history WHERE attacker_id=? OR defender_id=? OR winner_id=?", (user_id, user_id, user_id))
     db.execute("DELETE FROM scout_history WHERE scout_id=? OR target_id=?", (user_id, user_id))
     db.execute("DELETE FROM tier6_market_trades WHERE buyer_id=? OR seller_id=?", (user_id, user_id))
+    tier7_plan_ids = [row["id"] for row in db.execute(
+        "SELECT id FROM tier7_battle_plans WHERE attacker_id=? OR defender_id=?", (user_id, user_id)
+    ).fetchall()]
+    if tier7_plan_ids:
+        placeholders = ",".join("?" for _ in tier7_plan_ids)
+        db.execute(f"DELETE FROM tier7_plan_units WHERE plan_id IN ({placeholders})", tier7_plan_ids)
+        db.execute(f"DELETE FROM tier7_events WHERE plan_id IN ({placeholders})", tier7_plan_ids)
+    db.execute("DELETE FROM tier7_battle_plans WHERE attacker_id=? OR defender_id=?", (user_id, user_id))
+    db.execute("DELETE FROM tier7_battle_reports WHERE attacker_id=? OR defender_id=? OR winner_id=?", (user_id, user_id, user_id))
+    db.execute("DELETE FROM tier7_events WHERE user_id=?", (user_id,))
     db.execute("DELETE FROM players WHERE user_id=?", (user_id,))
     record_dashboard_audit(db, "DELETED", f"Deleted X BOT data for {player['display_name'] or player['nation_name']} ({user_id})")
     db.commit(); db.close(); g.skip_dashboard_audit = True
@@ -1961,10 +1974,21 @@ def war_control():
     real_regions = war_tier.world_city_tiles(war_tier._province_features())
     real_capitals = war_tier.world_capital_tiles()
     # Refresh improved full labels while preserving every owner's stable code,
-    # land level, capital flag and acquisition time.
-    db.executemany("UPDATE map_territories SET territory_name=? WHERE territory_code=?",
-                   ((region[1], code) for code, region in real_regions.items()))
-    db.commit()
+    # land level, capital flag and acquisition time.  Only write labels which
+    # actually changed; the old all-world UPDATE loop held a needless SQLite
+    # write lock every time an administrator opened this GET page.
+    mapped_names = {
+        str(row["territory_code"]): str(row["territory_name"])
+        for row in db.execute("SELECT territory_code,territory_name FROM map_territories").fetchall()
+    }
+    label_updates = [
+        (str(region[1]), code)
+        for code, region in real_regions.items()
+        if code in mapped_names and mapped_names[code] != str(region[1])
+    ]
+    if label_updates:
+        db.executemany("UPDATE map_territories SET territory_name=? WHERE territory_code=?", label_updates)
+        db.commit()
     territory_rows = db.execute("""SELECT t.*,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(t.owner_user_id AS TEXT)) owner_name,
         p.nation_name,p.capital_name FROM map_territories t LEFT JOIN players p ON p.user_id=t.owner_user_id
         ORDER BY owner_name,t.is_capital DESC,t.territory_name""").fetchall()
@@ -1990,7 +2014,84 @@ def war_control():
         (capital[1].rsplit(", ", 1)[-1] if ", " in capital[1] else "Other")
         for capital in available_capitals
     })
+    tier7_settings = {row["key"]: row["value"] for row in db.execute(
+        f"SELECT key,value FROM economy_settings WHERE key IN ({','.join('?' for _ in tier7.DEFAULTS)})",
+        tuple(tier7.DEFAULTS),
+    ).fetchall()}
+    tier7_setting_fields = [
+        {
+            "key": key,
+            "label": key.removeprefix("tier7_").replace("_", " ").title(),
+            "min": tier7.SETTING_LIMITS[key][0],
+            "max": tier7.SETTING_LIMITS[key][1],
+        }
+        for key in tier7.DEFAULTS
+    ]
+    tier7_health = tier7.health_report(db)
+    tier7_profiles = db.execute("""SELECT d.*,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(d.user_id AS TEXT)) player_name
+        FROM tier7_defence_profiles d LEFT JOIN players p ON p.user_id=d.user_id
+        ORDER BY player_name LIMIT 250""").fetchall()
+    tier7_territories = db.execute("""SELECT d.*,t.territory_name,t.is_capital,
+        COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(d.owner_user_id AS TEXT)) owner_name
+        FROM tier7_territory_defence d JOIN map_territories t ON t.territory_code=d.territory_code
+        LEFT JOIN players p ON p.user_id=d.owner_user_id
+        ORDER BY owner_name,t.is_capital DESC,t.territory_name LIMIT 500""").fetchall()
+    tier7_plans = db.execute("""SELECT x.*,
+        COALESCE(NULLIF(a.display_name,''),a.nation_name,CAST(x.attacker_id AS TEXT)) attacker_name,
+        COALESCE(NULLIF(d.display_name,''),d.nation_name,CAST(x.defender_id AS TEXT),'Not selected') defender_name,
+        COALESCE(t.territory_name,'Not selected') territory_name
+        FROM tier7_battle_plans x LEFT JOIN players a ON a.user_id=x.attacker_id
+        LEFT JOIN players d ON d.user_id=x.defender_id LEFT JOIN map_territories t ON t.territory_code=x.territory_code
+        ORDER BY x.id DESC LIMIT 100""").fetchall()
+    tier7_reports = db.execute("""SELECT r.*,
+        COALESCE(NULLIF(a.display_name,''),a.nation_name,CAST(r.attacker_id AS TEXT)) attacker_name,
+        COALESCE(NULLIF(d.display_name,''),d.nation_name,CAST(r.defender_id AS TEXT)) defender_name,
+        COALESCE(NULLIF(w.display_name,''),w.nation_name,CAST(r.winner_id AS TEXT)) winner_name
+        FROM tier7_battle_reports r LEFT JOIN players a ON a.user_id=r.attacker_id
+        LEFT JOIN players d ON d.user_id=r.defender_id LEFT JOIN players w ON w.user_id=r.winner_id
+        ORDER BY r.id DESC LIMIT 100""").fetchall()
+    tier7_events = db.execute("SELECT * FROM tier7_events ORDER BY id DESC LIMIT 100").fetchall()
     db.close()
+    tier7_panel = """<details class="creator" id="tier7-control"><summary class="btn purple">⚔️ Tier 7 · Warfront 2.0</summary>
+    <section class="panel"><h2>🩺 Tier 7 Health & Safety</h2><div class="grid pad">
+      <div class="card"><small>Status</small><strong class="{{'ok' if tier7_health['healthy'] else 'bad'}}">{{'Healthy' if tier7_health['healthy'] else 'Needs repair'}}</strong></div>
+      <div class="card"><small>Battle Reports</small><strong>{{tier7_health['reports']}}</strong></div>
+      <div class="card"><small>Open Plans</small><strong>{{tier7_health['draft_plans']}}</strong></div>
+      <div class="card"><small>Defended Lands</small><strong>{{tier7_health['territories']}}</strong></div>
+      <div class="card"><small>Expired Drafts</small><strong class="{{'bad' if tier7_health['expired_drafts'] else 'ok'}}">{{tier7_health['expired_drafts']}}</strong></div>
+      <div class="card"><small>Interrupted Battles</small><strong class="{{'bad' if tier7_health['stuck_resolving'] else 'ok'}}">{{tier7_health['stuck_resolving']}}</strong></div>
+      <div class="card"><small>Missing Reports</small><strong class="{{'bad' if tier7_health['missing_reports'] else 'ok'}}">{{tier7_health['missing_reports']}}</strong></div>
+      <div class="card"><small>Ownership Problems</small><strong class="{{'bad' if tier7_health['orphan_defence'] else 'ok'}}">{{tier7_health['orphan_defence']}}</strong></div>
+    </div><div class="top-actions"><form method="post" action="{{url_for('tier7_repair_dashboard')}}"><button class="teal">Health Check & Safe Repair</button></form></div></section>
+
+    <section class="panel"><h2>⚙️ Complete Tier 7 Balance</h2><div class="notice">These values control Attack Planner modes, cooldowns, terrain, fortifications, reports and defence automation. Changes apply to new previews and battles immediately.</div>
+      <form class="fields" method="post" action="{{url_for('tier7_save_settings')}}"><div class="fields-grid">
+      {% for field in tier7_setting_fields %}<label>{{field['label']}}<input type="number" name="{{field['key']}}" min="{{field['min']}}" max="{{field['max']}}" value="{{tier7_settings.get(field['key'],tier7_defaults[field['key']])}}" required></label>{% endfor %}
+      </div><button>Save All Tier 7 Settings</button></form></section>
+
+    <section class="panel"><h2>🛡️ Nation Defence Profiles</h2><div class="library">
+      {% for row in tier7_profiles %}<article class="library-card"><h3>🏳️ {{row['player_name']}}</h3><form class="fields" method="post" action="{{url_for('tier7_save_profile')}}"><input type="hidden" name="user_id" value="{{row['user_id']}}"><div class="fields-grid">
+        <label>Garrison Commitment %<input type="number" min="10" max="100" name="garrison_percent" value="{{row['garrison_percent']}}"></label>
+        <label>Capital Priority<select name="capital_priority"><option value="1" {% if row['capital_priority'] %}selected{% endif %}>On</option><option value="0" {% if not row['capital_priority'] %}selected{% endif %}>Off</option></select></label>
+        <label>Auto Reinforce<select name="auto_reinforce"><option value="1" {% if row['auto_reinforce'] %}selected{% endif %}>On</option><option value="0" {% if not row['auto_reinforce'] %}selected{% endif %}>Off</option></select></label>
+      </div><button>Save Defence Profile</button></form></article>{% else %}<p>No Nation defence profiles yet.</p>{% endfor %}
+    </div></section>
+
+    <section class="panel"><h2>🗺️ Territory Terrain & Fortification</h2><div class="notice">Terrain is generated once and can be corrected here. Captured Land keeps its terrain and fortification, while ownership is synchronised automatically.</div><table><tr><th>Nation / Land</th><th>Terrain</th><th>Fortification</th><th>Save</th></tr>
+      {% for row in tier7_territories %}<tr><td><b>{{'★ ' if row['is_capital'] else ''}}{{row['territory_name']}}</b><br><span class="muted">{{row['owner_name']}}</span></td><td colspan="3"><form class="inline" method="post" action="{{url_for('tier7_save_territory')}}"><input type="hidden" name="territory_code" value="{{row['territory_code']}}"><select name="terrain">{% for terrain in tier7_terrains %}<option value="{{terrain}}" {% if row['terrain']==terrain %}selected{% endif %}>{{terrain|title}}</option>{% endfor %}</select><input type="number" min="0" max="{{tier7_settings.get('tier7_fortification_max_level','5')}}" name="fortification_level" value="{{row['fortification_level']}}"><button>Save</button></form></td></tr>{% else %}<tr><td colspan="4">No mapped Land yet.</td></tr>{% endfor %}
+    </table></section>
+
+    <section class="panel"><h2>🎯 Recent Attack Plans</h2><table><tr><th>ID</th><th>Attacker</th><th>Target / Land</th><th>Mode</th><th>Status</th><th>Control</th></tr>
+      {% for row in tier7_plans %}<tr><td>#{{row['id']}}</td><td>{{row['attacker_name']}}</td><td>{{row['defender_name']}}<br><span class="muted">{{row['territory_name']}}</span></td><td>{{row['mode']|title}}</td><td class="{{'ok' if row['status']=='resolved' else 'bad' if row['status']=='failed' else ''}}">{{row['status']|title}}</td><td>{% if row['status']=='draft' %}<form method="post" action="{{url_for('tier7_cancel_plan',plan_id=row['id'])}}"><button class="danger">Cancel Draft</button></form>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="6">No attack plans yet.</td></tr>{% endfor %}
+    </table></section>
+
+    <section class="panel"><h2>📜 Tier 7 Battle Audit</h2><table><tr><th>Battle</th><th>Sides</th><th>Objective</th><th>Power</th><th>Winner</th><th>Result</th></tr>
+      {% for row in tier7_reports %}<tr><td>#{{row['battle_id']}}<br><span class="muted">{{row['created_at']|timestamp}}</span></td><td>{{row['attacker_name']}} → {{row['defender_name']}}</td><td>{{row['territory_name']}}<br><span class="muted">{{row['terrain']|title}} · {{row['mode']|title}}</span></td><td>{{row['attacker_score']}} vs {{row['defender_score']}}</td><td>{{row['winner_name']}}</td><td>{{row['land_captured']}} Land · {{row['capital_damage']}} HP · {{row['credits_captured']}} WC</td></tr>{% else %}<tr><td colspan="6">No Tier 7 battles yet.</td></tr>{% endfor %}
+    </table></section>
+
+    <section class="panel"><h2>🧾 Recent Tier 7 Events</h2><table><tr><th>Time</th><th>Event</th><th>User</th><th>Plan</th><th>Safe Detail</th></tr>
+      {% for row in tier7_events %}<tr><td>{{row['created_at']|timestamp}}</td><td>{{row['event_type'].replace('_',' ')|title}}</td><td>{{row['user_id'] or 'System'}}</td><td>{{('#' ~ row['plan_id']) if row['plan_id'] else '—'}}</td><td><code>{{row['detail_json'][:180]}}</code></td></tr>{% else %}<tr><td colspan="5">No Tier 7 events yet.</td></tr>{% endfor %}
+    </table></section></details>"""
     body = """<section class="panel"><h2>Alliance War Control</h2><div class="pad">{% if active %}<p class="bad"><b>War #{{active['id']}} is active.</b></p><form class="fields-grid" method="post" action="{{url_for('end_war_dashboard')}}"><label>Winner (optional)<select name="winner"><option value="">No winner</option>{% for a in alliances %}{% if a['id'] in [active['attacker_alliance_id'],active['defender_alliance_id']] %}<option value="{{a['id']}}">[{{a['tag']}}] {{a['name']}}</option>{% endif %}{% endfor %}</select></label><div class="actions"><button>End War</button></div></form>{% else %}<p class="ok">No active war.</p><form class="fields-grid" method="post" action="{{url_for('start_war_dashboard')}}"><label>Attacker<select name="attacker" required>{% for a in alliances %}<option value="{{a['id']}}">[{{a['tag']}}] {{a['name']}}</option>{% endfor %}</select></label><label>Defender<select name="defender" required>{% for a in alliances %}<option value="{{a['id']}}">[{{a['tag']}}] {{a['name']}}</option>{% endfor %}</select></label><div class="actions"><button>Start War</button></div></form>{% endif %}</div></section><section class="panel"><h2>Alliance Management</h2><table><tr><th>Alliance</th><th>Leader Discord ID</th><th>Save</th></tr>{% for a in alliances %}<tr><form method="post" action="{{url_for('save_alliance',alliance_id=a['id'])}}"><td><div class="inline"><input name="tag" value="{{a['tag']}}" maxlength="5" required><input name="name" value="{{a['name']}}" maxlength="30" required></div></td><td><input name="leader_id" type="number" value="{{a['leader_id']}}" required></td><td><button>Save</button></td></form></tr>{% else %}<tr><td colspan="3">No Alliances. Players can use /alliance_create.</td></tr>{% endfor %}</table></section>"""
     units_panel = """<details class="creator" {% if edit_unit or creating %}open{% endif %}><summary class="btn">＋ Create New War Unit / Tank Model</summary><section class="panel"><h2>{{'Edit' if edit_unit else 'Create'}} War Unit Model</h2><div class="notice">Categories control the menus in <code>/army_recruit</code>. Branch controls whether the unit appears in <code>/army</code>, <code>/navy</code> or <code>/airforce</code>. Multi-emoji names remain visible in text; buttons automatically use a safe single emoji.</div><form class="fields" method="post" action="{{url_for('save_war_unit')}}"><input type="hidden" name="id" value="{{edit_unit['id'] if edit_unit else ''}}"><div class="fields-grid"><label>Internal Code<input name="code" value="{{edit_unit['code'] if edit_unit else ''}}" placeholder="m1a2_abrams" required></label><label>Model Name<input name="name" value="{{edit_unit['name'] if edit_unit else ''}}" placeholder="M1A2 Abrams" required></label><label>Emoji<input name="emoji" value="{{edit_unit['emoji'] if edit_unit else '🪖'}}"></label><label>Recruit Category<select name="category_id">{% for category in categories %}<option value="{{category['id']}}" {% if edit_unit and edit_unit['category_id']==category['id'] %}selected{% endif %}>{{category['emoji']}} {{category['label']}}</option>{% endfor %}</select></label><label>Service Branch<select name="branch">{% for branch in ['land','tank','air','navy','special'] %}<option {% if edit_unit and edit_unit['branch']==branch %}selected{% endif %}>{{branch}}</option>{% endfor %}</select></label><label>Recruit Cost (War Credits)<input type="number" min="0" name="cost" value="{{edit_unit['cost'] if edit_unit else 100}}" required></label><label>Power per Unit<input type="number" min="0" name="power" value="{{edit_unit['power'] if edit_unit else 1}}" required></label><label>Display Order<input type="number" min="0" name="position" value="{{edit_unit['position'] if edit_unit else 10}}"></label><label>Enabled<select name="enabled"><option value="1" {% if not edit_unit or edit_unit['enabled'] %}selected{% endif %}>Yes</option><option value="0" {% if edit_unit and not edit_unit['enabled'] %}selected{% endif %}>No</option></select></label><label>Description<textarea name="description">{{edit_unit['description'] if edit_unit else ''}}</textarea></label></div><div class="actions"><button>Save War Unit</button></div></form></section></details><section class="panel"><h2>War Unit & Tank Model Library</h2><div class="notice">The library below now uses the same saved default sorting as <code>/army_recruit</code>: <b>{{default_recruit_sort.replace('_',' ').title()}}</b>.</div><div class="library">{% for u in units %}<article class="library-card"><h3>{{u['emoji']}} {{u['name']}}</h3><span class="badge">{{u['category_emoji'] or '⚔️'}} {{u['category_label'] or 'Uncategorised'}} · {{u['branch']|upper}}</span><p>{{u['description']}}</p><div class="statline">Code: {{u['code']}}<br>⚔️ Cost: {{u['cost']}} War Credits<br>💥 Power: {{u['power']}} each<br>📊 Cost / Power: {{u['cost_per_power']}}<br>Order: {{u['position']}}<br><span class="{{'ok' if u['enabled'] else 'bad'}}">{{'Enabled' if u['enabled'] else 'Disabled'}}</span></div><div class="actions"><a class="btn" href="{{url_for('war_control',edit_unit=u['id'])}}">Edit Model</a><form method="post" action="{{url_for('toggle_war_unit',unit_id=u['id'])}}"><button class="{{'danger' if u['enabled'] else 'secondary'}}">{{'Disable' if u['enabled'] else 'Enable'}}</button></form></div></article>{% endfor %}</div></section>"""
     units_panel=units_panel.replace('</form></div></article>{% endfor %}', '</form><form method="post" action="{{url_for(\'delete_war_unit\',unit_id=u[\'id\'])}}" onsubmit="return confirm(\'Delete this unit model? Units owned by players will block deletion.\')"><button class="danger">🗑 Delete</button></form></div></article>{% endfor %}')
@@ -2117,7 +2218,7 @@ def war_control():
     body = '<details class="creator"><summary class="btn purple">🤝 Alliance War Control</summary>' + body + '</details>'
     units_panel = '<details class="creator"><summary class="btn purple">🧰 War Unit Models & Library</summary>' + units_panel + '</details>'
     history_panel = '<details class="creator"><summary class="btn purple">📜 Recent Battle History</summary>' + history_panel + '</details>'
-    war_page = '<div class="war-control-page">' + season_panel + territory_panel + service_panel + logistics_panel + body + category_panel + units_panel + history_panel + '''</div><script>(()=>{
+    war_page = '<div class="war-control-page">' + tier7_panel + season_panel + territory_panel + service_panel + logistics_panel + body + category_panel + units_panel + history_panel + '''</div><script>(()=>{
  const sections=[...document.querySelectorAll(".war-control-page > details.creator")],storageKey="xbot-war-open-sections-v1";
  sections.forEach((section,index)=>{if(!section.id)section.id="war-section-"+index});
  let saved=[];try{saved=JSON.parse(localStorage.getItem(storageKey)||"[]")}catch(error){saved=[]}
@@ -2126,7 +2227,112 @@ def war_control():
  sections.forEach(section=>section.addEventListener("toggle",()=>{saveState();if(!section.open&&location.hash==="#"+section.id)history.replaceState(null,"",location.pathname+location.search)}));
  if(location.hash){const target=document.querySelector(location.hash);if(target&&target.matches("details")){target.open=true;saveState();setTimeout(()=>{target.scrollIntoView({block:"start"});history.replaceState(null,"",location.pathname+location.search)},0)}}
 })();</script>'''
-    return admin_page("War Control", war_page, alliances=alliances, active=active, units=unit_types, edit_unit=edit_unit, creating=request.args.get('create_unit'), players=players_list, battles=battles, services=service_totals, categories=enabled_categories, all_categories=category_rows, default_category_id=default_category_id, default_recruit_sort=default_recruit_sort,divisions=divisions,readiness_rows=readiness_rows,war_settings=war_settings,season_active=season_active,season_scores=season_scores,season_history=season_history,season_rules=season_rules,territory_rows=territory_rows,territory_nations=territory_nations,available_regions=available_regions,available_capitals=available_capitals,available_region_countries=available_region_countries,city_rows=city_rows)
+    return admin_page("War Control", war_page, alliances=alliances, active=active, units=unit_types, edit_unit=edit_unit, creating=request.args.get('create_unit'), players=players_list, battles=battles, services=service_totals, categories=enabled_categories, all_categories=category_rows, default_category_id=default_category_id, default_recruit_sort=default_recruit_sort,divisions=divisions,readiness_rows=readiness_rows,war_settings=war_settings,season_active=season_active,season_scores=season_scores,season_history=season_history,season_rules=season_rules,territory_rows=territory_rows,territory_nations=territory_nations,available_regions=available_regions,available_capitals=available_capitals,available_region_countries=available_region_countries,city_rows=city_rows,tier7_settings=tier7_settings,tier7_defaults=tier7.DEFAULTS,tier7_setting_fields=tier7_setting_fields,tier7_health=tier7_health,tier7_profiles=tier7_profiles,tier7_territories=tier7_territories,tier7_plans=tier7_plans,tier7_reports=tier7_reports,tier7_events=tier7_events,tier7_terrains=tier7.TERRAINS)
+
+
+@app.post("/war/tier7/settings")
+@login_required
+def tier7_save_settings():
+    db = get_db()
+    changed = 0
+    try:
+        for key, default in tier7.DEFAULTS.items():
+            if key not in request.form:
+                continue
+            minimum, maximum = tier7.SETTING_LIMITS[key]
+            value = max(minimum, min(maximum, int(request.form.get(key, default))))
+            db.execute(
+                """INSERT INTO economy_settings(key,value) VALUES(?,?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+                (key, str(value)),
+            )
+            changed += 1
+        db.commit()
+        flash(f"Saved {changed} Tier 7 Warfront setting(s).")
+    except (TypeError, ValueError) as error:
+        db.rollback()
+        flash(f"Tier 7 settings were not saved: {error}")
+    db.close()
+    return redirect(url_for("war_control") + "#tier7-control")
+
+
+@app.post("/war/tier7/territory")
+@login_required
+def tier7_save_territory():
+    db = get_db()
+    code = request.form.get("territory_code", "")
+    terrain = request.form.get("terrain", "plains").strip().lower()
+    try:
+        if terrain not in tier7.TERRAINS:
+            raise ValueError("Choose a valid terrain type.")
+        row = db.execute(
+            """SELECT t.territory_name,t.owner_user_id,d.fortification_level
+               FROM map_territories t JOIN tier7_territory_defence d ON d.territory_code=t.territory_code
+               WHERE t.territory_code=?""",
+            (code,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("That mapped Land no longer exists.")
+        maximum = tier7.setting(db, "tier7_fortification_max_level")
+        fortification = max(0, min(maximum, int(request.form.get("fortification_level", 0))))
+        db.execute(
+            """UPDATE tier7_territory_defence SET terrain=?,fortification_level=?,owner_user_id=?,updated_at=?
+               WHERE territory_code=?""",
+            (terrain, fortification, row["owner_user_id"], int(time.time()), code),
+        )
+        db.commit()
+        flash(f"Saved {row['territory_name']}: {terrain.title()}, Fortification Lv {fortification}.")
+    except (TypeError, ValueError) as error:
+        db.rollback()
+        flash(f"Territory defence was not saved: {error}")
+    db.close()
+    return redirect(url_for("war_control") + "#tier7-control")
+
+
+@app.post("/war/tier7/profile")
+@login_required
+def tier7_save_profile():
+    db = get_db()
+    try:
+        user_id = int(request.form.get("user_id", 0))
+        if not db.execute("SELECT 1 FROM players WHERE user_id=?", (user_id,)).fetchone():
+            raise ValueError("That Nation no longer exists.")
+        tier7.save_defence_profile(
+            db, user_id,
+            garrison_percent=int(request.form.get("garrison_percent", 100)),
+            capital_priority=int(request.form.get("capital_priority", 1)),
+            auto_reinforce=int(request.form.get("auto_reinforce", 0)),
+        )
+        flash("Tier 7 defence profile saved.")
+    except (TypeError, ValueError) as error:
+        db.rollback()
+        flash(f"Defence profile was not saved: {error}")
+    db.close()
+    return redirect(url_for("war_control") + "#tier7-control")
+
+
+@app.post("/war/tier7/plan/<int:plan_id>/cancel")
+@login_required
+def tier7_cancel_plan(plan_id):
+    db = get_db()
+    changed = db.execute(
+        "UPDATE tier7_battle_plans SET status='cancelled',error_text='Cancelled from Dashboard' WHERE id=? AND status='draft'",
+        (plan_id,),
+    ).rowcount
+    db.commit()
+    db.close()
+    flash(f"Battle Plan #{plan_id} cancelled." if changed else f"Battle Plan #{plan_id} was already closed.")
+    return redirect(url_for("war_control") + "#tier7-control")
+
+
+@app.post("/war/tier7/repair")
+@login_required
+def tier7_repair_dashboard():
+    db = get_db()
+    message = tier7.repair(db)
+    db.close()
+    flash(message)
+    return redirect(url_for("war_control") + "#tier7-control")
 
 
 @app.get("/war/territories/map-data")

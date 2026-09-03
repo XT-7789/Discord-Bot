@@ -1421,8 +1421,17 @@ def register_commands(bot, db, create_player) -> None:
         body = (f"## {area['emoji']} {area['name']}\nFound **{amount}x {material['emoji']} {material['name']}**\n"
             f"🛠️ {pickaxe['name']} · Power {pickaxe['pickaxe_power']} · Luck {pickaxe['pickaxe_luck']}%\n"
             f"📈 **+{gained_exp} EXP** · Level {new_level}\n⚡ Energy: **{max(0,energy-area['energy_cost'])}/{setting(db,'mining_max_energy')}**\n"
-            f"💰 Sell materials with `/sell_item` when you are ready.{extras}{level_up}")
-        await interaction.response.send_message(view=xbot_ui.panel("⛏️ Mining Expedition Complete", body, colour=discord.Color.dark_gold()))
+            f"💰 Use the buttons below to mine again or sell all mined materials.{extras}{level_up}")
+        result = MiningActionResultView(
+            interaction.user.id,
+            "⛏️ Mining Expedition Complete",
+            body,
+            discord.Color.dark_gold(),
+        )
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=result)
+        else:
+            await interaction.response.send_message(view=result)
 
     @bot.tree.command(name="sell_mined", description="Sell all sellable mining materials from your Backpack")
     async def sell_mined(interaction: discord.Interaction):
@@ -1463,7 +1472,16 @@ def register_commands(bot, db, create_player) -> None:
                 f"{', '.join(sold_lines)}\n\n"
                 f"💰 Received {' + '.join(reward_parts)}\n"
                 "-# Pickaxes, other equipment and non-mining items were not sold.")
-        await interaction.response.send_message(view=xbot_ui.success("⛏️ Mining Materials Sold", body))
+        result = MiningActionResultView(
+            interaction.user.id,
+            "⛏️ Mining Materials Sold",
+            body,
+            discord.Color.green(),
+        )
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=result)
+        else:
+            await interaction.response.send_message(view=result)
 
     class MiningHubButton(discord.ui.Button):
         def __init__(self, action: str, label: str, emoji: str, style: discord.ButtonStyle):
@@ -1471,6 +1489,9 @@ def register_commands(bot, db, create_player) -> None:
             self.action = action
 
         async def callback(self, interaction: discord.Interaction):
+            if self.action == "hub":
+                await interaction.response.edit_message(view=build_mining_hub(interaction.user.id))
+                return
             actions = {
                 "mine": mine.callback,
                 "profile": mining_profile.callback,
@@ -1481,6 +1502,49 @@ def register_commands(bot, db, create_player) -> None:
                 "sell": sell_mined.callback,
             }
             await actions[self.action](interaction)
+
+    class MiningLobbyButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="Lobby", emoji="✨", style=discord.ButtonStyle.secondary)
+
+        async def callback(self, interaction: discord.Interaction):
+            builder = getattr(bot, "xbot_player_lobby_builder", None)
+            if builder is None:
+                await interaction.response.send_message("Lobby is loading. Please try again.", ephemeral=True)
+                return
+            await interaction.response.edit_message(view=builder(interaction.user.id))
+
+    class MiningActionResultView(discord.ui.LayoutView):
+        """Keep a Mining result useful instead of leaving an orphan message."""
+        def __init__(self, owner_id: int, title: str, body: str, colour: discord.Color):
+            super().__init__(timeout=300)
+            self.owner_id = owner_id
+            container = discord.ui.Container(accent_color=colour)
+            container.add_item(discord.ui.TextDisplay(f"## {title}\n{body}"))
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.ActionRow(
+                MiningHubButton("mine", "Mine Again", "⛏️", discord.ButtonStyle.success),
+                MiningHubButton("sell", "Sell Materials", "💰", discord.ButtonStyle.primary),
+                MiningHubButton("hub", "Mining Hub", "🗺️", discord.ButtonStyle.secondary),
+                EconomyCentreButton(owner_id, "Economy"),
+                MiningLobbyButton(),
+            ))
+            container.add_item(discord.ui.TextDisplay("-# Continue mining or return to a main centre without creating another channel message."))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id == self.owner_id:
+                return True
+            await interaction.response.send_message("Open `/mining` for your own Mining Hub.", ephemeral=True)
+            return False
+
+    def build_mining_hub(owner_id: int):
+        energy = refresh_mining_energy(db, owner_id)
+        db.commit()
+        player = db.execute("SELECT * FROM players WHERE user_id=?", (owner_id,)).fetchone()
+        area = db.execute("SELECT * FROM mining_areas WHERE id=? AND enabled=1", (player["mining_area_id"],)).fetchone()
+        pickaxe = db.execute("SELECT * FROM items WHERE id=?", (player["equipped_pickaxe_id"],)).fetchone()
+        return MiningHubView(owner_id, player, area, pickaxe, energy)
 
     class MiningHubView(discord.ui.LayoutView):
         def __init__(self, owner_id: int, player, area, pickaxe, energy: int):
@@ -1520,13 +1584,8 @@ def register_commands(bot, db, create_player) -> None:
     @bot.tree.command(name="mining", description="Open the X BOT interactive Mining Hub")
     async def mining(interaction: discord.Interaction):
         await interaction.response.defer()
-        player = create_player(interaction.user)
-        energy = refresh_mining_energy(db, interaction.user.id)
-        db.commit()
-        player = db.execute("SELECT * FROM players WHERE user_id=?", (interaction.user.id,)).fetchone()
-        area = db.execute("SELECT * FROM mining_areas WHERE id=? AND enabled=1", (player['mining_area_id'],)).fetchone()
-        pickaxe = db.execute("SELECT * FROM items WHERE id=?", (player['equipped_pickaxe_id'],)).fetchone()
-        await interaction.edit_original_response(view=MiningHubView(interaction.user.id, player, area, pickaxe, energy))
+        create_player(interaction.user)
+        await interaction.edit_original_response(view=build_mining_hub(interaction.user.id))
 
     class RecruitQuantityModal(discord.ui.Modal):
         def __init__(self, unit_id: int):

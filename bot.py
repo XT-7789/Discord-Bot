@@ -25,6 +25,7 @@ import tester_feedback
 import tier4
 import tier5
 import tier6
+import tier7
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -131,6 +132,7 @@ tester_feedback.initialise(db)
 tier4.initialise(db)
 tier5.initialise(db)
 tier6.initialise(db)
+tier7.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -1688,6 +1690,12 @@ async def attack(interaction: discord.Interaction, target: discord.Member):
     db.commit()
 
     await interaction.followup.send(view=xbot_ui.panel("⚔️ Battle Report", result, colour=discord.Color.dark_red()))
+
+
+# Tier 7 replaces the legacy /war and /attack registrations above after every
+# dependency and panel builder exists.  It keeps the same two command names,
+# so Discord's command catalogue does not grow.
+tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
 
 
 # Seed server-only Tier 1.6 commands before applying their Council/Admin
