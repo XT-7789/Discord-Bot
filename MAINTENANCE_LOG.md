@@ -1,5 +1,13 @@
 # X BOT Maintenance Log
 
+## 2026-09-03 — Tier 7 target-selection hotfix
+
+- Fixed Nation-war targets disappearing whenever an unrelated Alliance war was active elsewhere on the server.
+- Fixed battle validation so an unrelated Alliance war no longer cancels a valid Nation war.
+- Replaced the unrestricted Discord player picker with an active-enemy Nation menu, so invalid players cannot be selected and then cleared.
+- Added enemy pagination for conflicts containing more than 25 target Nations.
+- Added regression coverage for mixed Alliance/Nation wars and active-enemy menu rendering.
+
 ## 2026-09-03 — Tier 7 Warfront 2.0
 
 ### Player experience
@@ -48,4 +56,4 @@
 - Offline Discord construction and serialization tests cover all five Tier 7 pages, large paginated libraries and command-scope replacement.
 - Temporary-database tests cover previews, exact territory capture, connected Capital protection, balance changes, single/batch fortification, expired-plan repair, bounded reports, duplicate confirmation and two-connection concurrency.
 - Flask test rendering verifies that the full War Dashboard returns HTTP 200 with Tier 7 controls.
-- The final suite contains 15 passing tests across Tier 6 and Tier 7.
+- The final suite contains 16 passing tests across Tier 6 and Tier 7.

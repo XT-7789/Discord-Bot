@@ -87,6 +87,26 @@ class Tier7WarfrontTests(unittest.TestCase):
     def no_alliance_war():
         return None
 
+    def test_unrelated_alliance_war_does_not_hide_nation_war_target(self):
+        unrelated_alliance_war = {
+            "id": 7000,
+            "attacker_alliance_id": 7001,
+            "defender_alliance_id": 7002,
+        }
+
+        def alliance_for(user_id):
+            return {"id": 7003} if user_id == self.attacker else None
+
+        targets = tier7.eligible_targets(
+            self.db, self.attacker, lambda: unrelated_alliance_war, alliance_for,
+        )
+        self.assertEqual([self.defender], [int(row["user_id"]) for row in targets])
+        conflict, error = tier7._conflict_for(
+            self.db, self.attacker, self.defender, lambda: unrelated_alliance_war, alliance_for,
+        )
+        self.assertIsNone(error)
+        self.assertEqual("nation", conflict["kind"])
+
     def test_plan_preview_resolve_and_double_click_are_safe(self):
         plan = tier7.create_plan(self.db, self.attacker, self.defender, "standard")
         self.assertEqual("T7-DEF-LAND", plan["territory_code"])
@@ -310,18 +330,34 @@ class Tier7WarfrontTests(unittest.TestCase):
                 "SELECT * FROM players WHERE user_id=?", (user.id,)
             ).fetchone(), self.no_alliance_war, self.no_alliance,
         )
+        attack_page = fake.xbot_tier7_attack_builder(self.attacker, self.defender)
         pages = (
             fake.xbot_player_panel_builders["war"](self.attacker),
-            fake.xbot_tier7_attack_builder(self.attacker, self.defender),
+            attack_page,
             fake.xbot_tier7_defence_builder(self.attacker),
             fake.xbot_tier7_army_builder(self.attacker),
             fake.xbot_tier7_reports_builder(self.attacker),
         )
         self.assertTrue(all(page.children for page in pages))
+        attack_payload = str(attack_page.to_components())
+        self.assertIn("Choose an active enemy Nation", attack_payload)
+        self.assertIn("Tier 7 Defender", attack_payload)
         self.assertEqual({"war", "attack"}, set(fake.tree.commands))
 
     def test_large_land_and_unit_libraries_have_selectable_pages(self):
         now = int(time.time())
+        extra_enemy_ids = [990000000000000100 + index for index in range(26)]
+        self.db.executemany(
+            """INSERT INTO players
+               (user_id,nation_name,display_name,money,land,capital_health,nation_created_at,last_attack)
+               VALUES(?,?,?,?,?,?,0,0)""",
+            ((user_id, f"ZZ Enemy {index:02d}", f"Enemy {index:02d}", 1000, 1, 100)
+             for index, user_id in enumerate(extra_enemy_ids)),
+        )
+        self.db.executemany(
+            "INSERT INTO nation_wars(attacker_id,defender_id,started_at,ends_at,active) VALUES(?,?,?,?,1)",
+            ((self.attacker, user_id, now, now + 86400) for user_id in extra_enemy_ids),
+        )
         self.db.executemany(
             """INSERT INTO map_territories
                (territory_code,territory_name,owner_user_id,is_capital,acquired_at,level)
@@ -374,6 +410,7 @@ class Tier7WarfrontTests(unittest.TestCase):
         )
         attack_payload = str(fake.xbot_tier7_attack_builder(self.attacker, self.defender).to_components())
         defence_payload = str(fake.xbot_tier7_defence_builder(self.defender).to_components())
+        self.assertIn("Next Enemies", attack_payload)
         self.assertIn("Next Land", attack_payload)
         self.assertIn("Next Units", attack_payload)
         self.assertIn("Next Land", defence_payload)

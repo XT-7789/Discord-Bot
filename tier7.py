@@ -317,17 +317,20 @@ def eligible_targets(db, attacker_id: int, get_active_war, get_alliance_for_user
                 int(row["user_id"])
                 for row in db.execute("SELECT user_id FROM alliance_members WHERE alliance_id=?", (enemy_alliance,)).fetchall()
             )
-    else:
-        # This call also expires old declarations before the list is built.
-        war_tier.active_nation_war(db, attacker_id)
-        target_ids.update(
-            int(row["target_id"])
-            for row in db.execute(
-                """SELECT CASE WHEN attacker_id=? THEN defender_id ELSE attacker_id END target_id
-                   FROM nation_wars WHERE active=1 AND (attacker_id=? OR defender_id=?)""",
-                (attacker_id, attacker_id, attacker_id),
-            ).fetchall()
-        )
+    # Alliance and Nation wars may exist at the same time. The old ``else``
+    # incorrectly hid a player's Nation-war enemies whenever any Alliance war
+    # was active on the server, even when that Alliance war was unrelated.
+    caller_transaction = db.in_transaction
+    war_tier.active_nation_war(db, attacker_id)  # Also expires old declarations.
+    target_ids.update(
+        int(row["target_id"])
+        for row in db.execute(
+            """SELECT CASE WHEN attacker_id=? THEN defender_id ELSE attacker_id END target_id
+               FROM nation_wars WHERE active=1 AND (attacker_id=? OR defender_id=?)""",
+            (attacker_id, attacker_id, attacker_id),
+        ).fetchall()
+    )
+    if not caller_transaction:
         db.commit()
     if not target_ids:
         return []
@@ -515,15 +518,15 @@ def _conflict_for(db, attacker_id: int, defender_id: int, get_active_war, get_al
     alliance_war = get_active_war()
     if alliance_war:
         sides = {int(alliance_war["attacker_alliance_id"]), int(alliance_war["defender_alliance_id"])}
-        valid = (
+        is_alliance_conflict = (
             attacker_alliance and defender_alliance
             and int(attacker_alliance["id"]) in sides
             and int(defender_alliance["id"]) in sides
             and int(attacker_alliance["id"]) != int(defender_alliance["id"])
         )
-        if not valid:
-            return None, "During an Alliance War, only its two sides can attack each other."
-        return {"kind": "alliance", "id": int(alliance_war["id"])}, None
+        if is_alliance_conflict:
+            return {"kind": "alliance", "id": int(alliance_war["id"])}, None
+        # An unrelated Alliance war must not cancel a valid Nation war.
     nation_war = war_tier.active_nation_war(db, attacker_id, defender_id)
     if nation_war is None:
         return None, "Declare war on a bordering Nation from Diplomacy before attacking."
@@ -1343,33 +1346,65 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             ))
             self.add_item(container)
 
-    class TargetNationSelect(discord.ui.UserSelect):
-        def __init__(self, plan_id: int):
-            super().__init__(placeholder="1 · Choose an enemy Nation", min_values=1, max_values=1)
+    class TargetNationSelect(discord.ui.Select):
+        def __init__(
+            self, plan_id: int, rows, selected_id: int | None,
+            target_page=0, territory_page=0, force_page=0,
+        ):
+            if rows:
+                options = []
+                for row in rows:
+                    nation_name = str(row["nation_name"] or _player_label(row))
+                    player_label = _player_label(row)
+                    description = (
+                        f"Player: {player_label}" if player_label != nation_name else "Active enemy Nation"
+                    )
+                    options.append(discord.SelectOption(
+                        label=nation_name[:100], value=str(row["user_id"]),
+                        description=description[:100], emoji="🏳️",
+                        default=selected_id is not None and int(row["user_id"]) == int(selected_id),
+                    ))
+                placeholder = "1 · Choose an active enemy Nation"
+                disabled = False
+            else:
+                options = [discord.SelectOption(
+                    label="No active enemy Nation", value="none",
+                    description="Open Diplomacy and declare war first", emoji="🕊️",
+                )]
+                placeholder = "1 · No active enemy — open Diplomacy"
+                disabled = True
+            super().__init__(
+                placeholder=placeholder, options=options,
+                min_values=1, max_values=1, disabled=disabled,
+            )
             self.plan_id = plan_id
+            self.target_page, self.territory_page, self.force_page = target_page, territory_page, force_page
 
         async def callback(self, interaction: discord.Interaction):
-            target = self.values[0]
-            if target.bot or target.id == interaction.user.id:
-                await interaction.response.send_message("Choose another player's Nation.", ephemeral=True)
-                return
             await interaction.response.defer()
+            target_id = int(self.values[0])
             allowed = {int(row["user_id"]) for row in eligible_targets(
                 db, interaction.user.id, get_active_war, get_alliance_for_user
             )}
-            if target.id not in allowed:
+            if target_id not in allowed:
                 await interaction.edit_original_response(
                     view=AttackPlannerView(
                         interaction.user.id, self.plan_id,
-                        "That Nation is not in an active war with you. Declare war from Diplomacy first.",
+                        "That war is no longer active. Refresh Diplomacy or choose another enemy.",
+                        target_page=self.target_page,
+                        territory_page=self.territory_page, force_page=self.force_page,
                     )
                 )
                 return
-            update_plan_target(db, self.plan_id, target.id)
-            await interaction.edit_original_response(view=AttackPlannerView(interaction.user.id, self.plan_id))
+            update_plan_target(db, self.plan_id, target_id)
+            await interaction.edit_original_response(view=AttackPlannerView(
+                interaction.user.id, self.plan_id,
+                target_page=self.target_page,
+                territory_page=0, force_page=self.force_page,
+            ))
 
     class TerritorySelect(discord.ui.Select):
-        def __init__(self, plan_id: int, rows, selected_code: str | None, territory_page=0, force_page=0):
+        def __init__(self, plan_id: int, rows, selected_code: str | None, territory_page=0, force_page=0, target_page=0):
             options = [discord.SelectOption(
                 label=str(row["territory_name"])[:100],
                 value=str(row["territory_code"]),
@@ -1378,17 +1413,19 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             ) for row in rows]
             super().__init__(placeholder="2 · Choose the Land to attack", options=options, min_values=1, max_values=1)
             self.plan_id, self.territory_page, self.force_page = plan_id, territory_page, force_page
+            self.target_page = target_page
 
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.defer()
             update_plan_territory(db, self.plan_id, self.values[0])
             await interaction.edit_original_response(view=AttackPlannerView(
                 interaction.user.id, self.plan_id,
+                target_page=self.target_page,
                 territory_page=self.territory_page, force_page=self.force_page,
             ))
 
     class ForceSelect(discord.ui.Select):
-        def __init__(self, plan_id: int, units, territory_page=0, force_page=0):
+        def __init__(self, plan_id: int, units, territory_page=0, force_page=0, target_page=0):
             selected = set(_selected_unit_ids(db, plan_id))
             options = [discord.SelectOption(
                 label=f"{row['name']} ×{int(row['quantity']):,}"[:100],
@@ -1401,6 +1438,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 options=options, min_values=0, max_values=len(options),
             )
             self.plan_id, self.territory_page, self.force_page = plan_id, territory_page, force_page
+            self.target_page = target_page
             self.visible_ids = {int(row["id"]) for row in units}
 
         async def callback(self, interaction: discord.Interaction):
@@ -1410,11 +1448,12 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             set_plan_units(db, self.plan_id, sorted((current - self.visible_ids) | selected_here))
             await interaction.edit_original_response(view=AttackPlannerView(
                 interaction.user.id, self.plan_id,
+                target_page=self.target_page,
                 territory_page=self.territory_page, force_page=self.force_page,
             ))
 
     class ModeSelect(discord.ui.Select):
-        def __init__(self, plan_id: int, current: str, territory_page=0, force_page=0):
+        def __init__(self, plan_id: int, current: str, territory_page=0, force_page=0, target_page=0):
             options = []
             for key, (label, _emoji) in MODE_LABELS.items():
                 mode = mode_config(db, key)
@@ -1425,30 +1464,36 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 ))
             super().__init__(placeholder="4 · Choose an attack mode", options=options)
             self.plan_id, self.territory_page, self.force_page = plan_id, territory_page, force_page
+            self.target_page = target_page
 
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.defer()
             update_plan_mode(db, self.plan_id, self.values[0])
             await interaction.edit_original_response(view=AttackPlannerView(
                 interaction.user.id, self.plan_id,
+                target_page=self.target_page,
                 territory_page=self.territory_page, force_page=self.force_page,
             ))
 
     class PlannerPageButton(discord.ui.Button):
         def __init__(
             self, plan_id: int, territory_page: int, force_page: int, *,
+            target_page: int = 0,
             kind: str, new_page: int, label: str, emoji: str, disabled=False,
         ):
             super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.secondary, disabled=disabled)
             self.plan_id, self.territory_page, self.force_page = plan_id, territory_page, force_page
+            self.target_page = target_page
             self.kind, self.new_page = kind, new_page
 
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.defer()
+            target_page = self.new_page if self.kind == "target" else self.target_page
             territory_page = self.new_page if self.kind == "territory" else self.territory_page
             force_page = self.new_page if self.kind == "force" else self.force_page
             await interaction.edit_original_response(view=AttackPlannerView(
                 interaction.user.id, self.plan_id,
+                target_page=target_page,
                 territory_page=territory_page, force_page=force_page,
             ))
 
@@ -1501,9 +1546,10 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         return body
 
     class PreviewButton(discord.ui.Button):
-        def __init__(self, plan_id: int, territory_page=0, force_page=0):
+        def __init__(self, plan_id: int, territory_page=0, force_page=0, target_page=0):
             super().__init__(label="Preview", emoji="📊", style=discord.ButtonStyle.primary)
             self.plan_id, self.territory_page, self.force_page = plan_id, territory_page, force_page
+            self.target_page = target_page
 
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.defer()
@@ -1511,13 +1557,15 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             notice = " · ".join(errors) if errors else "Preview updated. No resources were spent."
             await interaction.edit_original_response(view=AttackPlannerView(
                 interaction.user.id, self.plan_id, notice,
+                target_page=self.target_page,
                 territory_page=self.territory_page, force_page=self.force_page,
             ))
 
     class LaunchButton(discord.ui.Button):
-        def __init__(self, plan_id: int, territory_page=0, force_page=0):
+        def __init__(self, plan_id: int, territory_page=0, force_page=0, target_page=0):
             super().__init__(label="Launch Attack", emoji="🚀", style=discord.ButtonStyle.danger)
             self.plan_id, self.territory_page, self.force_page = plan_id, territory_page, force_page
+            self.target_page = target_page
 
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.defer()
@@ -1527,6 +1575,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             else:
                 view = AttackPlannerView(
                     interaction.user.id, self.plan_id, " · ".join(errors),
+                    target_page=self.target_page,
                     territory_page=self.territory_page, force_page=self.force_page,
                 )
             await interaction.edit_original_response(view=view)
@@ -1552,7 +1601,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
     class AttackPlannerView(OwnedView):
         def __init__(
             self, owner_id: int, plan_id: int, notice: str = "", *,
-            territory_page: int = 0, force_page: int = 0,
+            target_page: int = 0, territory_page: int = 0, force_page: int = 0,
         ):
             super().__init__(owner_id)
             plan = active_plan(plan_id)
@@ -1562,10 +1611,29 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 plan = create_plan(db, owner_id, previous_target, previous_mode)
                 plan_id = int(plan["id"])
                 notice = (notice + " " if notice else "") + "A fresh battle plan was opened safely."
-                territory_page = force_page = 0
+                target_page = territory_page = force_page = 0
             container = discord.ui.Container(accent_color=discord.Color.red())
             container.add_item(discord.ui.TextDisplay(planner_body(plan, notice)))
-            container.add_item(discord.ui.ActionRow(TargetNationSelect(plan_id)))
+            targets = eligible_targets(db, owner_id, get_active_war, get_alliance_for_user)
+            target_pages = max(1, (len(targets) + 24) // 25)
+            target_page = max(0, min(int(target_page), target_pages - 1))
+            target_rows = targets[target_page * 25:(target_page + 1) * 25]
+            container.add_item(discord.ui.ActionRow(TargetNationSelect(
+                plan_id, target_rows, plan["defender_id"], target_page, territory_page, force_page,
+            )))
+            if target_pages > 1:
+                container.add_item(discord.ui.ActionRow(
+                    PlannerPageButton(
+                        plan_id, territory_page, force_page, target_page=target_page, kind="target",
+                        new_page=target_page - 1, label=f"Enemies {target_page + 1}/{target_pages}",
+                        emoji="◀️", disabled=target_page <= 0,
+                    ),
+                    PlannerPageButton(
+                        plan_id, territory_page, force_page, target_page=target_page, kind="target",
+                        new_page=target_page + 1, label="Next Enemies", emoji="▶️",
+                        disabled=target_page >= target_pages - 1,
+                    ),
+                ))
             territories = []
             if plan["defender_id"]:
                 territories = attackable_territories(db, owner_id, int(plan["defender_id"]))
@@ -1574,17 +1642,19 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                     territory_page = max(0, min(int(territory_page), territory_pages - 1))
                     territory_rows = territories[territory_page * 25:(territory_page + 1) * 25]
                     container.add_item(discord.ui.ActionRow(TerritorySelect(
-                        plan_id, territory_rows, plan["territory_code"], territory_page, force_page,
+                        plan_id, territory_rows, plan["territory_code"], territory_page, force_page, target_page,
                     )))
                     if territory_pages > 1:
                         container.add_item(discord.ui.ActionRow(
                             PlannerPageButton(
                                 plan_id, territory_page, force_page, kind="territory",
+                                target_page=target_page,
                                 new_page=territory_page - 1, label=f"Land {territory_page + 1}/{territory_pages}",
                                 emoji="◀️", disabled=territory_page <= 0,
                             ),
                             PlannerPageButton(
                                 plan_id, territory_page, force_page, kind="territory",
+                                target_page=target_page,
                                 new_page=territory_page + 1, label="Next Land", emoji="▶️",
                                 disabled=territory_page >= territory_pages - 1,
                             ),
@@ -1595,27 +1665,29 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 force_page = max(0, min(int(force_page), force_pages - 1))
                 force_rows = positive_units[force_page * 25:(force_page + 1) * 25]
                 container.add_item(discord.ui.ActionRow(ForceSelect(
-                    plan_id, force_rows, territory_page, force_page,
+                    plan_id, force_rows, territory_page, force_page, target_page,
                 )))
                 if force_pages > 1:
                     container.add_item(discord.ui.ActionRow(
                         PlannerPageButton(
                             plan_id, territory_page, force_page, kind="force",
+                            target_page=target_page,
                             new_page=force_page - 1, label=f"Units {force_page + 1}/{force_pages}",
                             emoji="◀️", disabled=force_page <= 0,
                         ),
                         PlannerPageButton(
                             plan_id, territory_page, force_page, kind="force",
+                            target_page=target_page,
                             new_page=force_page + 1, label="Next Units", emoji="▶️",
                             disabled=force_page >= force_pages - 1,
                         ),
                     ))
             container.add_item(discord.ui.ActionRow(ModeSelect(
-                plan_id, plan["mode"], territory_page, force_page,
+                plan_id, plan["mode"], territory_page, force_page, target_page,
             )))
             container.add_item(discord.ui.ActionRow(
-                PreviewButton(plan_id, territory_page, force_page),
-                LaunchButton(plan_id, territory_page, force_page), QuickAttackButton(), WarCentreButton()
+                PreviewButton(plan_id, territory_page, force_page, target_page),
+                LaunchButton(plan_id, territory_page, force_page, target_page), QuickAttackButton(), WarCentreButton()
             ))
             self.add_item(container)
 
