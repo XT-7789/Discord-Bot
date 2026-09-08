@@ -1,5 +1,14 @@
 # X BOT Maintenance Log
 
+## 2026-09-08 — Economy and Casino usability
+
+- Promoted Economy and Casino in the Easy Lobby; War remains accessible through All Activities.
+- Existing single-round Casino results now show stake, total return, net result and remaining wallet, with same-stake replay, Change Bet, Casino and Lobby controls. Item-funded rounds identify the consumed item value.
+- Blackjack completed hands show net result/wallet and the same navigation; in-progress hands retain their original controls.
+- Game forms default to the configured minimum and show per-game bet limits. Fixed modal game identity so game-specific limits and cooldowns apply.
+- Panel-launched single-round games and Blackjack replace the current message. Casino return buttons reject other players.
+- No new games, payout changes, automatic betting or real-money features. 26 offline tests pass, including modal betting, loss settlement, replay cooldown, unauthorized navigation and Blackjack push settlement.
+
 ## 2026-09-08 — Clearer goals and direct mining
 
 - Replaced generic Continue labels with destination-specific actions; mining goals execute one existing mining action directly from the Lobby.

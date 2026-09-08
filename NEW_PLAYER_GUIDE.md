@@ -2,6 +2,8 @@
 
 X BOT is designed around panels. You only need a few short slash commands; most actions are buttons and menus inside the same Discord message.
 
+The Lobby highlights **Earn & Sell** and **Casino**. Casino is optional entertainment using fictional XC, not guaranteed income. Choose an existing game, read the bet range and submit one bet. Completed rounds show total returned separately from net profit/loss and your wallet. **Play Again** uses the displayed stake once; **Change Bet**, **Back to Casino** and **Lobby** let you change course. Normal cooldowns still apply. War is available in **All Activities**.
+
 ## 1. Start here
 
 1. Use `/lobby`. The Easy Lobby shows one recommended next step.

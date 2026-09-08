@@ -176,6 +176,50 @@ class ResearchTests(unittest.TestCase):
                     self.assertIn('Mining is recovering',str(i.response.edit_message.call_args.kwargs['view'].to_components()))
                     self.assertEqual(mined,module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
                     i.response.send_message.assert_not_called()
+                    # Casino modal uses per-game limits, settles in-place and retains navigation.
+                    import casino
+                    module.db.execute("UPDATE casino_game_settings SET min_bet=25,max_bet=100,cooldown_seconds=45 WHERE game='dice'")
+                    module.db.commit()
+                    hub=bot.xbot_player_panel_builders['casino'](self.uid)
+                    select=next(x for x in hub.walk_children() if isinstance(x,discord.ui.Select))
+                    select._values=['dice']
+                    i.id=998877
+                    i.guild=None
+                    i.command=None
+                    i.response.send_modal=AsyncMock()
+                    await select.callback(i)
+                    modal=i.response.send_modal.call_args.args[0]
+                    self.assertEqual('25',modal.primary.default)
+                    self.assertIn('100',modal.primary.label)
+                    modal.primary._value='25'
+                    modal.detail._value='1'
+                    before=self.balance()
+                    with patch.object(casino.random,'randint',return_value=2):
+                        await modal.on_submit(i)
+                    self.assertEqual(before-25,self.balance())
+                    result=i.response.edit_message.call_args.kwargs['view']
+                    rendered=str(result.to_components())
+                    for expected in ('Net result: **-25 XC**','Change Bet','Back to Casino','Lobby'):
+                        self.assertIn(expected,rendered)
+                    replay=next(x for x in result.walk_children() if getattr(x,'label','').startswith('Play Again'))
+                    await replay.callback(i)
+                    self.assertEqual(before-25,self.balance())
+                    self.assertNotIn(i.id,casino._replay_game_names)
+                    back=next(x for x in result.walk_children() if getattr(x,'label',None)=='Back to Casino')
+                    outsider=SimpleNamespace(user=SimpleNamespace(id=123),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+                    await back.callback(outsider)
+                    outsider.response.edit_message.assert_not_called()
+                    outsider.response.send_message.assert_awaited_once()
+                    blackjack=bot.tree.get_command('blackjack')
+                    i.command=blackjack
+                    before=self.balance()
+                    with patch.object(casino,'card',return_value=('10',10,'♠️')):
+                        await blackjack.callback(i,25)
+                        hand=i.response.edit_message.call_args.kwargs['view']
+                        await hand.play_action(i,'stand')
+                    self.assertEqual(before,self.balance())
+                    self.assertIn('Net result: **+0 XC**',str(hand.to_components()))
+                    self.assertIn('Change Bet',str(hand.to_components()))
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()

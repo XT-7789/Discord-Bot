@@ -382,8 +382,8 @@ def register_commands(bot,db,create_player):
                 c.add_item(row)
                 if not ready:
                     c.add_item(discord.ui.TextDisplay(f"-# Next daily reward <t:{int(player['last_daily'])+cooldown}:R>. Mining and Cities are still available."))
-            c.add_item(discord.ui.ActionRow(Go('💰 Earn & Sell','economy'),Go('🏙️ Build / Upgrade','city'),Go('🎯 Missions','missions')))
-            c.add_item(discord.ui.ActionRow(Go('All Activities','all'),Go('⚔️ War','war'),ModeButton(False)))
+            c.add_item(discord.ui.ActionRow(Go('💰 Earn & Sell','economy',discord.ButtonStyle.primary),Go('🎰 Casino','casino',discord.ButtonStyle.primary),Go('🎯 Missions','missions')))
+            c.add_item(discord.ui.ActionRow(Go('🏙️ Cities','city'),Go('All Activities','all'),ModeButton(False)))
             self.add_item(c)
 
     class ModeButton(discord.ui.Button):
