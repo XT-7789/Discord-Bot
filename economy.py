@@ -3,6 +3,7 @@ import random
 import os
 import sqlite3
 import time
+import tier8
 import unicodedata
 from pathlib import Path
 
@@ -1402,6 +1403,8 @@ def register_commands(bot, db, create_player) -> None:
         material = random.choices(drops, weights=weights, k=1)[0]
         amount = random.randint(material["min_yield"], material["max_yield"])
         amount += amount * pickaxe["pickaxe_yield_bonus"] // 100
+        research_yield = amount * tier8.bonus(db, interaction.user.id, 'mining')
+        amount += research_yield // 100 + int(random.randrange(100) < research_yield % 100)
         lucky_extra = random.randint(1,100) <= pickaxe["pickaxe_luck"]
         if lucky_extra: amount += 1
         gained_exp = random.randint(area["exp_min"], area["exp_max"]) + max(0,pickaxe["pickaxe_power"]-1)*2

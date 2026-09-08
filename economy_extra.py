@@ -155,7 +155,8 @@ def register_commands(bot, db, create_player, find_item):
                 await interaction.response.edit_message(view=economy_home_view(self.owner_id))
                 return
             if self.action == "lobby":
-                await interaction.response.edit_message(view=XBotLobbyView(self.owner_id))
+                await interaction.response.defer()
+                await interaction.edit_original_response(view=bot.xbot_player_lobby_builder(self.owner_id))
                 return
             if self.action == "more":
                 await interaction.response.edit_message(view=EconomyMoreView(self.owner_id))
@@ -575,6 +576,7 @@ def register_commands(bot, db, create_player, find_item):
     bot.xbot_player_panel_builders["economy"] = lambda owner_id: EconomyCentreView(owner_id)
     bot.xbot_player_panel_builders["market"] = lambda owner_id: MarketView(owner_id)
     bot.xbot_player_lobby_builder = lambda owner_id: XBotLobbyView(owner_id)
+    bot.xbot_daily_button_builder = lambda owner_id: EconomyPanelButton(owner_id, 'daily', 'Claim Daily', '🎁', discord.ButtonStyle.success)
 
     @bot.tree.command(name="market", description="Open the X BOT player marketplace")
     async def market(interaction: discord.Interaction):

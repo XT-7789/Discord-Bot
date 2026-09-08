@@ -4,10 +4,20 @@ X BOT is designed around panels. You only need a few short slash commands; most 
 
 ## 1. Start here
 
-1. Use `/lobby` to open the main centre.
-2. Claim `/daily` for 50 XC.
-3. Open `/economy` to see your Wallet, Bank, Backpack, Mining, Market, Stock Market, Contracts and Production.
-4. Open `/war` to see your Nation, Cities, Armed Forces, Diplomacy and Warfront.
+1. Use `/lobby`. The Easy Lobby shows one recommended next step.
+2. Press **Claim Daily** for 50 XC, then **Mine** and sell your materials.
+3. Press **Cities** when you are ready to grow. Build and upgrade several Cities together using their selection menus.
+4. Use **How to Play** whenever you need help. **All Activities** opens every main centre; **Detailed Lobby** restores the expanded home screen.
+
+You do not need to learn War first. Start with earning and Cities, then explore at your own pace.
+
+### Research made simple
+
+Open `/research` or press **Research** in the Lobby. Choose Economy, Industry or Military, then select one or both projects. Review the total XC cost and press **Confirm & Start** once.
+
+Level 1 normally costs **50 XC** and takes **5 minutes**. Later levels cost and take longer. Projects run one after another, and their benefits activate automatically: there is no claim button to remember. The Queue page shows finish times and lets you cancel unfinished work for its original XC refund.
+
+Begin with **Mining Methods** if you mine often, or **Construction Planning** if you build Cities. Research is optional; keep enough XC for the activities you enjoy.
 
 Every major result has a button back to its centre or the Lobby. Pressing a button edits the current panel whenever possible, so the channel is not filled with bot messages.
 

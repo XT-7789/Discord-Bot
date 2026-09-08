@@ -28,6 +28,7 @@ import tier4
 import tier5
 import tier6
 import tier7
+import tier8
 
 load_dotenv()
 DATABASE_PATH = Path(__file__).resolve().parent / "xwar.db"
@@ -108,6 +109,7 @@ with get_db() as startup_db:
     tier5.initialise(startup_db)
     tier6.initialise(startup_db)
     tier7.initialise(startup_db)
+    tier8.initialise(startup_db)
     startup_db.execute("""CREATE TABLE IF NOT EXISTS dashboard_role_access(
         role_id TEXT PRIMARY KEY, access_level TEXT NOT NULL,
         label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
@@ -156,6 +158,7 @@ with get_db() as startup_db:
     startup_db.execute("UPDATE dashboard_role_access SET access_level='admin',label='Moderator',enabled=1 WHERE role_id='1523954152701431848'")
     startup_db.commit()
 
+startup_db.close()
 
 def login_required(function):
     @wraps(function)
@@ -935,6 +938,7 @@ def delete_player_data(user_id):
         ("tier6_stock_holdings", "user_id"), ("tier6_stock_trades", "user_id"),
         ("tier6_contract_claims", "user_id"), ("tier6_production_queue", "user_id"),
         ("tier7_defence_profiles", "user_id"), ("tier7_territory_defence", "owner_user_id"),
+        ("tier8_research_jobs", "user_id"), ("tier8_levels", "user_id"), ("tier8_preferences", "user_id"),
     )
     for table, column in one_user_tables:
         db.execute(f"DELETE FROM {table} WHERE {column}=?", (user_id,))
@@ -3092,6 +3096,65 @@ def dashboard_access():
     new_code = session.pop("new_dashboard_access_code", None)
     body = """<section class="panel"><h2>🔐 Dashboard Role Access</h2><div class="notice">Administrators and Moderators have full Dashboard control. Discord login stays signed in for up to 90 days unless they log out or clear browser data. For a trusted Moderator who prefers not to use Discord OAuth, create one personal access code below.</div><form class="fields" method="post"><input type="hidden" name="action" value="save"><div class="fields-grid"><label>Discord Role<select name="role_id" required><option value="">Choose a role…</option>{% for role in server_roles %}<option value="{{role['id']}}">@{{role['name']}}</option>{% endfor %}</select></label><label>Display Label<input name="label" placeholder="Moderator"></label><label>Access Level<select name="access_level"><option value="admin">Administrator / Moderator — full control</option><option value="economy_manager">Economy Manager — economy pages</option><option value="viewer">Viewer — Overview only</option></select></label></div><button>Save Role Access</button></form></section><section class="panel"><h2>🔑 Moderator Personal Access Codes</h2><div class="notice">Each code is for one trusted person. They can sign in from the Dashboard login page without Discord. Never share a code in public chat; revoke or delete it immediately if it is shared.</div>{% if new_code %}<div class="notice good"><b>Copy this code now:</b><br><code style="font-size:18px;letter-spacing:1px">{{new_code}}</code></div>{% endif %}<form class="fields" method="post"><input type="hidden" name="action" value="code_create"><div class="fields-grid"><label>Moderator name / label<input name="code_label" placeholder="McRoy" required></label><label>Valid days<input type="number" min="0" max="365" name="code_days" value="90"><small>Use 0 for no expiry.</small></label></div><button class="purple">Create Personal Access Code</button></form>{% if code_rows %}<div class="top-actions"><form method="post"><input type="hidden" name="action" value="code_clear_revoked"><button class="secondary">Clear Revoked Results</button></form></div>{% endif %}<div class="library">{% for c in code_rows %}<article class="library-card"><h3>🔑 {{c['label']}}</h3><div class="statline"><span class="{{'ok' if c['enabled'] else 'muted'}}">{{'● Active' if c['enabled'] else '○ Revoked'}}</span> · Full Dashboard access<br><span class="muted">Created:</span> {{c['created_text']}}<br><span class="muted">Last used:</span> {{c['last_used_text']}}<br><span class="muted">Expires:</span> {{c['expiry_text']}}</div><form method="post"><input type="hidden" name="action" value="{{'code_revoke' if c['enabled'] else 'code_delete'}}"><input type="hidden" name="code_id" value="{{c['id']}}"><button class="{{'danger' if c['enabled'] else 'secondary'}}">{{'Revoke Code' if c['enabled'] else 'Delete Result'}}</button></form></article>{% endfor %}</div></section><section class="panel"><h2>Authorized Discord Roles</h2><div class="library">{% for r in rows %}<article class="library-card"><h3>@{{r['role_name']}}</h3><div class="statline">Label: {{r['label'] or r['role_name']}}<br>Access: <b>{{r['access_level']}}</b></div><form method="post"><input type="hidden" name="action" value="delete"><input type="hidden" name="role_id" value="{{r['role_id']}}"><button class="danger">Remove Access</button></form></article>{% endfor %}</div></section>"""
     return admin_page("Dashboard Access", body, rows=rows, code_rows=code_rows, new_code=new_code)
+
+
+HEADER = HEADER.replace('Tier 7 ·', 'Tier 8 ·').replace('</nav>', '<a href="{{url_for(\'research_control\')}}">Research · T8</a></nav>')
+
+
+@app.route('/research', methods=['GET','POST'])
+@login_required
+def research_control():
+    if session.get('dashboard_role') not in {'owner','admin','council'}:
+        abort(403)
+    db = get_db()
+    try:
+        if request.method == 'POST':
+            if not hmac.compare_digest(str(session.get('research_csrf','')), request.form.get('csrf','')) or not session.get('research_csrf'):
+                abort(403)
+            try:
+                if request.form.get('action') == 'settings':
+                    switch = int(request.form['enabled'])
+                    limit = int(request.form['queue_limit'])
+                    if switch not in (0,1) or not 1 <= limit <= 6:
+                        raise ValueError('Invalid research settings.')
+                    db.executemany('UPDATE economy_settings SET value=? WHERE key=?',[(str(switch),'tier8_enabled'),(str(limit),'tier8_queue_limit')])
+                else:
+                    code = request.form['code']
+                    spec = next((t for t in tier8.TECHS if t[0] == code), None)
+                    if spec is None:
+                        raise ValueError('Unknown research project.')
+                    values = {key:int(request.form[key]) for key in ('max_level','base_cost','seconds','bonus_per_level','bonus_cap','enabled')}
+                    limits = {'max_level':(1,10),'base_cost':(0,1000000),'seconds':(0,86400),
+                              'bonus_per_level':(0,spec[5]),'bonus_cap':(0,spec[5]),'enabled':(0,1)}
+                    if any(not limits[k][0] <= v <= limits[k][1] for k,v in values.items()):
+                        raise ValueError('A value is outside the allowed range.')
+                    db.execute('''UPDATE tier8_technologies SET max_level=?,base_cost=?,seconds=?,
+                        bonus_per_level=?,bonus_cap=?,enabled=? WHERE code=?''', (*values.values(),code))
+                db.commit()
+                flash('Research settings saved. Existing queue costs and finish times are preserved.')
+            except (ValueError,KeyError) as e:
+                db.rollback()
+                flash(str(e))
+            return redirect(url_for('research_control'))
+        session.setdefault('research_csrf', secrets.token_urlsafe(24))
+        rows = db.execute('SELECT * FROM tier8_technologies ORDER BY branch,code').fetchall()
+        jobs = db.execute('''SELECT j.*,p.nation_name,t.name FROM tier8_research_jobs j
+            LEFT JOIN players p ON p.user_id=j.user_id JOIN tier8_technologies t ON t.code=j.code
+            ORDER BY j.id DESC LIMIT 100''').fetchall()
+        settings = {r['key']:r['value'] for r in db.execute("SELECT * FROM economy_settings WHERE key IN ('tier8_enabled','tier8_queue_limit')")}
+        body = '''<section class="panel"><h2>Research · T8</h2><p>Benefits activate automatically. Queue prices and finish times are saved when confirmed. Costs and durations below are per level: level 2 costs twice the base.</p>
+        <form method="post" class="fields"><input type="hidden" name="csrf" value="{{session.research_csrf}}"><input type="hidden" name="action" value="settings">
+        <label>Research and benefits enabled (0/1)<input name="enabled" type="number" min="0" max="1" value="{{settings.tier8_enabled}}" required></label>
+        <label>Queue limit<input name="queue_limit" type="number" min="1" max="6" value="{{settings.tier8_queue_limit}}" required></label><button>Save settings</button></form></section>
+        <section class="panel"><h2>Technology balance</h2><div class="library">{% for r in rows %}<article class="library-card"><h3>{{r.name}}</h3><p>{{r.description}}</p>
+        <form method="post" class="fields"><input type="hidden" name="csrf" value="{{session.research_csrf}}"><input type="hidden" name="code" value="{{r.code}}">
+        {% for key,label in [('max_level','Maximum level'),('base_cost','Base XC cost'),('seconds','Base duration (seconds)'),('bonus_per_level','Bonus per level (%)'),('bonus_cap','Maximum benefit (%)'),('enabled','Enabled (0/1)')] %}
+        <label>{{label}}<input type="number" name="{{key}}" min="0" value="{{r[key]}}" required></label>{% endfor %}<button>Save technology</button></form></article>{% endfor %}</div></section>
+        <section class="panel"><h2>Recent research orders</h2><table><tr><th>Nation</th><th>Research</th><th>Paid XC</th><th>Status</th><th>Ready</th></tr>
+        {% for j in jobs %}<tr><td>{{j.nation_name}}</td><td>{{j.name}} · Lv {{j.level}}</td><td>{{j.paid}}</td><td>{{'active benefit' if j.status == 'queued' and j.ready_at <= now else j.status}}</td><td>{{j.ready_at|timestamp}}</td></tr>{% endfor %}</table></section>'''
+        return admin_page('Tier 8 Research', body, rows=rows, jobs=jobs, settings=settings, now=int(time.time()))
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,19 @@
 # X BOT Maintenance Log
 
+## 2026-09-07 — Tier 8 Research and Easier Play
+
+- Added a compact default Lobby with a guided next action, How to Play, direct Daily/Mining buttons and saved Easy/Detailed preference.
+- Added `/research` with six technologies across Economy, Industry and Military, plus a research queue page.
+- Added multi-project selection and one cost confirmation, serial scheduling, automatic completed benefits and confirmed cancellation with original-cost refunds.
+- Integrated technology benefits into mining yield, stock fees, production duration, single/bulk City build and upgrade costs, attack Supply and territory defence.
+- Added Research navigation from Economy and Lobby, and updated Economy's Lobby return to respect the saved home-screen preference.
+- Added authenticated Dashboard controls with validated ranges, request tokens, recent order history and player deletion cleanup.
+- Closed the Dashboard startup database connection after migrations to avoid leaving it open.
+- Research transactions and order tokens prevent duplicate spending across repeat callbacks and independent database connections.
+- Updated the new-player tutorial. Daily reward remains 50 XC.
+- Verification uses disposable databases and offline Discord components; it does not log the PC Bot into Discord.
+- Release verification: 24 tests across T6/T7/T8, including the real Bot command catalogue and the Research Dashboard.
+
 ## 2026-09-03 — Tier 7 target-selection hotfix
 
 - Fixed Nation-war targets disappearing whenever an unrelated Alliance war was active elsewhere on the server.

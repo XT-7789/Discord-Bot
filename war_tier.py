@@ -2,6 +2,7 @@
 import json
 import os
 import time
+import tier8
 import random
 import sqlite3
 import io
@@ -1860,6 +1861,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         if built >= int(territory["level"]):
             return f"❌ **{territory['territory_name']}** has no free City slot. Upgrade its Land level first."
         cost = setting(db, f"city_{city_type}_build_cost")
+        cost = tier8.discounted(db, user.id, 'construction', cost)
         if int(player["money"]) < cost:
             return f"❌ Building this City costs **{cost:,} War Credits**; you have **{player['money']:,}**."
         try:
@@ -1899,6 +1901,8 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             return None, f"Your Nation only has **{len(slots)}** free City slot(s). Upgrade Land or build fewer Cities."
         civilian_cost = setting(db, "city_civilian_build_cost")
         industrial_cost = setting(db, "city_industrial_build_cost")
+        civilian_cost = tier8.discounted(db, user_id, 'construction', civilian_cost)
+        industrial_cost = tier8.discounted(db, user_id, 'construction', industrial_cost)
         total_cost = civilian_count * civilian_cost + industrial_count * industrial_cost
         player = db.execute("SELECT money FROM players WHERE user_id=?", (user_id,)).fetchone()
         if not player or int(player["money"]) < total_cost:
@@ -1941,7 +1945,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         if not rows:
             return None, "Choose at least one City below Level 10."
         base_cost = setting(db, "city_upgrade_base_cost")
-        total_cost = sum(base_cost * int(row["level"]) for row in rows)
+        total_cost = sum(tier8.discounted(db, user_id, 'construction', base_cost * int(row["level"])) for row in rows)
         player = db.execute("SELECT money FROM players WHERE user_id=?", (user_id,)).fetchone()
         if not player or int(player["money"]) < total_cost:
             balance = int(player["money"]) if player else 0
@@ -2165,7 +2169,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             options = [discord.SelectOption(
                 label=row["name"][:100],
                 value=str(row["id"]),
-                description=f"Level {row['level']} → {int(row['level']) + 1} · {base_cost * int(row['level']):,} WC",
+                description=f"Level {row['level']} → {int(row['level']) + 1} · {tier8.discounted(db, owner_id, 'construction', base_cost * int(row['level'])):,} WC",
                 emoji="🏙️" if row["city_type"] == "civilian" else "🏭",
             ) for row in rows[:25]]
             super().__init__(
@@ -2306,8 +2310,8 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             container = discord.ui.Container(accent_color=discord.Color.teal())
             container.add_item(discord.ui.TextDisplay(
                 "## 🏗️ Build Cities\nChoose whether to build one City or several Cities at once.\n\n"
-                f"🏙️ Civilian: **{setting(db, 'city_civilian_build_cost'):,} War Credits** · more credits\n"
-                f"🏭 Industrial: **{setting(db, 'city_industrial_build_cost'):,} War Credits** · more supply"
+                f"🏙️ Civilian: **{tier8.discounted(db, owner_id, 'construction', setting(db, 'city_civilian_build_cost')):,} War Credits** · more credits\n"
+                f"🏭 Industrial: **{tier8.discounted(db, owner_id, 'construction', setting(db, 'city_industrial_build_cost')):,} War Credits** · more supply"
             ))
             container.add_item(discord.ui.ActionRow(
                 CityBuildTypeButton(owner_id, "civilian"),
@@ -2338,7 +2342,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
     class CityUpgradeSelect(discord.ui.Select):
         def __init__(self, owner_id: int):
             rows = db.execute("SELECT id,name,level,city_type FROM player_cities WHERE user_id=? ORDER BY level,name LIMIT 25", (owner_id,)).fetchall()
-            options = [discord.SelectOption(label=row['name'][:100], value=str(row['id']), description=f"{row['city_type'].title()} · Level {row['level']} · Upgrade {setting(db, 'city_upgrade_base_cost') * int(row['level']):,} WC") for row in rows]
+            options = [discord.SelectOption(label=row['name'][:100], value=str(row['id']), description=f"{row['city_type'].title()} · Level {row['level']} · Upgrade {tier8.discounted(db, owner_id, 'construction', setting(db, 'city_upgrade_base_cost') * int(row['level'])):,} WC") for row in rows]
             super().__init__(placeholder="Choose a City to upgrade", options=options, disabled=not options)
             self.owner_id = owner_id
 
@@ -2374,6 +2378,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 await interaction.response.send_message("✅ This City is already the maximum Level 10.", ephemeral=True)
                 return
             cost = setting(db, "city_upgrade_base_cost") * int(city["level"])
+            cost = tier8.discounted(db, self.owner_id, 'construction', cost)
             if int(player["money"]) < cost:
                 await interaction.response.send_message(view=xbot_ui.danger("💰 Not Enough War Credits", f"You need **{cost:,} War Credits** for this upgrade."), ephemeral=True)
                 return
@@ -2391,6 +2396,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             super().__init__(timeout=180); self.owner_id = owner_id
             next_level = int(row['level']) + 1
             cost = setting(db, 'city_upgrade_base_cost') * int(row['level'])
+            cost = tier8.discounted(db, owner_id, 'construction', cost)
             if row['city_type'] == 'industrial':
                 production = f"📦 Next 12-hour gain: **+{setting(db, 'city_industrial_supply'):,} Supply** + **+{setting(db, 'city_industrial_war_credits'):,} War Credits**"
             else:
@@ -2576,7 +2582,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 city_lines += [
                     f"{'🏙️' if row['city_type']=='civilian' else '🏭'} **{row['name']}** · Lv {row['level']}"
                     f" · 📍 {city_locations.get(row['id'], 'Unmapped location')}"
-                    f" · Next upgrade **{base_upgrade * int(row['level']):,} WC**"
+                    f" · Next upgrade **{tier8.discounted(db, user_id, 'construction', base_upgrade * int(row['level'])):,} WC**"
                     for row in cities
                 ]
                 collect_text = "✅ **Ready to collect now**" if remaining == 0 else f"⏳ Ready <t:{int(time.time()) + remaining}:R>"
@@ -2646,6 +2652,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 f"**{territory['territory_name']}** is Land Level **{territory['level']}** and has "
                 f"**{built}/{territory['level']}** City slots. Use /land_upgrade first."), ephemeral=True); return
         cost = setting(db, f"city_{city_type.value}_build_cost")
+        cost = tier8.discounted(db, interaction.user.id, 'construction', cost)
         if player["money"] < cost:
             await interaction.response.send_message(view=xbot_ui.danger("💰 Not Enough War Credits", f"Building a {city_type.name} costs **{cost:,} War Credits**. You have **{player['money']:,}**."), ephemeral=True); return
         try:
@@ -2741,6 +2748,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         if row["level"] >= 10:
             await interaction.response.send_message("✅ This city is already the maximum Level 10.", ephemeral=True); return
         cost = setting(db, "city_upgrade_base_cost") * int(row["level"])
+        cost = tier8.discounted(db, interaction.user.id, 'construction', cost)
         if player["money"] < cost:
             await interaction.response.send_message(view=xbot_ui.danger("💰 Not Enough War Credits", f"Upgrading **{row['name']}** to Level {row['level'] + 1} costs **{cost:,} War Credits**."), ephemeral=True); return
         db.execute("UPDATE player_cities SET level=level+1 WHERE id=?", (row["id"],))

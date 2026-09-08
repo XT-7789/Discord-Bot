@@ -26,6 +26,7 @@ import tier4
 import tier5
 import tier6
 import tier7
+import tier8
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -133,6 +134,7 @@ tier4.initialise(db)
 tier5.initialise(db)
 tier6.initialise(db)
 tier7.initialise(db)
+tier8.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -270,7 +272,7 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 PUBLIC_PLAYER_COMMANDS = {
     # Main panels: short, memorable direct access for ordinary players.
     "lobby", "economy", "shop", "backpack", "market", "mining", "stock",
-    "war", "city", "army", "recruit", "diplomacy", "casino", "craft",
+    "war", "city", "army", "recruit", "diplomacy", "casino", "craft", "research",
     # Fast actions that are still useful without opening a panel first.
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
     "declare_war", "attack", "balance", "code_redeem", "daily",
@@ -1696,6 +1698,7 @@ async def attack(interaction: discord.Interaction, target: discord.Member):
 # dependency and panel builder exists.  It keeps the same two command names,
 # so Discord's command catalogue does not grow.
 tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
+tier8.register_commands(bot, db, create_player)
 
 
 # Seed server-only Tier 1.6 commands before applying their Council/Admin

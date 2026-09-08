@@ -15,6 +15,7 @@ import random
 import secrets
 import sqlite3
 import time
+import tier8
 from typing import Optional
 
 import discord
@@ -117,7 +118,7 @@ def setting(db, key: str) -> int:
         return int(DEFAULTS[key])
 
 
-def mode_config(db, mode: str) -> dict:
+def mode_config(db, mode: str, user_id=None) -> dict:
     mode = mode if mode in MODE_LABELS else "standard"
     label, emoji = MODE_LABELS[mode]
     return {
@@ -126,7 +127,7 @@ def mode_config(db, mode: str) -> dict:
         "emoji": emoji,
         "force_percent": setting(db, f"tier7_{mode}_force_percent"),
         "attack_bonus": setting(db, f"tier7_{mode}_attack_bonus"),
-        "supply_cost": setting(db, f"tier7_{mode}_supply_cost"),
+        "supply_cost": tier8.discounted(db, user_id, 'logistics', setting(db, f"tier7_{mode}_supply_cost")) if user_id is not None else setting(db, f"tier7_{mode}_supply_cost"),
         "casualty_percent": setting(db, f"tier7_{mode}_casualty_percent"),
     }
 
@@ -367,6 +368,7 @@ def _territory_bonus(db, territory) -> tuple[int, dict]:
     ).fetchone()["amount"])
     profile = defence_profile(db, int(territory["owner_user_id"]))
     bonuses = {
+        "research": tier8.bonus(db, int(territory['owner_user_id']), 'defence'),
         "terrain": setting(db, f"tier7_terrain_{terrain}_bonus"),
         "fortification": fortification * setting(db, "tier7_fortification_bonus_per_level"),
         "cities": cities * setting(db, "tier7_city_defence_bonus"),
@@ -430,7 +432,7 @@ def set_plan_units(
     plan = db.execute("SELECT * FROM tier7_battle_plans WHERE id=?", (plan_id,)).fetchone()
     if not plan or plan["status"] != "draft":
         return
-    mode = mode_config(db, plan["mode"])
+    mode = mode_config(db, plan["mode"], plan['attacker_id'])
     owned = war_system.units_for_player(db, int(plan["attacker_id"]), enabled_only=True)
     allowed = {int(unit_id) for unit_id in unit_ids} if unit_ids is not None else None
     db.execute("DELETE FROM tier7_plan_units WHERE plan_id=?", (plan_id,))
@@ -608,7 +610,7 @@ def validate_plan(db, plan, get_active_war, get_alliance_for_user, now=None):
     if any(int(row["quantity"]) > int(row["owned"]) for row in deployments):
         errors.append("Your forces changed; reopen or refresh the plan before attacking.")
     state = db.execute("SELECT supply FROM player_war_settings WHERE user_id=?", (plan["attacker_id"],)).fetchone()
-    cost = mode_config(db, plan["mode"])["supply_cost"]
+    cost = mode_config(db, plan["mode"], plan['attacker_id'])["supply_cost"]
     if state is None or int(state["supply"]) < cost:
         errors.append(f"This attack needs {cost:,} Supply.")
     return list(dict.fromkeys(errors)), metadata
@@ -676,7 +678,7 @@ def battle_snapshot(db, plan, *, generator: random.Random | None = None) -> dict
         db, int(plan["id"]), int(plan["defender_id"]), defender=True,
         garrison_percent=max(10, min(100, int(profile["garrison_percent"])))
     )
-    mode = mode_config(db, plan["mode"])
+    mode = mode_config(db, plan["mode"], plan['attacker_id'])
     attacker = _adjust_services(db, int(plan["attacker_id"]), _raw_branch_powers(attacker_rows), attacking=True, mode=mode)
     defender = _adjust_services(db, int(plan["defender_id"]), _raw_branch_powers(defender_rows), attacking=False)
     territory_bonus, defence_detail = _territory_bonus(db, territory)
@@ -1456,7 +1458,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         def __init__(self, plan_id: int, current: str, territory_page=0, force_page=0, target_page=0):
             options = []
             for key, (label, _emoji) in MODE_LABELS.items():
-                mode = mode_config(db, key)
+                mode = mode_config(db, key, active_plan(plan_id)['attacker_id'])
                 options.append(discord.SelectOption(
                     label=label, value=key,
                     description=f"{mode['force_percent']}% force · {mode['supply_cost']} Supply"[:100],
@@ -1502,7 +1504,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         territory = db.execute(
             "SELECT territory_name FROM map_territories WHERE territory_code=?", (plan["territory_code"],)
         ).fetchone() if plan["territory_code"] else None
-        mode = mode_config(db, plan["mode"])
+        mode = mode_config(db, plan["mode"], plan['attacker_id'])
         selected_ids = set(_selected_unit_ids(db, int(plan["id"])))
         deployment_rows = [
             row for row in war_system.units_for_player(db, int(plan["attacker_id"]), enabled_only=True)

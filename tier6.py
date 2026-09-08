@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 import time
+import tier8
 from datetime import datetime, timezone
 
 import discord
@@ -260,6 +261,7 @@ def stock_trade(db, user_id: int, company_id: int, side: str, quantity: int):
     price = int(company["price"])
     gross = price * quantity
     fee = max(0, math.ceil(gross * setting(db, "tier6_stock_fee_percent") / 100))
+    fee = tier8.discounted(db, user_id, 'trade', fee)
     holding = db.execute("SELECT * FROM tier6_stock_holdings WHERE user_id=? AND company_id=?", (user_id, company_id)).fetchone()
     owned = int(holding["quantity"]) if holding else 0
     if side == "buy":
@@ -429,6 +431,7 @@ def start_production(db, user_id: int, recipe_id: int, quantity: int):
     industrial_levels = int(db.execute("SELECT COALESCE(SUM(level),0) FROM player_cities WHERE user_id=? AND city_type='industrial'", (user_id,)).fetchone()[0])
     speed = min(setting(db, "tier6_industrial_speed_cap_percent"), industrial_levels * setting(db, "tier6_industrial_speed_percent"))
     seconds = max(30, setting(db, "tier6_production_seconds_per_item") * quantity * (100 - speed) // 100)
+    seconds = max(30, tier8.discounted(db, user_id, 'production', seconds))
     now = int(time.time())
     cursor = db.execute(
         """INSERT INTO tier6_production_queue
@@ -673,6 +676,7 @@ def register_commands(bot, db, create_player):
             container.add_item(discord.ui.ActionRow(
                 EconomyNavButton(owner_id, "assets", "My Assets", "🎒", style=discord.ButtonStyle.success),
                 EconomyNavButton(owner_id, "legacy_economy", "Wallet & Daily", "🎁", style=discord.ButtonStyle.primary),
+                EconomyNavButton(owner_id, "research", "Research", "🔬"),
                 EconomyNavButton(owner_id, "lobby", "Lobby", "✨"),
             ))
             self.add_item(container)
