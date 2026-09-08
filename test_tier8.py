@@ -212,6 +212,7 @@ class ResearchTests(unittest.TestCase):
                     outsider.response.send_message.assert_awaited_once()
                     blackjack=bot.tree.get_command('blackjack')
                     i.command=blackjack
+                    i.user.roles=[SimpleNamespace(id=casino.setting(module.db,'server_svip_role_id'))]
                     before=self.balance()
                     with patch.object(casino,'card',return_value=('10',10,'♠️')):
                         await blackjack.callback(i,25)
@@ -230,6 +231,8 @@ class ResearchTests(unittest.TestCase):
                     self.assertEqual(before,self.balance())
                     self.assertIn('Net result: **+0 XC**',str(hand.to_components()))
                     self.assertIn('Change Bet',str(hand.to_components()))
+                    self.assertIn('**SVIP**',str(hand.to_components()))
+                    self.assertIn('Next round',str(hand.to_components()))
                     change=next(x for x in hand.walk_children() if getattr(x,'label',None)=='Change Bet')
                     await change.callback(i)
                     self.assertEqual('25',i.response.send_modal.call_args.args[0].primary.default)
@@ -250,6 +253,29 @@ class ResearchTests(unittest.TestCase):
                 login.assert_not_called()
             finally:
                 module.db.close()
+
+    def test_casino_cooldown_memberships_and_expiry(self):
+        import casino
+        casino.initialise(self.db)
+        self.db.execute("UPDATE casino_game_settings SET cooldown_seconds=40 WHERE game='dice'")
+        self.db.execute("UPDATE economy_settings SET value='50' WHERE key='casino_vip_cooldown_percent'")
+        self.db.execute("UPDATE economy_settings SET value='75' WHERE key='server_svip_cooldown_percent'")
+        self.db.execute("INSERT OR REPLACE INTO casino_cooldowns VALUES(?,?,?)",(self.uid,'dice',1000))
+        self.db.commit()
+        user=SimpleNamespace(id=self.uid,roles=[])
+        self.assertEqual(39,casino.cooldown_info(self.db,user,'dice',1001)['remaining'])
+        self.db.execute('INSERT OR REPLACE INTO casino_vip_members VALUES(?,?,?)',(self.uid,1100,900))
+        self.db.commit()
+        self.assertEqual(20,casino.cooldown_info(self.db,user,'dice',1001)['seconds'])
+        user.roles=[SimpleNamespace(id=casino.setting(self.db,'server_svip_role_id'))]
+        info=casino.cooldown_info(self.db,user,'dice',1001)
+        self.assertEqual(('SVIP',10,9),(info['tier'],info['seconds'],info['remaining']))
+        self.assertEqual(0,casino.cooldown_info(self.db,user,'dice',1010)['remaining'])
+        user.roles=[]
+        self.assertEqual('STANDARD',casino.cooldown_info(self.db,user,'dice',1100)['tier'])
+        self.db.execute("UPDATE casino_game_settings SET cooldown_seconds=0 WHERE game='dice'")
+        self.db.commit()
+        self.assertEqual(0,casino.cooldown_info(self.db,user,'dice',1000)['remaining'])
 
     def test_easy_goals_do_not_require_war_or_recruitment(self):
         import tier5

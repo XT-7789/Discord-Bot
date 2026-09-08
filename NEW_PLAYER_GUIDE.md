@@ -6,6 +6,8 @@ The Lobby highlights **Earn & Sell** and **Casino**. Casino is optional entertai
 
 Casino includes direct Blackjack, Coinflip and Slots buttons; other games remain in the selector. These buttons open a bet form, not an immediate wager. Change Bet pre-fills the previous stake when it is still within limits. In Blackjack, your cards and the dealer's cards are stacked for mobile readability. Hit takes a card; Stand finishes your hand. Double shows its extra cost, Surrender returns half, and Quit loses the stake.
 
+Casino result panels show your membership tier, effective cooldown and next-round timestamp. SVIP reduces cooldown; it does not normally remove it. With the default 75% reduction, 45 seconds rounds to 11 seconds. VIP and SVIP discounts do not add together: the stronger applicable reduction is used. Game-specific Dashboard settings still apply. The next round always requires a manual click.
+
 ## 1. Start here
 
 1. Use `/lobby`. The Easy Lobby shows one recommended next step.

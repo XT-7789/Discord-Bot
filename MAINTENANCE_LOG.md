@@ -1,5 +1,12 @@
 # X BOT Maintenance Log
 
+## 2026-09-08 — Membership cooldown display and cyber styling
+
+- Unified Casino cooldown enforcement and display for standard, active VIP and current SVIP roles, including game overrides, expiry and zero-cooldown configuration.
+- Single-round and Blackjack results show membership, effective seconds, reduction percentage and a relative ready timestamp without requiring a failed replay click.
+- Applied cyan terminal headers, violet active Blackjack styling and rose loss accents while retaining explicit text amounts and mobile-stacked cards.
+- Existing membership discounts and payouts are unchanged. 27 offline tests pass, including non-stacking VIP/SVIP, expiry, zero cooldown and SVIP result rendering. No live Discord visual verification performed.
+
 ## 2026-09-08 — Casino mobile layout and response handling
 
 - Replaced whitespace-aligned Blackjack columns with stacked player/dealer hands, clear totals, bust indicators and a net-result heading.
