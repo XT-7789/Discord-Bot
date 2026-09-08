@@ -11,6 +11,8 @@ X BOT is designed around panels. You only need a few short slash commands; most 
 
 You do not need to learn War first. Start with earning and Cities, then explore at your own pace.
 
+When your goal is mining, **Mine Now · Advance Goal** performs one mining action directly from home. The goal says how many actions remain. Mining results show mission progress and highlight **Lobby · Claim Rewards** when ready. Cooldown clicks keep the same panel and show when you can try again. Nation progress is shown as XP remaining until the next level.
+
 Daily rewards stay in the Lobby. When **Claim Ready Rewards** appears, press it to collect completed missions from the indicated category without opening another menu. The Lobby shows your Nation level, XP, next goal and its rewards. Military goals do not block the civilian guidance. After claiming Daily, its next available time appears; you can still mine or develop Cities.
 
 ### Research made simple

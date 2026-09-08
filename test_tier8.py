@@ -154,6 +154,28 @@ class ResearchTests(unittest.TestCase):
                     await claim.callback(i)
                     self.assertEqual(after,self.balance())
                     self.assertIn('Your next step',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
+                    # The goal button performs a real mine rather than opening another menu.
+                    tool=module.db.execute("SELECT id FROM items WHERE effect='mine_tool' AND enabled=1 ORDER BY pickaxe_required_level LIMIT 1").fetchone()[0]
+                    module.db.execute('INSERT OR REPLACE INTO inventories(user_id,item_id,quantity) VALUES(?,?,1)',(self.uid,tool))
+                    module.db.execute('UPDATE players SET equipped_pickaxe_id=?,mining_level=99,mining_energy=100,last_mine_at=0 WHERE user_id=?',(tool,self.uid))
+                    module.db.commit()
+                    import tier5
+                    tier5.claim_ready(module.db,self.uid,'daily')
+                    home=bot.xbot_player_lobby_builder(self.uid)
+                    mine_button=next(x for x in home.walk_children() if getattr(x,'label',None)=='Mine Now · Advance Goal')
+                    self.assertIn('XP to Level',str(home.to_components()))
+                    i.message=SimpleNamespace(id=1)
+                    i.response.edit_message=AsyncMock()
+                    i.response.send_message=AsyncMock()
+                    await mine_button.callback(i)
+                    result=i.response.edit_message.call_args.kwargs['view']
+                    self.assertIn('Lobby · Claim Rewards',str(result.to_components()))
+                    mined=module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0]
+                    self.assertEqual(1,mined)
+                    await mine_button.callback(i)
+                    self.assertIn('Mining is recovering',str(i.response.edit_message.call_args.kwargs['view'].to_components()))
+                    self.assertEqual(mined,module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
+                    i.response.send_message.assert_not_called()
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()
@@ -174,6 +196,21 @@ class ResearchTests(unittest.TestCase):
             pages['weekly']=[]
             pages['daily']=[]
             self.assertEqual('city',tier8.easy_objective(self.db,self.uid)['destination'])
+
+    def test_mining_goal_remaining_and_completion(self):
+        import tier5
+        m=dict(title='Mining Shift',destination='mining',progress=1,target=3,claimed=False,description='Mine three times',xc=20,credits=40,xp=25)
+        with patch.object(tier5,'missions_for',return_value=('today',[m])):
+            self.assertIn('2 more time(s)',tier8.easy_objective(self.db,self.uid)['detail'])
+            text,ready=tier8.mining_goal(self.db,self.uid)
+            self.assertFalse(ready)
+            self.assertIn('1/3',text)
+            m['progress']=3
+            text,ready=tier8.mining_goal(self.db,self.uid)
+            self.assertTrue(ready)
+            self.assertIn('complete',text)
+            m['claimed']=True
+            self.assertIn('optional',tier8.mining_goal(self.db,self.uid)[0])
 
     def test_stale_quote_insufficient_funds_and_duplicate_project(self):
         q=tier8.quote(self.db,self.uid,['mining'],1000)

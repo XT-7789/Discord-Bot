@@ -1391,7 +1391,13 @@ def register_commands(bot, db, create_player) -> None:
         cooldown = max(1, area["cooldown_seconds"] * (100 - min(90,pickaxe["pickaxe_cooldown_reduction"])) // 100)
         remaining = cooldown - (now - player["last_mine_at"])
         if remaining > 0:
-            await interaction.response.send_message(f"⏳ Mining cooldown: **{remaining} seconds**.", ephemeral=True); return
+            result=MiningActionResultView(interaction.user.id,'⏳ Mining is recovering',
+                f"Ready <t:{now+remaining}:R>. Your progress is saved. Sell materials or return to Lobby while you wait.",discord.Color.gold())
+            if interaction.message is not None:
+                await interaction.response.edit_message(view=result)
+            else:
+                await interaction.response.send_message(view=result)
+            return
         energy = refresh_mining_energy(db, interaction.user.id, now)
         if setting(db,"mining_energy_enabled") and energy < area["energy_cost"]:
             await interaction.response.send_message(f"⚡ You need **{area['energy_cost']} energy**. Current: **{energy}**.", ephemeral=True); db.commit(); return
@@ -1524,13 +1530,19 @@ def register_commands(bot, db, create_player) -> None:
             self.owner_id = owner_id
             container = discord.ui.Container(accent_color=colour)
             container.add_item(discord.ui.TextDisplay(f"## {title}\n{body}"))
+            goal_text,goal_ready=tier8.mining_goal(db,owner_id)
+            container.add_item(discord.ui.TextDisplay(goal_text))
             container.add_item(discord.ui.Separator())
+            lobby_button=MiningLobbyButton()
+            if goal_ready:
+                lobby_button.label='Lobby · Claim Rewards'
+                lobby_button.style=discord.ButtonStyle.success
             container.add_item(discord.ui.ActionRow(
                 MiningHubButton("mine", "Mine Again", "⛏️", discord.ButtonStyle.success),
                 MiningHubButton("sell", "Sell Materials", "💰", discord.ButtonStyle.primary),
                 MiningHubButton("hub", "Mining Hub", "🗺️", discord.ButtonStyle.secondary),
                 EconomyCentreButton(owner_id, "Economy"),
-                MiningLobbyButton(),
+                lobby_button,
             ))
             container.add_item(discord.ui.TextDisplay("-# Continue mining or return to a main centre without creating another channel message."))
             self.add_item(container)
@@ -1983,6 +1995,7 @@ def register_commands(bot, db, create_player) -> None:
         return ShopView(owner_id, categories[0]['id'])
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
+    bot.xbot_mine_button_builder = lambda: MiningHubButton('mine','Mine Now','⛏️',discord.ButtonStyle.success)
     bot.xbot_player_panel_builders.update({
         "shop": _shop_panel,
         "inventory": lambda owner_id: InventoryView(owner_id),

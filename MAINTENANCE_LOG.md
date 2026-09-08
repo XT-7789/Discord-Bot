@@ -1,5 +1,13 @@
 # X BOT Maintenance Log
 
+## 2026-09-08 — Clearer goals and direct mining
+
+- Replaced generic Continue labels with destination-specific actions; mining goals execute one existing mining action directly from the Lobby.
+- Mining goals state remaining actions, and results display starter/daily goal progress with a highlighted claim-rewards return when complete.
+- Nation progress shows XP remaining to the next level. Removed the redundant mining shortcut while mining is the primary goal.
+- Mining cooldown feedback edits the same panel, with a ready timestamp and alternate activities.
+- No modes, reward amounts, energy costs or cooldown rules added or changed. 26 offline tests passed, including real direct-mining callbacks, cooldown retries and goal completion feedback.
+
 ## 2026-09-08 — Existing-play usability pass (no new modes)
 
 - Daily claims remain in the Lobby with a result and next-ready time instead of moving players into Economy.

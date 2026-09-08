@@ -181,10 +181,25 @@ def easy_objective(db,user_id):
     for category,missions in pages:
         for m in missions:
             if not m['claimed'] and m['destination'] not in {'war','recruit','diplomacy'}:
+                remaining=max(0,m['target']-m['progress'])
+                instruction=(f"Mine **{remaining} more time(s)** to unlock this reward." if m['destination']=='mining' else m['description'])
                 return dict(label=f"{m['title']} · {m['progress']}/{m['target']}",destination=m['destination'],category=category,
-                            detail=f"{m['description']}\nReward: **{m['xc']} XC + {m['credits']} War Credits** · {m['xp']} XP")
+                            detail=f"{instruction}\nReward: **{m['xc']} XC + {m['credits']} War Credits** · {m['xp']} XP")
     return dict(label='Your civilian goals are complete!',destination='city',category='home',
                 detail='Build or upgrade Cities together, or mine and sell materials. War is optional; new daily missions arrive at 00:00 UTC.')
+
+
+def mining_goal(db,user_id):
+    """Show a small existing goal, not a new grind, immediately after an action."""
+    import tier5
+    for category in ('starter','daily'):
+        for m in tier5.missions_for(db,user_id,category)[1]:
+            if m['destination']=='mining' and not m['claimed']:
+                remaining=max(0,m['target']-m['progress'])
+                text=(f"✅ **{m['title']} complete!** Return to Lobby to claim" if not remaining else
+                      f"🎯 **{m['title']}: {m['progress']}/{m['target']}** · {remaining} more mine(s) to unlock")
+                return text+f" **{m['xc']} XC + {m['credits']} War Credits** and {m['xp']} Nation XP.",not remaining
+    return '✅ Your starter and daily mining goals are done. Sell your materials or build Cities; more mining is optional.',False
 
 
 def register_commands(bot,db,create_player):
@@ -344,10 +359,15 @@ def register_commands(bot,db,create_player):
             player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
             objective=easy_objective(db,owner)
             profile=tier5.profile_summary(db,owner)
-            progress=(f"{profile['xp']:,}/{profile['next_threshold']:,} XP" if profile['next_threshold'] else 'Maximum level')
+            progress=(f"{profile['next_threshold']-profile['xp']:,} XP to Level {profile['level']+1}" if profile['next_threshold'] else 'Maximum level')
             c=discord.ui.Container(accent_color=discord.Color.teal())
             c.add_item(discord.ui.TextDisplay(f"## 🏠 {player['nation_name']}\n💰 **{player['xc']:,} XC** · 🏙️ **{player['money']:,} War Credits**\n🌱 Nation Level **{profile['level']}** · {progress}\n\n"+(notice+'\n\n' if notice else '')+f"### Your next step\n{objective['label']}\n{objective['detail']}"))
             next_button=ClaimMission(objective['category']) if objective.get('claim') else Go('▶ Continue',objective['destination'],discord.ButtonStyle.success)
+            if not objective.get('claim'):
+                next_button.label={'city':'Open Cities','economy':'Open Daily & Wallet','mining':'Open Mining','lobby':'Open Lobby'}.get(objective['destination'],'View Goal')
+                if objective['destination']=='mining' and hasattr(bot,'xbot_mine_button_builder'):
+                    next_button=bot.xbot_mine_button_builder()
+                    next_button.label='Mine Now · Advance Goal'
             c.add_item(discord.ui.ActionRow(next_button,Go('🌱 How to Play','guide')))
             if hasattr(bot,'xbot_daily_button_builder'):
                 cooldown=int(db.execute("SELECT value FROM economy_settings WHERE key='daily_cooldown'").fetchone()[0])
@@ -356,7 +376,10 @@ def register_commands(bot,db,create_player):
                 daily=bot.xbot_daily_button_builder(owner)
                 daily.label=f'Claim Daily +{reward} XC' if ready else 'Daily Collected'
                 daily.disabled=not ready
-                c.add_item(discord.ui.ActionRow(daily,Go('⛏️ Mine','mining')))
+                row=discord.ui.ActionRow(daily)
+                if objective.get('claim') or objective['destination']!='mining':
+                    row.add_item(bot.xbot_mine_button_builder() if hasattr(bot,'xbot_mine_button_builder') else Go('⛏️ Mine','mining'))
+                c.add_item(row)
                 if not ready:
                     c.add_item(discord.ui.TextDisplay(f"-# Next daily reward <t:{int(player['last_daily'])+cooldown}:R>. Mining and Cities are still available."))
             c.add_item(discord.ui.ActionRow(Go('💰 Earn & Sell','economy'),Go('🏙️ Build / Upgrade','city'),Go('🎯 Missions','missions')))
