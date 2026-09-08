@@ -1967,22 +1967,22 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 await interaction.edit_original_response(view=CitySystemView(self.owner_id, notice=notice))
                 return
             if self.action == "build":
-                await interaction.response.edit_message(view=CityBuildView(self.owner_id))
+                await replace_slow_panel(interaction, lambda: CityBuildView(self.owner_id))
                 return
             if self.action == "bulk_build":
                 await interaction.response.send_modal(BulkCityBuildModal(self.owner_id))
                 return
             if self.action == "upgrade":
-                await interaction.response.edit_message(view=BulkCityUpgradeSelectView(self.owner_id))
+                await replace_slow_panel(interaction, lambda: BulkCityUpgradeSelectView(self.owner_id))
                 return
             if self.action == "bulk_upgrade":
-                await interaction.response.edit_message(view=BulkCityUpgradeSelectView(self.owner_id))
+                await replace_slow_panel(interaction, lambda: BulkCityUpgradeSelectView(self.owner_id))
                 return
             if self.action == "land":
-                await interaction.response.edit_message(view=LandUpgradeView(self.owner_id))
+                await replace_slow_panel(interaction, lambda: LandUpgradeView(self.owner_id))
                 return
             if self.action == "rename":
-                await interaction.response.edit_message(view=CityRenameView(self.owner_id))
+                await replace_slow_panel(interaction, lambda: CityRenameView(self.owner_id))
                 return
             if self.action == "overview":
                 # Building a tactical image can take longer than Discord's

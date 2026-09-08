@@ -6,14 +6,16 @@ X BOT is designed around panels. You only need a few short slash commands; most 
 
 1. Use `/lobby`. The Easy Lobby shows one recommended next step.
 2. Press **Claim Daily** for 50 XC, then **Mine** and sell your materials.
-3. Press **Cities** when you are ready to grow. Build and upgrade several Cities together using their selection menus.
+3. Press **Build / Upgrade** when you are ready to grow. Build and upgrade several Cities together using their selection menus.
 4. Use **How to Play** whenever you need help. **All Activities** opens every main centre; **Detailed Lobby** restores the expanded home screen.
 
 You do not need to learn War first. Start with earning and Cities, then explore at your own pace.
 
+Daily rewards stay in the Lobby. When **Claim Ready Rewards** appears, press it to collect completed missions from the indicated category without opening another menu. The Lobby shows your Nation level, XP, next goal and its rewards. Military goals do not block the civilian guidance. After claiming Daily, its next available time appears; you can still mine or develop Cities.
+
 ### Research made simple
 
-Open `/research` or press **Research** in the Lobby. Choose Economy, Industry or Military, then select one or both projects. Review the total XC cost and press **Confirm & Start** once.
+Open `/research` or use **All Activities → Research**. Choose Economy, Industry or Military, then select one or both projects. Review the total XC cost and press **Confirm & Start** once.
 
 Level 1 normally costs **50 XC** and takes **5 minutes**. Later levels cost and take longer. Projects run one after another, and their benefits activate automatically: there is no claim button to remember. The Queue page shows finish times and lets you cancel unfinished work for its original XC refund.
 
@@ -34,7 +36,7 @@ Recommended first loop: **Daily → Mine → Sell → Contracts → Build/upgrad
 
 ## 3. Develop your Nation
 
-Open `/war`, then use **City**.
+Open `/city` directly, or press **Build / Upgrade** in the Lobby.
 
 - **Build** lets you choose one or several available Lands and build Cities in one transaction.
 - **Upgrade** lets you select one or several Cities and upgrade them together.

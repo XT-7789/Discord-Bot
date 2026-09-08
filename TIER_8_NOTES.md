@@ -4,7 +4,7 @@
 
 - `/lobby` opens a compact home screen by default for both new and existing players.
 - One recommended next step, a short How to Play page, and direct Daily and Mining buttons reduce the number of menus beginners must learn.
-- Earn, Cities and Research are the primary development choices. War remains available without being required for Economy play.
+- Earn & Sell, Build / Upgrade and Missions are the primary choices. Research remains in All Activities and Economy; War is optional.
 - All Activities exposes the major centres, including Backpack, Stocks, Craft, Missions and Diplomacy.
 - Detailed Lobby is still available; the Easy/Detailed choice is saved per player.
 - Navigation edits the current message and respects panel ownership.

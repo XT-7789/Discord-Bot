@@ -1,5 +1,15 @@
 # X BOT Maintenance Log
 
+## 2026-09-08 — Existing-play usability pass (no new modes)
+
+- Daily claims remain in the Lobby with a result and next-ready time instead of moving players into Economy.
+- Ready mission rewards can be claimed directly from the Lobby using existing reward rules; no reward values or cooldowns changed.
+- Civilian next-step guidance shows progress and rewards without requiring recruitment or battles first. Nation level and XP are visible at home.
+- Simplified primary choices to Earn & Sell, Build / Upgrade and Missions; optional systems remain in All Activities.
+- Mining Hub now includes a direct Lobby return and a short mine-then-sell explanation.
+- City build, upgrade, land and rename navigation acknowledges clicks before constructing the panel, reducing timeout risk on slower phones.
+- 25 offline regression tests passed, including repeated Daily and mission claims, in-place Lobby results and non-military guidance. No live Discord login performed.
+
 ## 2026-09-07 — Tier 8 Research and Easier Play
 
 - Added a compact default Lobby with a guided next action, How to Play, direct Daily/Mining buttons and saved Easy/Detailed preference.

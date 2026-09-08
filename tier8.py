@@ -169,6 +169,24 @@ def cancel(db,user_id,now=None):
         raise
 
 
+def easy_objective(db,user_id):
+    """Offer existing rewards first, then civilian goals without a military gate."""
+    import tier5
+    pages=[(category,tier5.missions_for(db,user_id,category)[1]) for category in ('starter','daily','weekly')]
+    for category,missions in pages:
+        ready=[m for m in missions if not m['claimed'] and m['progress']>=m['target']]
+        if ready:
+            return dict(label=f"{len(ready)} mission reward(s) ready",destination='missions',category=category,claim=True,
+                        detail=f"Collect **{sum(m['xc'] for m in ready):,} XC + {sum(m['credits'] for m in ready):,} War Credits** and XP. Any level-up rewards are added automatically.")
+    for category,missions in pages:
+        for m in missions:
+            if not m['claimed'] and m['destination'] not in {'war','recruit','diplomacy'}:
+                return dict(label=f"{m['title']} · {m['progress']}/{m['target']}",destination=m['destination'],category=category,
+                            detail=f"{m['description']}\nReward: **{m['xc']} XC + {m['credits']} War Credits** · {m['xp']} XP")
+    return dict(label='Your civilian goals are complete!',destination='city',category='home',
+                detail='Build or upgrade Cities together, or mine and sell materials. War is optional; new daily missions arrive at 00:00 UTC.')
+
+
 def register_commands(bot,db,create_player):
     builders=bot.xbot_player_panel_builders
     old_lobby=bot.xbot_player_lobby_builder
@@ -309,15 +327,28 @@ def register_commands(bot,db,create_player):
                 c.add_item(discord.ui.ActionRow(*(Go(label,dest) for label,dest in group if dest in builders or ':' in dest or dest=='lobby')))
             self.add_item(c)
 
+    class ClaimMission(discord.ui.Button):
+        def __init__(self,category):
+            super().__init__(label='Claim Ready Rewards',style=discord.ButtonStyle.success)
+            self.category=category
+        async def callback(self,i):
+            await i.response.defer()
+            import tier5
+            notice=tier5.claim_ready(db,i.user.id,self.category)
+            await i.edit_original_response(view=lobby(i.user.id,notice))
+
     class SimpleLobby(Owned):
-        def __init__(self,owner):
+        def __init__(self,owner,notice=''):
             super().__init__(owner)
             import tier5
             player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
-            objective=tier5.next_objective(db,owner)
+            objective=easy_objective(db,owner)
+            profile=tier5.profile_summary(db,owner)
+            progress=(f"{profile['xp']:,}/{profile['next_threshold']:,} XP" if profile['next_threshold'] else 'Maximum level')
             c=discord.ui.Container(accent_color=discord.Color.teal())
-            c.add_item(discord.ui.TextDisplay(f"## 🏠 {player['nation_name']}\n💰 **{player['xc']:,} XC** · 🏙️ **{player['money']:,} War Credits**\n\n### Your next step\n{objective['label']}\nStart with earning and Cities. Explore other systems when ready."))
-            c.add_item(discord.ui.ActionRow(Go('▶ Continue',objective['destination'],discord.ButtonStyle.success),Go('🌱 How to Play','guide')))
+            c.add_item(discord.ui.TextDisplay(f"## 🏠 {player['nation_name']}\n💰 **{player['xc']:,} XC** · 🏙️ **{player['money']:,} War Credits**\n🌱 Nation Level **{profile['level']}** · {progress}\n\n"+(notice+'\n\n' if notice else '')+f"### Your next step\n{objective['label']}\n{objective['detail']}"))
+            next_button=ClaimMission(objective['category']) if objective.get('claim') else Go('▶ Continue',objective['destination'],discord.ButtonStyle.success)
+            c.add_item(discord.ui.ActionRow(next_button,Go('🌱 How to Play','guide')))
             if hasattr(bot,'xbot_daily_button_builder'):
                 cooldown=int(db.execute("SELECT value FROM economy_settings WHERE key='daily_cooldown'").fetchone()[0])
                 reward=int(db.execute("SELECT value FROM economy_settings WHERE key='daily_reward'").fetchone()[0])
@@ -326,7 +357,9 @@ def register_commands(bot,db,create_player):
                 daily.label=f'Claim Daily +{reward} XC' if ready else 'Daily Collected'
                 daily.disabled=not ready
                 c.add_item(discord.ui.ActionRow(daily,Go('⛏️ Mine','mining')))
-            c.add_item(discord.ui.ActionRow(Go('💰 Earn','economy'),Go('🏙️ Cities','city'),Go('🔬 Research','research:economy')))
+                if not ready:
+                    c.add_item(discord.ui.TextDisplay(f"-# Next daily reward <t:{int(player['last_daily'])+cooldown}:R>. Mining and Cities are still available."))
+            c.add_item(discord.ui.ActionRow(Go('💰 Earn & Sell','economy'),Go('🏙️ Build / Upgrade','city'),Go('🎯 Missions','missions')))
             c.add_item(discord.ui.ActionRow(Go('All Activities','all'),Go('⚔️ War','war'),ModeButton(False)))
             self.add_item(c)
 
@@ -340,11 +373,13 @@ def register_commands(bot,db,create_player):
             db.commit()
             await i.edit_original_response(view=lobby(i.user.id))
 
-    def lobby(owner):
+    def lobby(owner,notice=''):
         pref=db.execute('SELECT simple_mode FROM tier8_preferences WHERE user_id=?',(owner,)).fetchone()
         if not pref or pref[0]:
-            return SimpleLobby(owner)
+            return SimpleLobby(owner,notice)
         view=old_lobby(owner)
+        if notice:
+            view.add_item(discord.ui.TextDisplay(notice))
         view.add_item(discord.ui.ActionRow(ModeButton(True),Go('Research','research:economy')))
         return view
 

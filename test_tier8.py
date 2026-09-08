@@ -134,11 +134,46 @@ class ResearchTests(unittest.TestCase):
                         if destination and ':' not in destination and destination!='lobby':
                             self.assertIn(destination,bot.xbot_player_panel_builders)
                     self.assertEqual('50',module.db.execute("SELECT value FROM economy_settings WHERE key='daily_reward'").fetchone()[0])
+                    # Daily stays in the Lobby, and retrying the old button cannot pay twice.
+                    module.db.execute('UPDATE players SET last_daily=0 WHERE user_id=?',(self.uid,))
+                    module.db.commit()
+                    daily=bot.xbot_daily_button_builder(self.uid)
+                    before=self.balance()
+                    await daily.callback(i)
+                    self.assertEqual(before+50,self.balance())
+                    daily_view=i.edit_original_response.call_args.kwargs['view']
+                    self.assertIn('Your next step',str(daily_view.to_components()))
+                    self.assertIn('Next daily reward',str(daily_view.to_components()))
+                    await daily.callback(i)
+                    self.assertEqual(before+50,self.balance())
+                    # Claim existing mission rewards directly, staying on the same message.
+                    claim=next(x for x in daily_view.walk_children() if getattr(x,'label',None)=='Claim Ready Rewards')
+                    await claim.callback(i)
+                    after=self.balance()
+                    self.assertGreater(after,before+50)
+                    await claim.callback(i)
+                    self.assertEqual(after,self.balance())
+                    self.assertIn('Your next step',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()
             finally:
                 module.db.close()
+
+    def test_easy_goals_do_not_require_war_or_recruitment(self):
+        import tier5
+        def mission(title,destination,progress=0):
+            return dict(title=title,destination=destination,progress=progress,target=1,claimed=False,
+                        description='Do this action',xc=5,credits=10,xp=20)
+        pages={'starter':[mission('Recruit','recruit')],
+               'daily':[mission('Mine','mining')], 'weekly':[mission('Battle','war')]}
+        with patch.object(tier5,'missions_for',side_effect=lambda db,uid,cat:('test',pages[cat])):
+            self.assertEqual('mining',tier8.easy_objective(self.db,self.uid)['destination'])
+            pages['weekly']=[mission('Battle','war',1)]
+            self.assertTrue(tier8.easy_objective(self.db,self.uid)['claim'])
+            pages['weekly']=[]
+            pages['daily']=[]
+            self.assertEqual('city',tier8.easy_objective(self.db,self.uid)['destination'])
 
     def test_stale_quote_insufficient_funds_and_duplicate_project(self):
         q=tier8.quote(self.db,self.uid,['mining'],1000)

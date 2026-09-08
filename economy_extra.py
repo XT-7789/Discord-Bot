@@ -167,23 +167,23 @@ def register_commands(bot, db, create_player, find_item):
             if self.action == "balance":
                 await interaction.response.edit_message(view=EconomyBalanceView(self.owner_id))
                 return
-            if self.action == "daily":
+            if self.action in {"daily", "daily_lobby"}:
+                await interaction.response.defer()
+                def result_view(notice):
+                    if self.action == "daily_lobby":
+                        return bot.xbot_player_lobby_builder(self.owner_id, notice=notice)
+                    return economy_home_view(self.owner_id, notice=notice)
                 player = create_player_from_id(self.owner_id)
                 remaining = setting(db, "daily_cooldown") - (int(time.time()) - int(player["last_daily"]))
                 if remaining > 0:
                     hours, remainder = divmod(remaining, 3600)
-                    await interaction.response.edit_message(view=economy_home_view(
-                        self.owner_id,
-                        notice=f"⏳ Daily reward is ready in **{hours}h {remainder // 60}m**.",
-                    ))
+                    await interaction.edit_original_response(view=result_view(f"⏳ Daily reward is ready in **{hours}h {remainder // 60}m**."))
                     return
                 reward = setting(db, "daily_reward")
                 db.execute("UPDATE players SET xc=xc+?,last_daily=? WHERE user_id=?", (reward, int(time.time()), self.owner_id))
                 log(db, self.owner_id, "daily", f"+{reward} XC")
                 db.commit()
-                await interaction.response.edit_message(view=economy_home_view(
-                    self.owner_id, notice=f"✅ Daily reward collected: **+{reward:,} XC**."
-                ))
+                await interaction.edit_original_response(view=result_view(f"✅ Daily reward collected: **+{reward:,} XC**."))
                 return
             # Other player systems register a view factory on the bot.  Opening
             # them this way replaces the Economy Centre instead of posting a
@@ -576,7 +576,7 @@ def register_commands(bot, db, create_player, find_item):
     bot.xbot_player_panel_builders["economy"] = lambda owner_id: EconomyCentreView(owner_id)
     bot.xbot_player_panel_builders["market"] = lambda owner_id: MarketView(owner_id)
     bot.xbot_player_lobby_builder = lambda owner_id: XBotLobbyView(owner_id)
-    bot.xbot_daily_button_builder = lambda owner_id: EconomyPanelButton(owner_id, 'daily', 'Claim Daily', '🎁', discord.ButtonStyle.success)
+    bot.xbot_daily_button_builder = lambda owner_id: EconomyPanelButton(owner_id, 'daily_lobby', 'Claim Daily', '🎁', discord.ButtonStyle.success)
 
     @bot.tree.command(name="market", description="Open the X BOT player marketplace")
     async def market(interaction: discord.Interaction):

@@ -1574,8 +1574,9 @@ def register_commands(bot, db, create_player) -> None:
                 MiningHubButton("collection", "Collection", "🏆", discord.ButtonStyle.secondary),
                 MiningHubButton("sell", "Sell Mining Materials", "💰", discord.ButtonStyle.secondary),
                 EconomyCentreButton(owner_id, "Economy"),
+                MiningLobbyButton(),
             ))
-            container.add_item(discord.ui.TextDisplay("-# Select an action above. Each action shows its result and keeps a route back to your main panels."))
+            container.add_item(discord.ui.TextDisplay("-# Quick start: Mine Now → Sell Mining Materials to earn XC. Upgrade your tool when ready; other pages are optional."))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
