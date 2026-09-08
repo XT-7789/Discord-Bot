@@ -216,10 +216,35 @@ class ResearchTests(unittest.TestCase):
                     with patch.object(casino,'card',return_value=('10',10,'♠️')):
                         await blackjack.callback(i,25)
                         hand=i.response.edit_message.call_args.kwargs['view']
+                        active=str(hand.to_components())
+                        for expected in ('You · 20','Dealer · ?','Hit · Take Card','Double · +25 XC'):
+                            self.assertIn(expected,active)
+                        hand.busy=True
+                        await hand.play_action(i,'hit')
+                        self.assertEqual(2,len(hand.player_cards))
+                        hand.busy=False
+                        edits=i.response.edit_message.await_count
                         await hand.play_action(i,'stand')
+                        self.assertEqual(edits,i.response.edit_message.await_count)
+                        self.assertIs(hand,i.edit_original_response.call_args.kwargs['view'])
                     self.assertEqual(before,self.balance())
                     self.assertIn('Net result: **+0 XC**',str(hand.to_components()))
                     self.assertIn('Change Bet',str(hand.to_components()))
+                    change=next(x for x in hand.walk_children() if getattr(x,'label',None)=='Change Bet')
+                    await change.callback(i)
+                    self.assertEqual('25',i.response.send_modal.call_args.args[0].primary.default)
+                    # Invalid late surrender must not refund or settle a live hand.
+                    late=type(hand)(self.uid,25,[('2',2,'♥️')]*3,[('10',10,'♠️')]*2)
+                    balance=self.balance()
+                    await late.play_action(i,'surrender')
+                    self.assertFalse(late.finished)
+                    self.assertEqual(balance,self.balance())
+                    # A regular hit updates the existing message after acknowledgement.
+                    with patch.object(casino,'card',return_value=('2',2,'♥️')):
+                        await late.play_action(i,'hit')
+                    self.assertEqual(4,len(late.player_cards))
+                    self.assertIs(late,i.edit_original_response.call_args.kwargs['view'])
+                    self.assertFalse(late.busy)
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()

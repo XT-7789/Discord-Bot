@@ -303,14 +303,15 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message(view=view)
 
     class ChangeBetButton(discord.ui.Button):
-        def __init__(self,owner_id,game):
+        def __init__(self,owner_id,game,stake=None):
             super().__init__(label='Change Bet',style=discord.ButtonStyle.secondary)
             self.owner_id,self.game=owner_id,game
+            self.stake=stake
         async def callback(self,interaction):
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message('Open /casino for your own game.',ephemeral=True)
                 return
-            await interaction.response.send_modal(CasinoGameModal(self.game))
+            await interaction.response.send_modal(CasinoGameModal(self.game,self.stake))
 
     def casino_result(title: str, body: str, *, won: bool, owner_id: int, game: str, command, args, stake: int, payout: int):
         """A coloured end card with a same-bet Next Round button."""
@@ -326,7 +327,7 @@ def register_commands(bot, db, create_player) -> None:
         replay.label=f'Play Again · {stake:,} XC'[:80]
         if game in {'spin','balloonpop'} and args[-1]==0:
             replay.label='Play Again · Use Item'
-        container.add_item(discord.ui.ActionRow(replay,ChangeBetButton(owner_id,game),CasinoHubBackButton(owner_id),CasinoLobbyButton(owner_id)))
+        container.add_item(discord.ui.ActionRow(replay,ChangeBetButton(owner_id,game,stake),CasinoHubBackButton(owner_id),CasinoLobbyButton(owner_id)))
         container.add_item(discord.ui.TextDisplay('-# Each click starts one paid round, subject to cooldown. No automatic bets. XC is a fictional game currency.'))
         view.add_item(container)
         return view
@@ -339,7 +340,7 @@ def register_commands(bot, db, create_player) -> None:
 
     class CasinoGameModal(discord.ui.Modal):
         """One guided input panel for every Casino game, so players do not need command syntax."""
-        def __init__(self, game: str):
+        def __init__(self, game: str, previous_bet=None):
             self.game = game
             super().__init__(title=f"Play {game.replace('_', ' ').title()}"[:45])
             label = "Tickets" if game == "lottery" else "Bet (XC)"
@@ -349,7 +350,8 @@ def register_commands(bot, db, create_player) -> None:
             maximum=rules['max_bet'] if rules and rules['max_bet']>0 else setting(db,'casino_max_bet')
             if game!='lottery':
                 label=f'Bet XC ({minimum:,}–{maximum:,})'[:45]
-            self.primary = discord.ui.TextInput(label=label, placeholder=placeholder, default='1' if game=='lottery' else str(minimum), max_length=12)
+            suggested=previous_bet if previous_bet is not None and minimum<=previous_bet<=maximum else minimum
+            self.primary = discord.ui.TextInput(label=label, placeholder=placeholder, default='1' if game=='lottery' else str(suggested), max_length=12)
             self.add_item(self.primary)
             details = {
                 "dice": ("Guess (1–6)", "For example: 4", "1"),
@@ -536,6 +538,12 @@ def register_commands(bot, db, create_player) -> None:
             ))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(CasinoGameSelect(owner_id)))
+            quick=discord.ui.ActionRow()
+            for game,label in [('blackjack','🃏 Blackjack'),('coinflip','🪙 Coinflip'),('slot','🎰 Slots')]:
+                button=ChangeBetButton(owner_id,game)
+                button.label=label
+                quick.add_item(button)
+            container.add_item(quick)
             container.add_item(discord.ui.ActionRow(
                 CasinoHubButton(owner_id, "casino_stats", "My Stats", "📊", discord.ButtonStyle.primary),
                 CasinoHubButton(owner_id, "casino_leaderboard", "Leaderboard", "🏆", discord.ButtonStyle.secondary),
@@ -638,6 +646,7 @@ def register_commands(bot, db, create_player) -> None:
             self.owner_id, self.bet = owner_id, bet
             self.player_cards, self.dealer_cards = player_cards, dealer_cards
             self.finished = False
+            self.busy = False
             self.result = None
             self.payout = 0
             self.reveal = False
@@ -654,34 +663,38 @@ def register_commands(bot, db, create_player) -> None:
             player_total = hand_value(self.player_cards)
             dealer_display = cards_text(self.dealer_cards) if self.reveal else f"{cards_text(self.dealer_cards[:1])} ❓"
             dealer_total = hand_value(self.dealer_cards) if self.reveal else "?"
-            result_lower = (self.result or "").lower()
-            colour = discord.Color.red() if self.finished and ("lost" in result_lower or "bust" in result_lower or "dealer wins" in result_lower or "quit" in result_lower) else discord.Color.green() if self.finished and ("win" in result_lower or "blackjack" in result_lower) else discord.Color.blurple()
+            net=self.payout-self.bet
+            colour = (discord.Color.green() if net>0 else discord.Color.red() if net<0 else discord.Color.teal()) if self.finished else discord.Color.blurple()
             container = discord.ui.Container(accent_color=colour)
-            header = f"## 🃏 X BOT Blackjack\n{self.result + chr(10) if self.result else ''}"
+            outcome=('Win' if net>0 else 'Loss' if net<0 else 'Push')
+            header = f"## 🃏 Blackjack\n"+(f"### {outcome} · {net:+,} XC\n{self.result}" if self.finished else f"Your turn · Stake **{self.bet:,} XC**")
             container.add_item(discord.ui.TextDisplay(header))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                f"### You (Player)                         Dealer\n"
-                f"**Cards:** {cards_text(self.player_cards)}    **Cards:** {dealer_display}\n"
-                f"**Total:** {player_total}                           **Total:** {dealer_total}\n"
-                f"**Bet:** {self.bet} XC"
+                f"### You · {player_total}{' · BUST' if player_total>21 else ''}\n"
+                f"{cards_text(self.player_cards)}\n\n"
+                f"### Dealer · {dealer_total}{' · BUST' if self.reveal and hand_value(self.dealer_cards)>21 else ''}\n"
+                f"{dealer_display}"
             ))
             container.add_item(discord.ui.Separator())
             if self.finished:
                 wallet=db.execute('SELECT xc FROM players WHERE user_id=?',(self.owner_id,)).fetchone()[0]
-                container.add_item(discord.ui.TextDisplay(f'Total returned: **{self.payout:,} XC** · Net result: **{self.payout-self.bet:+,} XC**\nWallet: **{wallet:,} XC**'))
+                container.add_item(discord.ui.TextDisplay(f'Stake: **{self.bet:,} XC** · Total returned: **{self.payout:,} XC**\nNet result: **{self.payout-self.bet:+,} XC** · Wallet: **{wallet:,} XC**'))
                 container.add_item(discord.ui.ActionRow(
                     BlackjackButton(f"Play Again · {self.bet:,} XC", discord.ButtonStyle.success, "again"),
-                    ChangeBetButton(self.owner_id,'blackjack'),CasinoHubBackButton(self.owner_id),CasinoLobbyButton(self.owner_id),
+                    ChangeBetButton(self.owner_id,'blackjack',self.bet),CasinoHubBackButton(self.owner_id),CasinoLobbyButton(self.owner_id),
                 ))
             else:
                 container.add_item(discord.ui.ActionRow(
-                    BlackjackButton("Hit", discord.ButtonStyle.primary, "hit"),
-                    BlackjackButton("Stand", discord.ButtonStyle.primary, "stand"),
-                    BlackjackButton("Quit", discord.ButtonStyle.danger, "quit"),
-                    BlackjackButton("Double Down", discord.ButtonStyle.secondary, "double", len(self.player_cards) != 2),
-                    BlackjackButton("Surrender", discord.ButtonStyle.secondary, "surrender", len(self.player_cards) != 2),
+                    BlackjackButton("Hit · Take Card", discord.ButtonStyle.primary, "hit"),
+                    BlackjackButton("Stand · Finish Hand", discord.ButtonStyle.primary, "stand"),
                 ))
+                container.add_item(discord.ui.ActionRow(
+                    BlackjackButton(f"Double · +{self.bet:,} XC", discord.ButtonStyle.secondary, "double", len(self.player_cards) != 2),
+                    BlackjackButton("Surrender · Half Back", discord.ButtonStyle.secondary, "surrender", len(self.player_cards) != 2),
+                    BlackjackButton("Quit · Lose Stake", discord.ButtonStyle.danger, "quit"),
+                ))
+                container.add_item(discord.ui.TextDisplay('-# Get closer to 21 than the dealer without going over. Double adds the displayed stake and draws one final card.'))
             self.add_item(container)
 
         async def resolve(self, interaction, result, multiplier):
@@ -693,16 +706,39 @@ def register_commands(bot, db, create_player) -> None:
             self.reveal = True
             self.result = f"**{result}** " + (f"Payout: **{payout} XC**." if payout else f"You lost **{self.bet} XC**.")
             self.rebuild()
-            await interaction.response.edit_message(view=self)
+            await interaction.edit_original_response(view=self)
 
         async def play_action(self, interaction, action):
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message('Open /casino for your own hand.',ephemeral=True)
+                return
+            if self.busy:
+                await interaction.response.send_message('Your last action is processing. Please wait.',ephemeral=True)
+                return
+            self.busy=True
+            try:
+                await self._play_action(interaction,action)
+            finally:
+                self.busy=False
+
+        async def _play_action(self, interaction, action):
             if self.finished:
                 if action == "again":
                     _replay_game_names[interaction.id] = "blackjack"
-                    await blackjack.callback(interaction, self.bet)
+                    try:
+                        await blackjack.callback(interaction, self.bet)
+                    finally:
+                        _replay_game_names.pop(interaction.id,None)
                     return
                 await interaction.response.send_message("This Blackjack hand is already finished.", ephemeral=True)
                 return
+            if action not in {'hit','stand','double','surrender','quit'}:
+                await interaction.response.send_message('Refresh your hand before choosing an action.',ephemeral=True)
+                return
+            if action=='surrender' and len(self.player_cards)!=2:
+                await interaction.response.send_message('Surrender is only available on the first two cards.',ephemeral=True)
+                return
+            await interaction.response.defer()
             if action == "hit":
                 self.player_cards.append(card())
                 if hand_value(self.player_cards) > 21:
@@ -716,7 +752,7 @@ def register_commands(bot, db, create_player) -> None:
                         await self.resolve(interaction, "21! Automatic stand — you win!", 2)
                 else:
                     self.rebuild()
-                    await interaction.response.edit_message(view=self)
+                    await interaction.edit_original_response(view=self)
                 return
             if action == "surrender":
                 self.finished = True
@@ -725,7 +761,7 @@ def register_commands(bot, db, create_player) -> None:
                 self.payout = payout
                 self.result = f"**Surrendered.** Half your bet was returned: **{payout} XC**."
                 self.rebuild()
-                await interaction.response.edit_message(view=self)
+                await interaction.edit_original_response(view=self)
                 return
             if action == "quit":
                 self.finished = True
@@ -733,15 +769,15 @@ def register_commands(bot, db, create_player) -> None:
                 finish(db, self.owner_id, "casino_blackjack", self.bet, 0, "quit")
                 self.result = f"**Quit.** You lost **{self.bet} XC**."
                 self.rebuild()
-                await interaction.response.edit_message(view=self)
+                await interaction.edit_original_response(view=self)
                 return
             if action == "double":
                 if len(self.player_cards) != 2:
-                    await interaction.response.send_message("❌ Double Down is only available on your first two cards.", ephemeral=True)
+                    await interaction.followup.send("❌ Double Down is only available on your first two cards.", ephemeral=True)
                     return
                 player = create_player(interaction.user)
                 if player['xc'] < self.bet:
-                    await interaction.response.send_message(f"❌ You need another **{self.bet} XC** to Double Down.", ephemeral=True)
+                    await interaction.followup.send(f"❌ You need another **{self.bet} XC** to Double Down.", ephemeral=True)
                     return
                 db.execute("UPDATE players SET xc=xc-? WHERE user_id=?", (self.bet, self.owner_id))
                 self.bet *= 2

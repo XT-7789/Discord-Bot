@@ -1,5 +1,13 @@
 # X BOT Maintenance Log
 
+## 2026-09-08 — Casino mobile layout and response handling
+
+- Replaced whitespace-aligned Blackjack columns with stacked player/dealer hands, clear totals, bust indicators and a net-result heading.
+- Grouped Hit/Stand separately from Double/Surrender/Quit; buttons explain their effect and Double displays its extra XC cost.
+- Added direct Casino game-form shortcuts and retained the previous valid stake in Change Bet.
+- Blackjack acknowledges active-hand actions before settlement/rendering and rejects overlapping clicks. Server validation rejects surrender after more than two cards.
+- Existing odds, payouts and cooldowns are unchanged. Offline regressions cover hand visibility, in-place updates, busy handling, late surrender and stake prefill; no live Discord latency measurement performed.
+
 ## 2026-09-08 — Economy and Casino usability
 
 - Promoted Economy and Casino in the Easy Lobby; War remains accessible through All Activities.

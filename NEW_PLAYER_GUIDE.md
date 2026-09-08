@@ -4,6 +4,8 @@ X BOT is designed around panels. You only need a few short slash commands; most 
 
 The Lobby highlights **Earn & Sell** and **Casino**. Casino is optional entertainment using fictional XC, not guaranteed income. Choose an existing game, read the bet range and submit one bet. Completed rounds show total returned separately from net profit/loss and your wallet. **Play Again** uses the displayed stake once; **Change Bet**, **Back to Casino** and **Lobby** let you change course. Normal cooldowns still apply. War is available in **All Activities**.
 
+Casino includes direct Blackjack, Coinflip and Slots buttons; other games remain in the selector. These buttons open a bet form, not an immediate wager. Change Bet pre-fills the previous stake when it is still within limits. In Blackjack, your cards and the dealer's cards are stacked for mobile readability. Hit takes a card; Stand finishes your hand. Double shows its extra cost, Surrender returns half, and Quit loses the stake.
+
 ## 1. Start here
 
 1. Use `/lobby`. The Easy Lobby shows one recommended next step.
