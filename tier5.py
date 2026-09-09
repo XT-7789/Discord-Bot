@@ -333,7 +333,7 @@ def register_commands(bot, db, create_player):
                 MissionButton(owner_id, "page:weekly", "Weekly", "📅", style=discord.ButtonStyle.primary if page == "weekly" else discord.ButtonStyle.secondary, disabled=summary["level"] < 2),
             ))
             if notice:
-                container.add_item(discord.ui.TextDisplay(f"-# {notice}"))
+                container.add_item(discord.ui.TextDisplay(notice))
             if page == "home":
                 sections = []
                 for category, label in (("starter", "Starter Journey"), ("daily", "Daily Missions"), ("weekly", "Weekly Missions")):

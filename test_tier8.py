@@ -508,6 +508,25 @@ class ResearchTests(unittest.TestCase):
                     select._values=[select.options[0].value]
                     await select.callback(i)
                     self.assertIn('Unit Power',str(i.response.edit_message.call_args.kwargs['view'].to_components()))
+                    # Market pages remain readable and within component limits.
+                    module.db.execute('DELETE FROM market_listings')
+                    item_id=module.db.execute('SELECT id FROM items LIMIT 1').fetchone()[0]
+                    for number in range(9):
+                        module.db.execute('INSERT INTO market_listings(seller_id,item_id,quantity,price_each,created_at) VALUES(?,?,1,?,?)',(self.uid,item_id,number+1,int(time.time())))
+                    module.db.commit()
+                    market=bot.xbot_system_page_builder(self.uid,'market')
+                    for page_number,count in ((1,4),(2,4),(3,1)):
+                        self.assertIn(f'Page {page_number}/3',str(market.to_components()))
+                        self.assertEqual(count,sum(isinstance(x,discord.ui.Section) for x in market.walk_children()))
+                        self.assertLessEqual(market.total_children_count,40)
+                        next_button=next(x for x in market.walk_children() if getattr(x,'label',None)=='Next')
+                        self.assertEqual(page_number==3,next_button.disabled)
+                        if page_number<3:
+                            await next_button.callback(i)
+                            market=i.edit_original_response.call_args.kwargs['view']
+                    stock=bot.xbot_system_page_builder(self.uid,'stock')
+                    self.assertIn('Unrealised P/L',str(stock.to_components()))
+                    self.assertIn('Choose a company',str(stock.to_components()))
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()

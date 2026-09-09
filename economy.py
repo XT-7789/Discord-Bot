@@ -1014,7 +1014,8 @@ def register_commands(bot, db, create_player) -> None:
             self.page = max(0, min(page, pages - 1))
             category = db.execute("SELECT * FROM item_categories WHERE id=?", (category_id,)).fetchone()
             container = discord.ui.Container(accent_color=discord.Color.teal())
-            container.add_item(discord.ui.TextDisplay(f"## 🏪 X BOT's {category['emoji']} {category['label']} Shop\nChoose an item with its **Buy Now** button. Prices and stock come from the Dashboard."))
+            wallet=db.execute('SELECT xc,xcrystals FROM players WHERE user_id=?',(owner_id,)).fetchone()
+            container.add_item(discord.ui.TextDisplay(f"## 🏪 {category['label']} Shop\nWallet **{wallet['xc']:,} XC** · Crystals **{wallet['xcrystals']:,}**\nChoose an item below."))
             container.add_item(discord.ui.Separator())
             player = db.execute("SELECT * FROM players WHERE user_id=?", (owner_id,)).fetchone()
             for item in items[self.page * 5:(self.page + 1) * 5]:
@@ -1261,9 +1262,10 @@ def register_commands(bot, db, create_player) -> None:
             notice_text = f"\n{notice}" if notice else ""
             container.add_item(discord.ui.TextDisplay(
                 f"## 🎒 X BOT Backpack\n"
+                f"**{len(all_rows)} item types** · **{sum(int(row['quantity']) for row in all_rows):,} items**\n"
                 f"### {selected['emoji']} {selected['name']} × {selected['quantity']}{equipped_text}\n"
                 f"{description[:300]}\n"
-                f"💰 Sell value: **{sell_value:,} {'XC' if selected['currency']=='xc' else 'XCrystals'}** each{notice_text}"
+                f"### Sell-back Value\n## {sell_value:,} {'XC' if selected['currency']=='xc' else 'XCrystals'}\nPer item{notice_text}"
             ))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(BackpackItemSelect(owner_id, self.page, selected['id'], shown)))
@@ -1572,24 +1574,27 @@ def register_commands(bot, db, create_player) -> None:
             container.add_item(discord.ui.TextDisplay(
                 f"## ⛏️ X BOT Mining Hub\n"
                 f"📈 Mining Level **{player['mining_level']}** · EXP **{player['mining_exp']:,}**\n"
-                f"⚡ Energy **{energy}/{setting(db, 'mining_max_energy')}**\n"
-                f"🗺️ Area: {area_text}\n🛠️ Tool: {pickaxe_text}"
+                f"### ⚡ Energy\n## {energy} / {setting(db, 'mining_max_energy')}\n"
+                f"### Expedition\n🗺️ {area_text}\n🛠️ {pickaxe_text}"
             ))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(
                 MiningHubButton("mine", "Mine Now", "⛏️", discord.ButtonStyle.success),
                 MiningHubButton("profile", "Profile", "📊", discord.ButtonStyle.primary),
+            ))
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay('### 🎒 Equipment & Materials'))
+            container.add_item(discord.ui.ActionRow(
                 MiningHubButton("inventory", "Backpack", "🎒", discord.ButtonStyle.secondary),
                 MiningHubButton("shop", "Tool Shop", "🏪", discord.ButtonStyle.primary),
+                MiningHubButton("sell", "Sell Materials", "💰", discord.ButtonStyle.secondary),
             ))
             container.add_item(discord.ui.ActionRow(
                 MiningHubButton("areas", "Areas", "🗺️", discord.ButtonStyle.primary),
                 MiningHubButton("collection", "Collection", "🏆", discord.ButtonStyle.secondary),
-                MiningHubButton("sell", "Sell Mining Materials", "💰", discord.ButtonStyle.secondary),
                 EconomyCentreButton(owner_id, "Economy"),
                 MiningLobbyButton(),
             ))
-            container.add_item(discord.ui.TextDisplay("-# Quick start: Mine Now → Sell Mining Materials to earn XC. Upgrade your tool when ready; other pages are optional."))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:

@@ -28,3 +28,9 @@ Army shows total/service power and War Credit balance, service switching and pag
 Legacy player detail views are passed through the shared presentation layer: consistent titles/colours, heading groups separated visually where component capacity permits, and existing owner-checked controls and navigation. This includes economic detail pages, crafting/production/research, missions and military operations. Existing active-game controls and transaction results retain their behaviour; staff/dashboard UI is outside this player-UI pass.
 
 Offline coverage includes the 35 player routes, component limits, recruitment confirmation before payment, repeated confirmation, changed prices, insufficient funds, and Army detail selection. This is not a claim of live visual verification on every Discord device.
+
+## Readability renewal: trading, items and mining
+
+Stock Market now leads with a large wallet value and portfolio value/P&L, with company details behind the selector rather than a long duplicate quote list. Company detail separates price, holding and availability. Shop displays available currencies; Backpack highlights item count and selected-item sell value. Mining separates energy, expedition and equipment/material controls. Existing transaction rules are unchanged in this visual pass.
+
+Player Market shows four listing cards per page, with Previous/Next/Refresh, current wallet and single-row shared navigation. All active listings can be paged, replacing the fixed latest-ten list. A nine-listing integration fixture verifies page counts, disabled last-page navigation and component limits. Mobile visual acceptance remains pending.

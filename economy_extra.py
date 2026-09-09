@@ -556,25 +556,45 @@ def register_commands(bot, db, create_player, find_item):
                 return
             await interaction.response.edit_message(view=economy_home_view(self.owner_id))
 
+    class MarketPageButton(discord.ui.Button):
+        def __init__(self,owner_id,page,label,disabled=False):
+            super().__init__(label=label,style=discord.ButtonStyle.secondary,disabled=disabled)
+            self.owner_id,self.page=owner_id,page
+        async def callback(self,i):
+            if i.user.id!=self.owner_id:
+                await i.response.send_message('Open /market for your own panel.',ephemeral=True)
+                return
+            await i.response.defer()
+            await i.edit_original_response(view=MarketView(self.owner_id,self.page))
+
     class MarketView(discord.ui.LayoutView):
-        def __init__(self, owner_id: int):
+        def __init__(self, owner_id: int,page=0):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             expire_market_listings(db)
+            count=db.execute('SELECT COUNT(*) FROM market_listings l JOIN items i ON i.id=l.item_id WHERE l.active=1 AND l.quantity>0').fetchone()[0]
+            pages=max(1,(count+3)//4)
+            page=max(0,min(int(page),pages-1))
             rows = db.execute("""SELECT l.*,i.name,i.emoji,i.description,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(l.seller_id AS TEXT)) seller_name
                 FROM market_listings l JOIN items i ON i.id=l.item_id LEFT JOIN players p ON p.user_id=l.seller_id
-                WHERE l.active=1 AND l.quantity>0 ORDER BY l.id DESC LIMIT 10""").fetchall()
+                WHERE l.active=1 AND l.quantity>0 ORDER BY l.id DESC LIMIT 4 OFFSET ?""",(page*4,)).fetchall()
             container = discord.ui.Container(accent_color=discord.Color.teal())
-            container.add_item(discord.ui.TextDisplay("## 🛒 X BOT Player Market\nBuy tradeable items listed by other players."))
+            wallet=db.execute('SELECT xc FROM players WHERE user_id=?',(owner_id,)).fetchone()[0]
+            container.add_item(discord.ui.TextDisplay(f"## 🛒 Player Market\n### Wallet\n## {wallet:,} XC\n{count} active listings · Page {page+1}/{pages}"))
             for row in rows:
                 container.add_item(discord.ui.Separator())
                 text = f"### {row['emoji']} {row['name']}\n📦 **{row['quantity']} available** · 👤 {row['seller_name']}\n💰 **{row['price_each']:,} XC each**"
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=MarketBuyButton(row)))
             if not rows:
                 container.add_item(discord.ui.TextDisplay("No active listings. Open your Backpack from the Economy Centre to create one."))
-            container.add_item(discord.ui.ActionRow(MarketLobbyButton(owner_id)))
-            container.add_item(discord.ui.TextDisplay("-# Latest 10 listings · Market purchases use XC only."))
+            container.add_item(discord.ui.ActionRow(MarketPageButton(owner_id,page-1,'Previous',page==0),MarketPageButton(owner_id,page+1,'Next',page==pages-1),MarketPageButton(owner_id,page,'Refresh')))
             self.add_item(container)
+
+        async def interaction_check(self,i):
+            if i.user.id==self.owner_id:
+                return True
+            await i.response.send_message('Open /market for your own panel.',ephemeral=True)
+            return False
 
     # EconomyCentre is registered after Economy, Casino and Market.  Keep all
     # player navigation in a single message by exporting the local view factory.

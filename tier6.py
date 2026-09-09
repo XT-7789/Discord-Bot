@@ -702,7 +702,8 @@ def register_commands(bot, db, create_player):
             super().__init__(owner_id)
             rows = contract_rows(db, owner_id) if setting(db, "tier6_economy_enabled") and setting(db, "tier6_contracts_enabled") else []
             container = discord.ui.Container(accent_color=discord.Color.green())
-            container.add_item(discord.ui.TextDisplay("## 🛠️ Earn & Contracts\nComplete normal Economy actions; Contract progress updates automatically."))
+            ready_count=sum(not row['claimed'] and row['progress']>=row['target'] for row in rows)
+            container.add_item(discord.ui.TextDisplay(f"## 🛠️ Contracts\n### Ready to Claim\n## {ready_count} rewards\nProgress updates as you play."))
             container.add_item(economy_navigation(owner_id, "earn"))
             if notice:
                 container.add_item(discord.ui.TextDisplay(f"-# {notice}"))
@@ -711,7 +712,7 @@ def register_commands(bot, db, create_player):
                 for row in rows:
                     state = "🎁 Claimed" if row["claimed"] else "✅ Ready" if row["progress"] >= row["target"] else "⬜ In progress"
                     lines.append(
-                        f"{row['emoji']} **{row['title']}** · {row['progress']}/{row['target']}\n"
+                        f"### {row['emoji']} {row['title']}\nProgress **{row['progress']}/{row['target']}**\n"
                         f"{row['description']}\n{state} · **{row['reward_xc']} XC + {row['reward_war_credits']} WC**"
                     )
                 container.add_item(discord.ui.TextDisplay("\n\n".join(lines)))
@@ -814,13 +815,13 @@ def register_commands(bot, db, create_player):
             container = discord.ui.Container(accent_color=discord.Color.green() if change >= 0 else discord.Color.red())
             container.add_item(discord.ui.TextDisplay(
                 f"## {company['emoji']} {company['symbol']} · {company['name']}\n"
-                f"**{company['industry']}** · {company['description']}\n\n"
-                f"💹 Price **{company['price']:,} XC** · {'+' if change >= 0 else ''}{change:,} ({percent:+.1f}%)\n"
-                f"📊 Available **{company['available_shares']:,}/{company['total_shares']:,} shares**\n"
-                f"💼 You own **{owned:,}** · Average **{average:,} XC** · P/L **{profit:+,} XC**"
+                f"{company['industry']}\n"
+                f"### 💹 Share Price\n## {company['price']:,} XC\nChange **{change:+,} ({percent:+.1f}%)**\n"
+                f"### 💼 Your Holding\nShares **{owned:,}**\nAverage cost **{average:,} XC**\nUnrealised P/L **{profit:+,} XC**\n"
+                f"### 📊 Availability\n**{company['available_shares']:,}** shares available"
             ))
             if notice:
-                container.add_item(discord.ui.TextDisplay(f"-# {notice}"))
+                container.add_item(discord.ui.TextDisplay(notice))
             container.add_item(discord.ui.ActionRow(
                 StockTradeButton(owner_id, company_id, "buy"),
                 StockTradeButton(owner_id, company_id, "sell"),
@@ -836,18 +837,17 @@ def register_commands(bot, db, create_player):
             super().__init__(owner_id)
             update_stock_prices(db)
             companies = db.execute("SELECT * FROM tier6_stock_companies WHERE enabled=1 ORDER BY symbol LIMIT 25").fetchall()
+            summary=economy_summary(db,owner_id)
             container = discord.ui.Container(accent_color=discord.Color.blue())
             container.add_item(discord.ui.TextDisplay(
-                "## 📈 X Virtual Stock Market\n"
-                "Game-only companies use XC. Prices update automatically and never represent real investments."
+                f"## 📈 Stock Market\nOVERVIEW\n"
+                f"### 💰 Wallet\n## {summary['player']['xc']:,} XC\n"
+                f"### 💼 Portfolio\nValue **{summary['stock_value']:,} XC**\nUnrealised P/L **{summary['stock_value']-summary['stock_cost']:+,} XC**\n"
+                "Game-only companies · Fictional XC, not real investments."
             ))
             container.add_item(economy_navigation(owner_id, "stock"))
             if setting(db, "tier6_economy_enabled") and setting(db, "tier6_stock_enabled") and companies:
-                lines = []
-                for row in companies:
-                    change = int(row["price"]) - int(row["previous_price"])
-                    lines.append(f"{row['emoji']} **{row['symbol']}** · {row['price']:,} XC · **{change:+,}**")
-                container.add_item(discord.ui.TextDisplay("\n".join(lines)))
+                container.add_item(discord.ui.TextDisplay(f"### Companies\n{len(companies)} available · Select to inspect price and holdings."))
                 container.add_item(discord.ui.ActionRow(StockCompanySelect(owner_id, companies)))
                 container.add_item(discord.ui.ActionRow(
                     EconomyNavButton(owner_id, "assets", "My Portfolio", "💼", style=discord.ButtonStyle.success),
@@ -924,7 +924,8 @@ def register_commands(bot, db, create_player):
             ).fetchall()
             now = int(time.time())
             container = discord.ui.Container(accent_color=discord.Color.orange())
-            container.add_item(discord.ui.TextDisplay("## 🏭 Production Centre\nQueue multiple Recipe batches and collect all finished products in one press."))
+            totals=db.execute("SELECT COUNT(*) total,COALESCE(SUM(ready_at<=?),0) ready FROM tier6_production_queue WHERE user_id=? AND status='working'",(now,owner_id)).fetchone()
+            container.add_item(discord.ui.TextDisplay(f"## 🏭 Production Centre\n### Ready to Collect\n## {totals['ready']} jobs\nActive queue **{totals['total']}** · Collect finished products below."))
             container.add_item(economy_navigation(owner_id, "production"))
             if notice:
                 container.add_item(discord.ui.TextDisplay(f"-# {notice}"))
@@ -933,7 +934,7 @@ def register_commands(bot, db, create_player):
                 for row in queue:
                     state = "✅ Ready" if int(row["ready_at"]) <= now else f"<t:{row['ready_at']}:R>"
                     queue_lines.append(f"{row['emoji']} **{row['name']} ×{row['quantity']}** · {state}")
-                container.add_item(discord.ui.TextDisplay("### Queue\n" + "\n".join(queue_lines)))
+                container.add_item(discord.ui.TextDisplay("### Queue · Next 10 Jobs\n" + "\n\n".join(queue_lines)))
             else:
                 container.add_item(discord.ui.TextDisplay("### Queue\nNo active Production jobs."))
             if recipes and setting(db, "tier6_production_enabled"):

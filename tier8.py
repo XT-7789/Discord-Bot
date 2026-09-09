@@ -303,7 +303,7 @@ def register_commands(bot,db,create_player):
             super().__init__(owner)
             c=discord.ui.Container(accent_color=discord.Color.blurple())
             wallet=db.execute('SELECT xc FROM players WHERE user_id=?',(owner,)).fetchone()[0]
-            c.add_item(discord.ui.TextDisplay(f'## 🔬 Research Centre\nWallet: **{wallet:,} XC**\nChoose projects → review cost → confirm once.\n'+notice))
+            c.add_item(discord.ui.TextDisplay(f'## 🔬 Research Centre\n### Wallet\n## {wallet:,} XC\nSelect projects · Review cost · Confirm\n'+notice))
             c.add_item(discord.ui.ActionRow(*(Go(label,f'research:{key}',discord.ButtonStyle.primary if branch==key else discord.ButtonStyle.secondary) for key,label in {**BRANCHES,'queue':'⏳ Queue'}.items())))
             if branch=='queue':
                 jobs=db.execute("SELECT j.*,t.name FROM tier8_research_jobs j JOIN tier8_technologies t ON t.code=j.code WHERE user_id=? AND status='queued' AND ready_at>? ORDER BY ready_at",(owner,int(time.time()))).fetchall()
