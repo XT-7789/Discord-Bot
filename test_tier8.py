@@ -122,6 +122,13 @@ class ResearchTests(unittest.TestCase):
                     main_buttons=[x for x in panels[0].walk_children() if isinstance(x,discord.ui.Button)]
                     self.assertTrue({'profile','economy','war','missions','help','close','city','army','casino'} <= {getattr(x,'key',None) for x in main_buttons})
                     self.assertIn('PLAYER HUB',str(panels[0].to_components()))
+                    for button in main_buttons:
+                        if getattr(button,'action',None) in {'deposit','withdraw'}:
+                            self.assertEqual(discord.ButtonStyle.secondary,button.style)
+                        if getattr(button,'key',None) in {'economy','war','casino','missions'} and button.label not in {'Continue','View Rewards'}:
+                            self.assertEqual(discord.ButtonStyle.primary,button.style)
+                        if button.label in {'Continue','View Rewards'}:
+                            self.assertEqual(discord.ButtonStyle.success,button.style)
                     i=SimpleNamespace(user=SimpleNamespace(id=self.uid),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock(),followup=SimpleNamespace(send=AsyncMock()))
                     await next(x for x in main_buttons if getattr(x,'key',None)=='economy').callback(i)
                     all_view=i.edit_original_response.call_args.kwargs['view']

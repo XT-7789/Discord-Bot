@@ -121,6 +121,17 @@ def register(bot, db, create_player):
         token=navigation.set(history[-40:])
         try:
             view=render_page(owner,key,notice,member)
+            if key in {'menu','economy'}:
+                # Overview colour emphasises system entry points, not banking.
+                main_routes={'economy','war','casino','missions'} if key=='menu' else {'finance','market_menu','casino','earn_menu'}
+                for child in view.walk_children():
+                    if isinstance(child,discord.ui.Button):
+                        if getattr(child,'action',None) in {'deposit','withdraw'}:
+                            child.style=discord.ButtonStyle.secondary
+                        elif isinstance(child,Nav) and child.key in main_routes:
+                            child.style=discord.ButtonStyle.primary
+                        if isinstance(child,Nav) and child.label in {'Continue','View Rewards'}:
+                            child.style=discord.ButtonStyle.success
             view.system_history=navigation.get()
             for child in view.walk_children():
                 if isinstance(child,(Nav,HelpSelect)):
