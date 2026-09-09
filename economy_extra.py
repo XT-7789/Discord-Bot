@@ -136,7 +136,8 @@ def register_commands(bot, db, create_player, find_item):
             # Modal submits are a separate Discord interaction. Update the
             # original Economy Centre message instead of posting a result.
             await interaction.response.defer()
-            result = bot.xbot_system_page_builder(interaction.user.id,'finance',notice=detail) if self.return_to_finance else EconomyBankView(interaction.user.id)
+            destination=self.return_to_finance if isinstance(self.return_to_finance,str) else 'finance'
+            result = bot.xbot_system_page_builder(interaction.user.id,destination,notice=detail) if self.return_to_finance else EconomyBankView(interaction.user.id)
             await self.source_message.edit(view=result)
 
     class EconomyPanelButton(discord.ui.Button):
@@ -173,6 +174,8 @@ def register_commands(bot, db, create_player, find_item):
             if self.action in {"daily", "daily_lobby"}:
                 await interaction.response.defer()
                 def result_view(notice):
+                    if getattr(self,'overview_destination',None):
+                        return bot.xbot_system_page_builder(self.owner_id,self.overview_destination,notice=notice)
                     if self.action == "daily_lobby":
                         return bot.xbot_player_lobby_builder(self.owner_id, notice=notice)
                     return economy_home_view(self.owner_id, notice=notice)
@@ -582,7 +585,12 @@ def register_commands(bot, db, create_player, find_item):
     bot.xbot_player_panel_builders['wallet'] = lambda owner_id: EconomyBalanceView(owner_id)
     bot.xbot_player_lobby_builder = lambda owner_id: XBotLobbyView(owner_id)
     bot.xbot_daily_button_builder = lambda owner_id: EconomyPanelButton(owner_id, 'daily_lobby', 'Claim Daily', '🎁', discord.ButtonStyle.success)
-    bot.xbot_finance_button_builder = lambda owner_id, action: EconomyPanelButton(owner_id, action, action.title(), '📥' if action=='deposit' else '📤', discord.ButtonStyle.primary, return_to_finance=True)
+    def overview_daily_button(owner_id,destination):
+        button=EconomyPanelButton(owner_id,'daily','Claim Daily','🎁',discord.ButtonStyle.success)
+        button.overview_destination=destination
+        return button
+    bot.xbot_overview_daily_button_builder=overview_daily_button
+    bot.xbot_finance_button_builder = lambda owner_id, action, destination='finance': EconomyPanelButton(owner_id, action, action.title(), '📥' if action=='deposit' else '📤', discord.ButtonStyle.primary, return_to_finance=destination)
 
     @bot.tree.command(name="market", description="Open the X BOT player marketplace")
     async def market(interaction: discord.Interaction):

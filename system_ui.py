@@ -3,6 +3,7 @@ import discord
 import tier5
 import war_tier
 import casino
+import economy
 import os
 import functools
 import time
@@ -132,6 +133,12 @@ def register(bot, db, create_player):
         filled=min(10,max(0,int(10*value/max(1,total))))
         return '▰'*filled+'▱'*(10-filled)
 
+    def overview_block(view,title,body,buttons):
+        view.box.add_item(discord.ui.Separator())
+        view.box.add_item(discord.ui.TextDisplay(f'### {title}\n{body}'))
+        if buttons:
+            view.box.add_item(discord.ui.ActionRow(*buttons))
+
     def render_page(owner,key='menu',notice='',member=None):
         player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
         if key=='mission_weekly' and tier5.profile_summary(db,owner)['level']<2:
@@ -173,13 +180,9 @@ def register(bot, db, create_player):
             footer(view,owner,key)
             return view
         if key=='finance':
-            view=Shell(owner,'💳 Finance','Manage your XC in one place.',notice)
-            view.box.add_item(discord.ui.TextDisplay(f"### Wallet\n## {player['xc']:,} XC\nAvailable to spend."))
-            view.box.add_item(discord.ui.Separator())
-            view.box.add_item(discord.ui.TextDisplay(f"### Bank\n## {player['bank_xc']:,} XC\nWithdraw to use these savings."))
-            view.box.add_item(discord.ui.ActionRow(bot.xbot_finance_button_builder(owner,'deposit'),bot.xbot_finance_button_builder(owner,'withdraw')))
-            view.box.add_item(discord.ui.TextDisplay(f"**Total XC: {player['xc']+player['bank_xc']:,}** · Transfers do not change your total."))
-            view.box.add_item(discord.ui.ActionRow(Nav(owner,'View Assets','assets'),Nav(owner,'Exchange','exchange')))
+            view=Shell(owner,'💳 Finance','OVERVIEW',notice)
+            overview_block(view,'Accounts',f"Wallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**\nTotal **{player['xc']+player['bank_xc']:,} XC**",[bot.xbot_finance_button_builder(owner,'deposit'),bot.xbot_finance_button_builder(owner,'withdraw')])
+            overview_block(view,'Assets & Exchange',f"War Credits **{player['money']:,}** · XCrystals **{player['xcrystals']:,}**",[Nav(owner,'View Assets','assets'),Nav(owner,'Exchange','exchange')])
             footer(view,owner,key)
             return prepare(view,owner,key,force=True)
         if key in sections:
@@ -229,8 +232,75 @@ def register(bot, db, create_player):
                 block('### 🎰 Casino\nChoose a game · XC stakes can be lost.',[Nav(owner,'Casino','casino'),Nav(owner,'VIP Status','vip'),Nav(owner,'Profile','profile')])
                 footer(view,owner,key)
                 return prepare(view,owner,key,force=True)
-            if key=='economy':
-                view.box.add_item(discord.ui.TextDisplay(f"### Wallet · {player['xc']:,} XC\nBank **{player['bank_xc']:,} XC**"))
+            if key in {'economy','profile','war','missions','earn_menu','market_menu'}:
+                view=Shell(owner,title,'OVERVIEW',notice)
+                def navs(*entries):
+                    return [Nav(owner,label,dest) for label,dest in entries]
+                def block(title,body,buttons):
+                    overview_block(view,title,body,buttons)
+                def funds():
+                    return f"Wallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**"
+                def earning():
+                    ready_at=int(player['last_daily'])+economy.setting(db,'daily_cooldown')
+                    ready=ready_at<=int(time.time())
+                    daily=bot.xbot_overview_daily_button_builder(owner,key)
+                    daily.disabled=not ready
+                    daily.label='Claim Daily' if ready else 'Daily Collected'
+                    maximum=economy.setting(db,'mining_max_energy')
+                    elapsed=max(0,int(time.time())-int(player['mining_energy_updated']))
+                    energy=min(maximum,int(player['mining_energy'])+(elapsed//max(1,economy.setting(db,'mining_energy_regen_seconds')))*economy.setting(db,'mining_energy_regen_amount'))
+                    status='Daily **Ready**' if ready else f'Daily <t:{ready_at}:R>'
+                    energy_text=f'Energy **{energy}/{maximum}**' if economy.setting(db,'mining_energy_enabled') else 'Energy costs off'
+                    block('💼 Earn',f'{status} · {energy_text}',[daily,*navs(('Mines','mining'),('Contracts','contracts'))])
+                if key=='economy':
+                    block('💳 Finance',funds(),[bot.xbot_finance_button_builder(owner,'deposit',key),bot.xbot_finance_button_builder(owner,'withdraw',key),*navs(('Finance','finance'))])
+                    earning()
+                    block('📊 Market','Items · Player trading · Stocks',navs(('Market','market_menu'),('Shop','shop'),('Stocks','stock')))
+                    membership=casino.cooldown_info(db,member,'blackjack')['tier'] if member is not None and hasattr(member,'roles') else 'Check VIP Status'
+                    block('🎰 Casino',f'Membership **{membership}** · XC stakes can be lost.',navs(('Casino','casino'),('VIP Status','vip'),('Rankings','rankings')))
+                    view.box.add_item(discord.ui.ActionRow(*navs(('Earn & Create','earn_menu'),('Assets','assets'))))
+                elif key=='profile':
+                    span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
+                    xp=profile['xp']-profile['current_floor']
+                    status=f'{progress_bar(xp,span)} {xp}/{span} XP' if profile['next_threshold'] else 'MAX LEVEL'
+                    block('👤 Player',f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{profile['rank']}\n{status}",navs(('Missions','missions')))
+                    block('💰 Accounts',funds()+f"\nWar Credits **{player['money']:,}** · XCrystals **{player['xcrystals']:,}**",navs(('Finance','finance'),('VIP Status','vip')))
+                    count=db.execute('SELECT COALESCE(SUM(quantity),0) FROM inventories WHERE user_id=?',(owner,)).fetchone()[0]
+                    block('🎒 Collection',f'Backpack **{count:,} items**',navs(('Backpack','inventory'),('Assets','assets')))
+                elif key=='war':
+                    cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(owner,)).fetchone()[0]
+                    lands=db.execute('SELECT COUNT(*) FROM map_territories WHERE owner_user_id=?',(owner,)).fetchone()[0]
+                    units=db.execute('SELECT COALESCE(SUM(quantity),0) FROM player_war_units WHERE user_id=?',(owner,)).fetchone()[0]
+                    block('🏙️ Nation',f"Cities **{cities}** · Land **{lands}**\nWar Credits **{player['money']:,}**",navs(('Cities','city'),('Overview','war_overview')))
+                    block('🪖 Forces',f'Units **{units:,}**',navs(('Army','army'),('Recruit','recruit')))
+                    block('⚔️ Operations','Choose a target and review before launching.',navs(('Diplomacy','diplomacy'),('Attack','attack'),('Defence','defence')))
+                    block('📋 Intelligence','Review previous operations.',navs(('Reports','reports')))
+                elif key=='missions':
+                    level=tier5.profile_summary(db,owner)['level']
+                    for category in ('starter','daily','weekly'):
+                        _,items=tier5.missions_for(db,owner,category)
+                        claimed=sum(m['claimed'] for m in items)
+                        ready=sum(not m['claimed'] and m['progress']>=m['target'] for m in items)
+                        pending=next((m for m in items if not m['claimed']),None)
+                        body=f'{progress_bar(claimed,len(items))} {claimed}/{len(items)} claimed · **{ready} ready**'
+                        if pending:
+                            body+=f"\n{pending['title']} · {pending['progress']}/{pending['target']}"
+                        button=Nav(owner,'View '+category.title(),'mission_'+category)
+                        if category=='weekly' and level<2:
+                            body='Unlocks at Nation Level 2.'
+                            button.disabled=True
+                        block(category.title(),body,[button])
+                elif key=='earn_menu':
+                    earning()
+                    block('🛠️ Workshop','Craft items and manage production.',navs(('Craft','craft'),('Production','production')))
+                    block('🔬 Development',f"War Credits **{player['money']:,}**",navs(('Research','research'),('Cities','city')))
+                elif key=='market_menu':
+                    block('🛒 Shopping',funds(),navs(('Shop','shop'),('Player Market','market')))
+                    block('📈 Investments','Review quotes and holdings before trading.',navs(('Stocks','stock'),('Assets','assets')))
+                    count=db.execute('SELECT COALESCE(SUM(quantity),0) FROM inventories WHERE user_id=?',(owner,)).fetchone()[0]
+                    block('🎒 Inventory',f'Backpack **{count:,} items**',navs(('Backpack','inventory')))
+                footer(view,owner,key)
+                return prepare(view,owner,key,force=True)
             for n in range(0,len(links),2):
                 row=discord.ui.ActionRow()
                 for label,dest in links[n:n+2]:
@@ -357,6 +427,19 @@ def register(bot, db, create_player):
             title,sep,body=first_text.content.partition('\n')
             title=re.sub(r'\s*[·—-]\s*Tier\s+\d+','',title[3:].replace('X BOT ','')).replace('`','')
             first_text.content=f'-# ✦ X SYSTEM\n## {title}'+(sep+body if sep else '')
+        # Preserve specialised forms/results, while clearly separating their
+        # readable content from controls. Never change active-game actions.
+        if not isinstance(view,Shell) and getattr(view,'finished',None) is not False and view.total_children_count<=32:
+            box=next((x for x in view.children if isinstance(x,discord.ui.Container)),None)
+            if box is not None:
+                items=list(box.children)
+                first_row=next((n for n,x in enumerate(items) if isinstance(x,discord.ui.ActionRow)),None)
+                if first_row is not None and first_row>0 and not isinstance(items[first_row-1],discord.ui.Separator):
+                    box.add_item(discord.ui.Separator())
+                    # Public remove/add APIs keep component parentage intact.
+                    for item in items[first_row:]:
+                        box.remove_item(item)
+                        box.add_item(item)
         for child in list(view.walk_children()):
             if isinstance(child,discord.ui.Container) and child.accent_colour not in (discord.Color.red(),discord.Color.green(),discord.Color(0xFF5470)):
                 child.accent_colour=discord.Color(0x41D9D0)

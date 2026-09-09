@@ -540,16 +540,17 @@ def register_commands(bot, db, create_player) -> None:
             self.owner_id = owner_id
             player = create_player_from_id(owner_id)
             container = discord.ui.Container(accent_color=discord.Color(0x00D4FF))
+            record=db.execute('SELECT games_played,total_wagered,total_won FROM casino_stats WHERE user_id=?',(owner_id,)).fetchone()
+            played=int(record['games_played']) if record else 0
+            net=int(record['total_won']-record['total_wagered']) if record else 0
             container.add_item(discord.ui.TextDisplay(
-                f"-# ◈ X CASINO / GAME TERMINAL\n## 🎰 Casino\n"
+                f"-# ✦ X SYSTEM / OVERVIEW\n## 🎰 Casino\n"
                 f"🪙 Wallet: **{player['xc']:,} XC**\n"
-                f"💰 Bet range: **{setting(db, 'casino_min_bet'):,}–{setting(db, 'casino_max_bet'):,} XC**\n"
-                f"⏳ Standard cooldown: **{setting(db, 'casino_cooldown_seconds')} seconds**\n"
-                f"Choose a game → enter your bet → submit one round.\n"
-                f"Game-specific limits appear in the bet form.\n"
-                f"-# XC is fictional game currency. You can lose your stake; Casino is optional, not a guaranteed way to earn."
+                f"Rounds **{played:,}** · Net **{net:+,} XC**\n"
+                f"-# Optional games · Fictional XC · Stakes can be lost."
             ))
             container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay('### 🎮 Games\nChoose a game, then review its bet and cooldown.'))
             container.add_item(discord.ui.ActionRow(CasinoGameSelect(owner_id)))
             quick=discord.ui.ActionRow()
             for game,label in [('blackjack','🃏 Blackjack'),('coinflip','🪙 Coinflip'),('slot','🎰 Slots')]:
@@ -557,10 +558,12 @@ def register_commands(bot, db, create_player) -> None:
                 button.label=label
                 quick.add_item(button)
             container.add_item(quick)
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay('### 📊 Records & Membership\nYour results and available benefits.'))
             container.add_item(discord.ui.ActionRow(
                 CasinoHubButton(owner_id, "casino_stats", "My Stats", "📊", discord.ButtonStyle.primary),
                 CasinoHubButton(owner_id, "casino_leaderboard", "Leaderboard", "🏆", discord.ButtonStyle.secondary),
-                CasinoHubButton(owner_id, "casino_vip", "Casino VIP", "💎", discord.ButtonStyle.success),
+                CasinoHubButton(owner_id, "casino_vip", "Buy / View VIP", "💎", discord.ButtonStyle.success),
                 CasinoLobbyButton(owner_id),
             ))
             self.add_item(container)

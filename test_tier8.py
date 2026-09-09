@@ -363,6 +363,31 @@ class ResearchTests(unittest.TestCase):
                     await form.on_submit(i)
                     self.assertEqual(initial,self.balance())
                     self.assertIn('do not have',i.response.send_message.call_args.args[0])
+                    # Overview actions keep the player on the same system.
+                    for destination in ('economy','earn_menu'):
+                        module.db.execute('UPDATE players SET last_daily=0 WHERE user_id=?',(self.uid,))
+                        module.db.commit()
+                        overview=bot.xbot_system_page_builder(self.uid,destination)
+                        self.assertGreaterEqual(sum(isinstance(x,discord.ui.Separator) for x in overview.walk_children()),3)
+                        claim=next(x for x in overview.walk_children() if getattr(x,'label',None)=='Claim Daily')
+                        before=self.balance()
+                        await claim.callback(i)
+                        result=i.edit_original_response.call_args.kwargs['view']
+                        self.assertEqual(destination,result.system_history[-1])
+                        self.assertEqual(before+50,self.balance())
+                        self.assertTrue(next(x for x in result.walk_children() if getattr(x,'label',None)=='Daily Collected').disabled)
+                        await claim.callback(i)
+                        self.assertEqual(before+50,self.balance())
+                    overview=bot.xbot_system_page_builder(self.uid,'economy')
+                    deposit=next(x for x in overview.walk_children() if getattr(x,'label',None)=='Deposit')
+                    await deposit.callback(i)
+                    form=i.response.send_modal.call_args.args[0]
+                    form.amount._value='1'
+                    before=self.balance()
+                    await form.on_submit(i)
+                    result=i.message.edit.call_args.kwargs['view']
+                    self.assertEqual('economy',result.system_history[-1])
+                    self.assertEqual(before-1,self.balance())
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()
