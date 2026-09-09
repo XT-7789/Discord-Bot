@@ -134,6 +134,11 @@ class ResearchTests(unittest.TestCase):
                     all_view=i.edit_original_response.call_args.kwargs['view']
                     self.assertIn('Finance',str(all_view.to_components()))
                     self.assertIn('Casino',str(all_view.to_components()))
+                    refresh=next(x for x in all_view.walk_children() if getattr(x,'label',None)=='Refresh')
+                    refresh_balance=self.balance()
+                    await refresh.callback(i)
+                    self.assertEqual(all_view.system_history,i.edit_original_response.call_args.kwargs['view'].system_history)
+                    self.assertEqual(refresh_balance,self.balance())
                     async def navigate(view,key):
                         await next(x for x in view.walk_children() if getattr(x,'key',None)==key).callback(i)
                         return i.edit_original_response.call_args.kwargs['view']

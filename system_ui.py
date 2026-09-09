@@ -269,7 +269,7 @@ def register(bot, db, create_player):
                     block('📊 Market','Items · Player trading · Stocks',navs(('Market','market_menu'),('Shop','shop'),('Stocks','stock')))
                     membership=casino.cooldown_info(db,member,'blackjack')['tier'] if member is not None and hasattr(member,'roles') else 'Check VIP Status'
                     block('🎰 Casino',f'Membership **{membership}** · XC stakes can be lost.',navs(('Casino','casino'),('VIP Status','vip'),('Rankings','rankings')))
-                    view.box.add_item(discord.ui.ActionRow(*navs(('Earn & Create','earn_menu'),('Assets','assets'))))
+                    view.box.add_item(discord.ui.ActionRow(*navs(('Earn & Create','earn_menu'),('Assets','assets'),('Refresh','economy'))))
                 elif key=='profile':
                     span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
                     xp=profile['xp']-profile['current_floor']
