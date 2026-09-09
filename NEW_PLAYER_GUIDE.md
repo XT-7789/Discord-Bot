@@ -2,7 +2,7 @@
 
 X BOT is designed around panels. You only need a few short slash commands; most actions are buttons and menus inside the same Discord message.
 
-The Lobby highlights **Earn & Sell** and **Casino**. Casino is optional entertainment using fictional XC, not guaranteed income. Choose an existing game, read the bet range and submit one bet. Completed rounds show total returned separately from net profit/loss and your wallet. **Play Again** uses the displayed stake once; **Change Bet**, **Back to Casino** and **Lobby** let you change course. Normal cooldowns still apply. War is available in **All Activities**.
+The compact X SYSTEM menu has four entries: **Profile, Economy, War and Missions**. Casino is under Economy and remains optional entertainment using fictional XC, not guaranteed income. Choose an existing game, read the bet range and submit one bet. Completed rounds separate total return from net profit/loss. Existing quick slash commands are retained.
 
 Casino includes direct Blackjack, Coinflip and Slots buttons; other games remain in the selector. These buttons open a bet form, not an immediate wager. Change Bet pre-fills the previous stake when it is still within limits. In Blackjack, your cards and the dealer's cards are stacked for mobile readability. Hit takes a card; Stand finishes your hand. Double shows its extra cost, Surrender returns half, and Quit loses the stake.
 
@@ -10,20 +10,20 @@ Casino result panels show your membership tier, effective cooldown and next-roun
 
 ## 1. Start here
 
-1. Use `/lobby`. The Easy Lobby shows one recommended next step.
-2. Press **Claim Daily** for 50 XC, then **Mine** and sell your materials.
-3. Press **Build / Upgrade** when you are ready to grow. Build and upgrade several Cities together using their selection menus.
-4. Use **How to Play** whenever you need help. **All Activities** opens every main centre; **Detailed Lobby** restores the expanded home screen.
+1. Use `/lobby` for the four-entry menu. Profile contains personal progress, assets and Backpack.
+2. Open **Economy → Earn → Daily** for your 50 XC reward. **Economy → Mines** opens mining and selling.
+3. Open **War → Cities** to build and upgrade several Cities together.
+4. Open **Missions** and choose Starter, Daily or Weekly to review progress and claim rewards.
 
 You do not need to learn War first. Start with earning and Cities, then explore at your own pace.
 
-When your goal is mining, **Mine Now · Advance Goal** performs one mining action directly from home. The goal says how many actions remain. Mining results show mission progress and highlight **Lobby · Claim Rewards** when ready. Cooldown clicks keep the same panel and show when you can try again. Nation progress is shown as XP remaining until the next level.
+Mining results retain goal progress and highlight **Missions · Claim Rewards** when ready. Cooldown clicks keep the same panel and show when you can try again.
 
-Daily rewards stay in the Lobby. When **Claim Ready Rewards** appears, press it to collect completed missions from the indicated category without opening another menu. The Lobby shows your Nation level, XP, next goal and its rewards. Military goals do not block the civilian guidance. After claiming Daily, its next available time appears; you can still mine or develop Cities.
+Category pages use two buttons per row. Back returns to the parent category; Menu opens the four-entry home; Close replaces the panel with a closed notice, without deleting player data. Active Blackjack hands retain their explicit Quit action instead of a generic Close button. Legacy maps keep their native attachment layout.
 
 ### Research made simple
 
-Open `/research` or use **All Activities → Research**. Choose Economy, Industry or Military, then select one or both projects. Review the total XC cost and press **Confirm & Start** once.
+Open `/research` or use **Economy → Earn → Research**. Choose Economy, Industry or Military, then select one or both projects. Review the total XC cost and press **Confirm & Start** once.
 
 Level 1 normally costs **50 XC** and takes **5 minutes**. Later levels cost and take longer. Projects run one after another, and their benefits activate automatically: there is no claim button to remember. The Queue page shows finish times and lets you cancel unfinished work for its original XC refund.
 
@@ -44,7 +44,7 @@ Recommended first loop: **Daily → Mine → Sell → Contracts → Build/upgrad
 
 ## 3. Develop your Nation
 
-Open `/city` directly, or press **Build / Upgrade** in the Lobby.
+Open `/city` directly, or use **War → Cities**.
 
 - **Build** lets you choose one or several available Lands and build Cities in one transaction.
 - **Upgrade** lets you select one or several Cities and upgrade them together.

@@ -196,7 +196,7 @@ def mining_goal(db,user_id):
         for m in tier5.missions_for(db,user_id,category)[1]:
             if m['destination']=='mining' and not m['claimed']:
                 remaining=max(0,m['target']-m['progress'])
-                text=(f"✅ **{m['title']} complete!** Return to Lobby to claim" if not remaining else
+                text=(f"✅ **{m['title']} complete!** Open Missions to claim" if not remaining else
                       f"🎯 **{m['title']}: {m['progress']}/{m['target']}** · {remaining} more mine(s) to unlock")
                 return text+f" **{m['xc']} XC + {m['credits']} War Credits** and {m['xp']} Nation XP.",not remaining
     return '✅ Your starter and daily mining goals are done. Sell your materials or build Cities; more mining is optional.',False

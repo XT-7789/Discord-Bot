@@ -1241,7 +1241,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             super().__init__(label=label, emoji="⬅️", style=discord.ButtonStyle.secondary)
 
         async def callback(self, interaction: discord.Interaction):
-            await deferred_edit(interaction, lambda: WarCentreView(interaction.user.id))
+            await deferred_edit(interaction, lambda: bot.xbot_player_panel_builders['war'](interaction.user.id))
 
     class ExternalPanelButton(discord.ui.Button):
         def __init__(self, key: str, label: str, emoji: str, style=discord.ButtonStyle.secondary):

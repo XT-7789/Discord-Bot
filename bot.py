@@ -27,6 +27,7 @@ import tier5
 import tier6
 import tier7
 import tier8
+import system_ui
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -1699,6 +1700,7 @@ async def attack(interaction: discord.Interaction, target: discord.Member):
 # so Discord's command catalogue does not grow.
 tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
 tier8.register_commands(bot, db, create_player)
+system_ui.register(bot, db, create_player)
 
 
 # Seed server-only Tier 1.6 commands before applying their Council/Admin

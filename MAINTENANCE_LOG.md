@@ -1,5 +1,15 @@
 # X BOT Maintenance Log
 
+## 2026-09-09 — X SYSTEM player menu redesign
+
+- Replaced the default Lobby with four entries only: Profile, Economy, War and Missions, plus Close. Old easy/detailed preferences no longer change the main-menu layout.
+- Added compact, two-column category menus: Economy → Finance / Earn / Market / Mines / Casino / Rankings; Profile → Backpack / Assets / Missions; War → Cities / Army / Recruit / Diplomacy / Attack / Defence / Reports / Overview.
+- Added Starter/Daily/Weekly mission categories while retaining the existing Level 2 weekly gate. Mining completion now links to Missions instead of implying the main menu claims rewards.
+- Unified player panel headings/accent colour and supplied parent/menu/close navigation within Discord's component limits. Active Blackjack hands and legacy map attachments retain their specialized controls.
+- Presentation forwarding preserves navigation across button results, modal submits and stored-message edits. Game calculations, balances, rewards, cooldowns and admin command permissions are unchanged.
+- Existing slash shortcuts remain; /lobby, /economy and /war open the new menus directly. No new slash catalogue entries added.
+- Offline verification: 27 tests, including 35 page renders, four-entry menu, Close without data mutation, Casino/Blackjack callbacks and Bank modal edits. Live Discord rendering remains to be checked after phone deployment.
+
 ## 2026-09-08 — Membership cooldown display and cyber styling
 
 - Unified Casino cooldown enforcement and display for standard, active VIP and current SVIP roles, including game overrides, expiry and zero-cooldown configuration.

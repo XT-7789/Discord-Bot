@@ -291,6 +291,9 @@ def register_commands(bot, db, create_player):
                 await interaction.response.send_message("Open `/lobby` for your own Missions.", ephemeral=True)
                 return
             if self.action.startswith("page:"):
+                if self.action=='page:home':
+                    await interaction.response.edit_message(view=bot.xbot_player_panel_builders['missions'](self.owner_id))
+                    return
                 await interaction.response.edit_message(view=MissionView(self.owner_id, self.action.split(":", 1)[1]))
                 return
             if self.action.startswith("claim:"):
@@ -378,5 +381,7 @@ def register_commands(bot, db, create_player):
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
     bot.xbot_player_panel_builders["missions"] = lambda owner_id: MissionView(owner_id)
+    for category in ('starter','daily','weekly'):
+        bot.xbot_player_panel_builders['mission_'+category] = lambda owner_id,cat=category: MissionView(owner_id,cat)
     bot.xbot_tier5_health = lambda: health_report(db)
     bot.xbot_tier5_repair = lambda: repair(db)

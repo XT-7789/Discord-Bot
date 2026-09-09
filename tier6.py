@@ -589,7 +589,7 @@ def register_commands(bot, db, create_player):
                 await interaction.response.send_message("Open `/economy` for your own Economy Centre.", ephemeral=True)
                 return
             local = {
-                "economy_v2": lambda: EconomyV2View(self.owner_id),
+                "economy_v2": lambda: bot.xbot_player_panel_builders['economy'](self.owner_id),
                 "earn": lambda: ContractView(self.owner_id),
                 "trade": lambda: TradeHubView(self.owner_id),
                 "production": lambda: ProductionView(self.owner_id),

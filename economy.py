@@ -1513,11 +1513,12 @@ def register_commands(bot, db, create_player) -> None:
             await actions[self.action](interaction)
 
     class MiningLobbyButton(discord.ui.Button):
-        def __init__(self):
+        def __init__(self,destination='lobby'):
             super().__init__(label="Lobby", emoji="✨", style=discord.ButtonStyle.secondary)
+            self.destination=destination
 
         async def callback(self, interaction: discord.Interaction):
-            builder = getattr(bot, "xbot_player_lobby_builder", None)
+            builder = getattr(bot, "xbot_player_lobby_builder", None) if self.destination=='lobby' else bot.xbot_player_panel_builders.get(self.destination)
             if builder is None:
                 await interaction.response.send_message("Lobby is loading. Please try again.", ephemeral=True)
                 return
@@ -1533,9 +1534,9 @@ def register_commands(bot, db, create_player) -> None:
             goal_text,goal_ready=tier8.mining_goal(db,owner_id)
             container.add_item(discord.ui.TextDisplay(goal_text))
             container.add_item(discord.ui.Separator())
-            lobby_button=MiningLobbyButton()
+            lobby_button=MiningLobbyButton('missions' if goal_ready else 'lobby')
             if goal_ready:
-                lobby_button.label='Lobby · Claim Rewards'
+                lobby_button.label='Missions · Claim Rewards'
                 lobby_button.style=discord.ButtonStyle.success
             container.add_item(discord.ui.ActionRow(
                 MiningHubButton("mine", "Mine Again", "⛏️", discord.ButtonStyle.success),

@@ -119,16 +119,34 @@ class ResearchTests(unittest.TestCase):
                     for panel in panels:
                         self.assertLessEqual(panel.total_children_count,40)
                         self.assertTrue(panel.to_components())
-                    all_button=next(x for x in panels[0].walk_children() if getattr(x,'label',None)=='All Activities')
-                    i=SimpleNamespace(user=SimpleNamespace(id=self.uid),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock())
-                    await all_button.callback(i)
+                    main_buttons=[x for x in panels[0].walk_children() if isinstance(x,discord.ui.Button)]
+                    self.assertEqual({'profile','economy','war','missions','close'},{x.key for x in main_buttons})
+                    i=SimpleNamespace(user=SimpleNamespace(id=self.uid),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock(),followup=SimpleNamespace(send=AsyncMock()))
+                    await next(x for x in main_buttons if x.key=='economy').callback(i)
                     all_view=i.edit_original_response.call_args.kwargs['view']
-                    self.assertIn('Backpack',str(all_view.to_components()))
+                    self.assertIn('Finance',str(all_view.to_components()))
+                    self.assertIn('Casino',str(all_view.to_components()))
+                    # All reorganized categories and leaf panels render without lost routes.
+                    for key in ('menu','profile','economy','war','missions','finance','earn_menu','market_menu',
+                                'daily','rankings','wallet','bank','assets','exchange','inventory','contracts',
+                                'mining','craft','production','research','shop','market','stock','casino','city',
+                                'army','recruit','diplomacy','attack','defence','reports','war_overview',
+                                'mission_starter','mission_daily','mission_weekly'):
+                        current=bot.xbot_system_page_builder(self.uid,key)
+                        self.assertLessEqual(current.total_children_count,40,key)
+                        self.assertNotIn('This panel is unavailable',str(current.to_components()),key)
+                        self.assertIn('Close',str(current.to_components()),key)
+                    before_close=self.balance()
+                    close=next(x for x in main_buttons if x.key=='close')
+                    await close.callback(i)
+                    closed=i.edit_original_response.call_args.kwargs['view']
+                    self.assertEqual([],list(x for x in closed.walk_children() if isinstance(x,discord.ui.Button)))
+                    self.assertEqual(before_close,self.balance())
                     guild=discord.Object(id=module._staff_guild_id) if module._staff_guild_id else None
                     for name in ('lobby','research'):
                         command=bot.tree.get_command(name,guild=guild)
                         self.assertIsNotNone(command)
-                        self.assertEqual('tier8',command.callback.__module__)
+                        self.assertEqual('system_ui' if name=='lobby' else 'tier8',command.callback.__module__)
                     for child in all_view.walk_children():
                         destination=getattr(child,'destination','')
                         if destination and ':' not in destination and destination!='lobby':
@@ -142,12 +160,13 @@ class ResearchTests(unittest.TestCase):
                     await daily.callback(i)
                     self.assertEqual(before+50,self.balance())
                     daily_view=i.edit_original_response.call_args.kwargs['view']
-                    self.assertIn('Your next step',str(daily_view.to_components()))
-                    self.assertIn('Next daily reward',str(daily_view.to_components()))
+                    self.assertIn('X SYSTEM',str(daily_view.to_components()))
+                    self.assertIn('Daily reward collected',str(daily_view.to_components()))
                     await daily.callback(i)
                     self.assertEqual(before+50,self.balance())
                     # Claim existing mission rewards directly, staying on the same message.
-                    claim=next(x for x in daily_view.walk_children() if getattr(x,'label',None)=='Claim Ready Rewards')
+                    legacy_home=bot.xbot_legacy_easy_lobby_builder(self.uid)
+                    claim=next(x for x in legacy_home.walk_children() if getattr(x,'label',None)=='Claim Ready Rewards')
                     await claim.callback(i)
                     after=self.balance()
                     self.assertGreater(after,before+50)
@@ -161,7 +180,7 @@ class ResearchTests(unittest.TestCase):
                     module.db.commit()
                     import tier5
                     tier5.claim_ready(module.db,self.uid,'daily')
-                    home=bot.xbot_player_lobby_builder(self.uid)
+                    home=bot.xbot_legacy_easy_lobby_builder(self.uid)
                     mine_button=next(x for x in home.walk_children() if getattr(x,'label',None)=='Mine Now · Advance Goal')
                     self.assertIn('XP to Level',str(home.to_components()))
                     i.message=SimpleNamespace(id=1)
@@ -169,7 +188,7 @@ class ResearchTests(unittest.TestCase):
                     i.response.send_message=AsyncMock()
                     await mine_button.callback(i)
                     result=i.response.edit_message.call_args.kwargs['view']
-                    self.assertIn('Lobby · Claim Rewards',str(result.to_components()))
+                    self.assertIn('Missions · Claim Rewards',str(result.to_components()))
                     mined=module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0]
                     self.assertEqual(1,mined)
                     await mine_button.callback(i)
@@ -199,7 +218,7 @@ class ResearchTests(unittest.TestCase):
                     self.assertEqual(before-25,self.balance())
                     result=i.response.edit_message.call_args.kwargs['view']
                     rendered=str(result.to_components())
-                    for expected in ('Net result: **-25 XC**','Change Bet','Back to Casino','Lobby'):
+                    for expected in ('Net result: **-25 XC**','Change Bet','Back to Casino','Menu'):
                         self.assertIn(expected,rendered)
                     replay=next(x for x in result.walk_children() if getattr(x,'label','').startswith('Play Again'))
                     await replay.callback(i)
@@ -248,6 +267,20 @@ class ResearchTests(unittest.TestCase):
                     self.assertEqual(4,len(late.player_cards))
                     self.assertIs(late,i.edit_original_response.call_args.kwargs['view'])
                     self.assertFalse(late.busy)
+                    # Stored-message modal edits keep the new navigation as well.
+                    bank=bot.xbot_system_page_builder(self.uid,'bank')
+                    deposit=next(x for x in bank.walk_children() if getattr(x,'label',None)=='Deposit')
+                    i.message=SimpleNamespace(id=2,edit=AsyncMock())
+                    await deposit.callback(i)
+                    form=i.response.send_modal.call_args.args[0]
+                    form.amount._value='1'
+                    balance=self.balance()
+                    await form.on_submit(i)
+                    self.assertEqual(balance-1,self.balance())
+                    updated=i.message.edit.call_args.kwargs['view']
+                    self.assertIn('X SYSTEM',str(updated.to_components()))
+                    self.assertIn('Close',str(updated.to_components()))
+                    self.assertIn('Menu',str(updated.to_components()))
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()

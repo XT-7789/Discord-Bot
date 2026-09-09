@@ -575,6 +575,8 @@ def register_commands(bot, db, create_player, find_item):
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
     bot.xbot_player_panel_builders["economy"] = lambda owner_id: EconomyCentreView(owner_id)
     bot.xbot_player_panel_builders["market"] = lambda owner_id: MarketView(owner_id)
+    bot.xbot_player_panel_builders['bank'] = lambda owner_id: EconomyBankView(owner_id)
+    bot.xbot_player_panel_builders['wallet'] = lambda owner_id: EconomyBalanceView(owner_id)
     bot.xbot_player_lobby_builder = lambda owner_id: XBotLobbyView(owner_id)
     bot.xbot_daily_button_builder = lambda owner_id: EconomyPanelButton(owner_id, 'daily_lobby', 'Claim Daily', '🎁', discord.ButtonStyle.success)
 
