@@ -1,11 +1,13 @@
 """Compact player navigation. Existing game callbacks retain their rules."""
 import discord
 import tier5
+import war_tier
 import os
 import functools
 import time
 import re
 from pathlib import Path
+from contextvars import ContextVar
 
 GUIDE_IMAGE=Path(__file__).parent/'assets'/'ui'/'navigation-guide.png'
 HELP_TOPICS={
@@ -23,6 +25,7 @@ HELP_TOPICS={
 
 
 def register(bot, db, create_player):
+    navigation=ContextVar('player_panel_history',default=())
     builders=bot.xbot_player_panel_builders
     legacy=dict(builders)
     bot.xbot_legacy_easy_lobby_builder=bot.xbot_player_lobby_builder
@@ -61,8 +64,17 @@ def register(bot, db, create_player):
                 await i.response.send_message('Open /menu for your own menu.',ephemeral=True)
                 return
             await i.response.defer()
-            attachments=[discord.File(GUIDE_IMAGE,filename='navigation-guide.png')] if self.key=='help_map' and GUIDE_IMAGE.is_file() else []
-            await i.edit_original_response(view=page(self.owner,self.key),attachments=attachments)
+            history=getattr(self,'history',('menu',))
+            destination=self.key
+            if destination=='back':
+                history=history[:-1] or ('menu',)
+                destination=history[-1]
+            token=navigation.set(history)
+            try:
+                attachments=[discord.File(GUIDE_IMAGE,filename='navigation-guide.png')] if destination=='help_map' and GUIDE_IMAGE.is_file() else []
+                await i.edit_original_response(view=page(self.owner,destination),attachments=attachments)
+            finally:
+                navigation.reset(token)
 
     class HelpSelect(discord.ui.Select):
         def __init__(self,owner):
@@ -70,7 +82,11 @@ def register(bot, db, create_player):
             self.owner=owner
         async def callback(self,i):
             await i.response.defer()
-            await i.edit_original_response(view=page(self.owner,'help:'+self.values[0]),attachments=[])
+            token=navigation.set(getattr(self,'history',('help',)))
+            try:
+                await i.edit_original_response(view=page(self.owner,'help:'+self.values[0]),attachments=[])
+            finally:
+                navigation.reset(token)
 
     class Shell(discord.ui.LayoutView):
         def __init__(self,owner,title,body='',notice=''):
@@ -90,14 +106,32 @@ def register(bot, db, create_player):
         row=discord.ui.ActionRow()
         if key!='menu':
             if include_back:
-                row.add_item(Nav(owner,'‹ Back',parents.get(key,'menu')))
+                row.add_item(Nav(owner,'‹ Back','back'))
             row.add_item(Nav(owner,'⌂ Menu','menu'))
-        if key!='help':
+        if key=='menu':
             row.add_item(Nav(owner,'? Help','help'))
         view.add_item(row)
         view.add_item(discord.ui.ActionRow(Nav(owner,'× Close','close')))
 
     def page(owner,key='menu',notice=''):
+        history=navigation.get()
+        history=('menu',) if key=='menu' else history if history and history[-1]==key else (*history,key)
+        token=navigation.set(history[-40:])
+        try:
+            view=render_page(owner,key,notice)
+            view.system_history=navigation.get()
+            for child in view.walk_children():
+                if isinstance(child,(Nav,HelpSelect)):
+                    child.history=view.system_history
+            return view
+        finally:
+            navigation.reset(token)
+
+    def progress_bar(value,total):
+        filled=min(10,max(0,int(10*value/max(1,total))))
+        return '▰'*filled+'▱'*(10-filled)
+
+    def render_page(owner,key='menu',notice=''):
         player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
         if key=='mission_weekly' and tier5.profile_summary(db,owner)['level']<2:
             return page(owner,'missions','Weekly missions unlock at Nation Level 2.')
@@ -150,12 +184,39 @@ def register(bot, db, create_player):
                 body='\n'.join(lines)
             view=Shell(owner,title,body,notice)
             if key=='menu':
-                descriptions={'profile':'Your progress, items and assets.','economy':'Earn XC, manage savings, trade and play Casino.','war':'Build Cities, recruit units and manage battles.','missions':'See your goals and claim completed rewards.'}
-                for label,dest in links:
-                    view.box.add_item(discord.ui.TextDisplay(f'### {label}\n{descriptions[dest]}'))
-                    view.box.add_item(discord.ui.ActionRow(Nav(owner,'Open '+label.split(' ',1)[1],dest)))
+                xp=profile['xp']-profile['current_floor']
+                span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
+                xp_text=f"{progress_bar(xp,span)} {xp:,} / {span:,} XP" if profile['next_threshold'] else 'MAX LEVEL'
+                view=Shell(owner,'PLAYER HUB',f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{xp_text}",notice)
+                def block(text,buttons):
+                    view.box.add_item(discord.ui.Separator())
+                    view.box.add_item(discord.ui.TextDisplay(text))
+                    view.box.add_item(discord.ui.ActionRow(*buttons))
+                block(f"### 💰 Economy\nWallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**",[bot.xbot_finance_button_builder(owner,'deposit'),bot.xbot_finance_button_builder(owner,'withdraw'),Nav(owner,'Economy','economy')])
+                cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(owner,)).fetchone()[0]
+                lands=db.execute('SELECT COUNT(*) FROM map_territories WHERE owner_user_id=?',(owner,)).fetchone()[0]
+                units=db.execute('SELECT COALESCE(SUM(quantity),0) FROM player_war_units WHERE user_id=?',(owner,)).fetchone()[0]
+                state=db.execute('SELECT last_collect FROM player_city_state WHERE user_id=?',(owner,)).fetchone()
+                ready_at=(int(state['last_collect']) if state else 0)+war_tier.setting(db,'city_collect_cooldown')
+                production='Production ready' if ready_at<=int(time.time()) else f'Production <t:{ready_at}:R>'
+                block(f"### 🏙️ Nation\nCities **{cities}** · Land **{lands}** · Units **{units}**\nWar Credits **{player['money']:,}** · {production}",[Nav(owner,'Cities','city'),Nav(owner,'Army','army'),Nav(owner,'Warfront','war')])
+                pending=[(category,m) for category in ('daily','starter') for m in tier5.missions_for(db,owner,category)[1] if not m['claimed']]
+                ready=next(((c,m) for c,m in pending if m['progress']>=m['target']),None)
+                chosen=ready or next(((c,m) for c,m in pending if m['destination'] in ('mining','economy','city')),None)
+                if chosen:
+                    category,m=chosen
+                    target='mission_'+category if ready else {'economy':'daily'}.get(m['destination'],m['destination'])
+                    text=f"### 🎯 {'Reward Ready' if ready else 'Current Mission'}\n**{m['title']}** · {m['progress']} / {m['target']}\n{progress_bar(m['progress'],m['target'])}\n+{m['xc']} XC · +{m['credits']} WC · +{m['xp']} XP"
+                    actions=[Nav(owner,'View Rewards' if ready else 'Continue',target),Nav(owner,'Missions','missions')]
+                else:
+                    text='### 🎯 Missions\nAll featured goals complete. Explore at your own pace.'
+                    actions=[Nav(owner,'Missions','missions')]
+                block(text,actions)
+                block('### 🎰 Casino\nChoose a game · XC stakes can be lost.',[Nav(owner,'Casino','casino'),Nav(owner,'Daily Reward','daily'),Nav(owner,'Profile','profile')])
                 footer(view,owner,key)
-                return view
+                return prepare(view,owner,key,force=True)
+            if key=='economy':
+                view.box.add_item(discord.ui.TextDisplay(f"### Wallet · {player['xc']:,} XC\nBank **{player['bank_xc']:,} XC**"))
             for n in range(0,len(links),2):
                 row=discord.ui.ActionRow()
                 for label,dest in links[n:n+2]:
@@ -210,8 +271,13 @@ def register(bot, db, create_player):
         async def send_modal(self,modal):
             if not getattr(modal,'system_wrapped',False):
                 original=modal.on_submit
+                history=navigation.get()
                 async def submit(i):
-                    await original(Interaction(i,self.owner,self.key))
+                    token=navigation.set(history)
+                    try:
+                        await original(Interaction(i,self.owner,self.key))
+                    finally:
+                        navigation.reset(token)
                 modal.on_submit=submit
                 modal.system_wrapped=True
             return await self.target.send_modal(modal)
@@ -247,6 +313,8 @@ def register(bot, db, create_player):
             return await self.actual.edit_original_response(**kwargs)
 
     def prepare(view,owner,key,force=False):
+        if isinstance(view,discord.ui.LayoutView) and not hasattr(view,'system_history'):
+            view.system_history=navigation.get() or (key,)
         if not isinstance(view,discord.ui.LayoutView) or (isinstance(view,Shell) and not force):
             return view
         signature=tuple(id(child) for child in view.walk_children())
@@ -281,13 +349,19 @@ def register(bot, db, create_player):
             if isinstance(child,(discord.ui.Button,discord.ui.Select)) and not isinstance(child,Nav) and not getattr(child,'system_wrapped',False):
                 original=child.callback
                 async def callback(i,handler=original):
-                    await handler(Interaction(i,owner,key))
+                    token=navigation.set(view.system_history)
+                    try:
+                        await handler(Interaction(i,owner,key))
+                    finally:
+                        navigation.reset(token)
                 child.callback=callback
                 child.system_wrapped=True
         # Discord allows 40 components including containers/action rows.
         if not force and can_footer and not any(isinstance(child,Nav) for child in view.walk_children()):
-            has_back=any(isinstance(child,discord.ui.Button) and (child.label or '').lower().startswith('back to ') for child in view.walk_children())
-            footer(view,owner,key,include_back=not has_back)
+            footer(view,owner,key)
+        for child in view.walk_children():
+            if isinstance(child,Nav):
+                child.history=view.system_history
         view.system_signature=tuple(id(child) for child in view.walk_children())
         return view
 

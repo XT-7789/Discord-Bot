@@ -120,12 +120,29 @@ class ResearchTests(unittest.TestCase):
                         self.assertLessEqual(panel.total_children_count,40)
                         self.assertTrue(panel.to_components())
                     main_buttons=[x for x in panels[0].walk_children() if isinstance(x,discord.ui.Button)]
-                    self.assertEqual({'profile','economy','war','missions','help','close'},{x.key for x in main_buttons})
+                    self.assertTrue({'profile','economy','war','missions','help','close','city','army','casino'} <= {getattr(x,'key',None) for x in main_buttons})
+                    self.assertIn('PLAYER HUB',str(panels[0].to_components()))
                     i=SimpleNamespace(user=SimpleNamespace(id=self.uid),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock(),followup=SimpleNamespace(send=AsyncMock()))
-                    await next(x for x in main_buttons if x.key=='economy').callback(i)
+                    await next(x for x in main_buttons if getattr(x,'key',None)=='economy').callback(i)
                     all_view=i.edit_original_response.call_args.kwargs['view']
                     self.assertIn('Finance',str(all_view.to_components()))
                     self.assertIn('Casino',str(all_view.to_components()))
+                    async def navigate(view,key):
+                        await next(x for x in view.walk_children() if getattr(x,'key',None)==key).callback(i)
+                        return i.edit_original_response.call_args.kwargs['view']
+                    finance_route=await navigate(all_view,'finance')
+                    assets_route=await navigate(finance_route,'assets')
+                    restored=await navigate(assets_route,'back')
+                    self.assertEqual(('menu','economy','finance'),restored.system_history)
+                    restored=await navigate(restored,'back')
+                    self.assertEqual(('menu','economy'),restored.system_history)
+                    # Another open panel must not overwrite this panel's route.
+                    profile_route=await navigate(panels[0],'profile')
+                    other_assets=await navigate(profile_route,'assets')
+                    self.assertEqual(('menu','profile'),(await navigate(other_assets,'back')).system_history)
+                    self.assertEqual(('menu','economy','finance'),(await navigate(assets_route,'back')).system_history)
+                    direct=bot.xbot_system_page_builder(self.uid,'finance')
+                    self.assertEqual(('menu',),(await navigate(direct,'back')).system_history)
                     # All reorganized categories and leaf panels render without lost routes.
                     for key in ('menu','profile','economy','war','missions','finance','earn_menu','market_menu',
                                 'daily','rankings','wallet','bank','assets','exchange','inventory','contracts',
@@ -136,8 +153,10 @@ class ResearchTests(unittest.TestCase):
                         self.assertLessEqual(current.total_children_count,40,key)
                         self.assertNotIn('This panel is unavailable',str(current.to_components()),key)
                         self.assertIn('Close',str(current.to_components()),key)
+                        if key!='menu':
+                            self.assertFalse(any(getattr(x,'key',None)=='help' for x in current.walk_children()),key)
                     before_close=self.balance()
-                    close=next(x for x in main_buttons if x.key=='close')
+                    close=next(x for x in main_buttons if getattr(x,'key',None)=='close')
                     await close.callback(i)
                     closed=i.edit_original_response.call_args.kwargs['view']
                     self.assertEqual([],list(x for x in closed.walk_children() if isinstance(x,discord.ui.Button)))
@@ -165,7 +184,7 @@ class ResearchTests(unittest.TestCase):
                     self.assertEqual(1,len(i.edit_original_response.call_args.kwargs['attachments']))
                     self.assertIn('attachment://navigation-guide.png',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
                     i.edit_original_response.call_args.kwargs['attachments'][0].close()
-                    await next(x for x in main_buttons if x.key=='help').callback(i)
+                    await next(x for x in main_buttons if getattr(x,'key',None)=='help').callback(i)
                     self.assertEqual([],i.edit_original_response.call_args.kwargs['attachments'])
                     with patch.object(system_ui,'GUIDE_IMAGE',Path(self.tmp.name)/'missing.png'):
                         fallback=bot.xbot_system_page_builder(self.uid,'help_map')
@@ -320,7 +339,7 @@ class ResearchTests(unittest.TestCase):
                         self.assertEqual(expected,self.balance())
                         finance=i.message.edit.call_args.kwargs['view']
                         content=str(finance.to_components())
-                        for text in ('Finance','Wallet','Bank',notice,'Help','Close'):
+                        for text in ('Finance','Wallet','Bank',notice,'Close'):
                             self.assertIn(text,content)
                         self.assertLessEqual(finance.total_children_count,40)
                     await next(x for x in finance.walk_children() if getattr(x,'label',None)=='Deposit').callback(i)
