@@ -722,6 +722,7 @@ def register_commands(bot, db, create_player):
                     EconomyNavButton(owner_id, "mining", "Mining", "⛏️", style=discord.ButtonStyle.primary),
                     EconomyNavButton(owner_id, "city", "City", "🏙️"),
                     EconomyNavButton(owner_id, "missions", "Missions", "🎯"),
+                    EconomyNavButton(owner_id, "earn_menu", "Workshop", "🛠️"),
                 ))
             else:
                 container.add_item(discord.ui.TextDisplay("Contracts are currently closed or no Contracts are available at your Nation Level."))

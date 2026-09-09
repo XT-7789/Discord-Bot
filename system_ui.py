@@ -144,6 +144,7 @@ def register(bot, db, create_player):
         token=navigation.set(history[-40:])
         try:
             view=render_page(owner,key,notice,member)
+            align_economy_tabs(view,owner,key)
             if key in {'menu','economy'}:
                 # Overview colour emphasises system entry points, not banking.
                 main_routes={'profile','economy','war','missions'} if key=='menu' else {'finance','market_menu','casino','earn_menu'}
@@ -151,7 +152,7 @@ def register(bot, db, create_player):
                     if isinstance(child,discord.ui.Button):
                         if getattr(child,'action',None) in {'deposit','withdraw'}:
                             child.style=discord.ButtonStyle.secondary
-                        elif isinstance(child,Nav) and child.key in main_routes:
+                        elif isinstance(child,Nav) and child.key in main_routes and not getattr(child,'economy_tab',False):
                             child.style=discord.ButtonStyle.primary
                         if isinstance(child,Nav) and child.label in {'Continue','View Rewards'}:
                             child.style=discord.ButtonStyle.success
@@ -172,6 +173,57 @@ def register(bot, db, create_player):
         view.box.add_item(discord.ui.TextDisplay(f'### {title}\n{body}'))
         if buttons:
             view.box.add_item(discord.ui.ActionRow(*buttons))
+
+    def align_economy_tabs(view,owner,key):
+        tabs=[('Overview','economy'),('Earn','contracts'),('Trade','market_menu'),('Production','production'),('Stocks','stock')]
+        if key not in {dest for _,dest in tabs} or getattr(view,'economy_tabs_aligned',False):
+            return
+        box=next((x for x in view.children if isinstance(x,discord.ui.Container)),None)
+        if box is None:
+            return
+        # Remove the old five-tab strip before inserting the shared one.
+        old_actions={'economy_v2','earn','trade','production','stock'}
+        for row in list(box.children):
+            if isinstance(row,discord.ui.ActionRow) and len(row.children)==5 and {getattr(x,'action',None) for x in row.children}==old_actions:
+                box.remove_item(row)
+        # This shortcut duplicates the Earn tab; keep Assets and Refresh.
+        for row in list(box.children):
+            if isinstance(row,discord.ui.ActionRow):
+                for child in list(row.children):
+                    if isinstance(child,Nav) and child.label=='Earn & Create':
+                        row.remove_item(child)
+        items=list(box.children)
+        if not items or not isinstance(items[0],discord.ui.TextDisplay):
+            return
+        header=items[0]
+        # All five screens share the same brand/title hierarchy; their data
+        # blocks remain untouched below the navigation.
+        lines=header.content.split('\n')
+        title_index=next((n for n,line in enumerate(lines) if line.startswith('## ')),None)
+        if title_index is None:
+            return
+        rest='\n'.join(lines[title_index+1:]).strip()
+        if rest=='OVERVIEW':
+            rest=''
+        extra=6+(1 if rest else 0)
+        if view.total_children_count+extra>40:
+            return
+        header.content='-# ✦ X SYSTEM / ECONOMY\n'+lines[title_index]
+        row=discord.ui.ActionRow()
+        for label,dest in tabs:
+            button=Nav(owner,label,dest)
+            button.style=discord.ButtonStyle.primary if dest==key else discord.ButtonStyle.secondary
+            button.economy_tab=True
+            row.add_item(button)
+        for child in items:
+            box.remove_item(child)
+        box.add_item(header)
+        box.add_item(row)
+        if rest:
+            box.add_item(discord.ui.TextDisplay(rest))
+        for child in items[1:]:
+            box.add_item(child)
+        view.economy_tabs_aligned=True
 
     def render_page(owner,key='menu',notice='',member=None):
         player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
@@ -537,6 +589,7 @@ def register(bot, db, create_player):
         # Discord allows 40 components including containers/action rows.
         if not force and can_footer and not any(isinstance(child,Nav) for child in view.walk_children()):
             footer(view,owner,key)
+        align_economy_tabs(view,owner,key)
         for child in view.walk_children():
             if isinstance(child,Nav):
                 child.history=view.system_history

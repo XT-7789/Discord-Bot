@@ -160,6 +160,14 @@ class ResearchTests(unittest.TestCase):
                     all_view=i.edit_original_response.call_args.kwargs['view']
                     self.assertIn('Finance',str(all_view.to_components()))
                     self.assertIn('Casino',str(all_view.to_components()))
+                    for destination in ('economy','contracts','market_menu','production','stock'):
+                        screen=bot.xbot_system_page_builder(self.uid,destination)
+                        box=next(x for x in screen.children if isinstance(x,discord.ui.Container))
+                        tab_row=box.children[1]
+                        self.assertIsInstance(tab_row,discord.ui.ActionRow,destination)
+                        self.assertEqual(['Overview','Earn','Trade','Production','Stocks'],[x.label for x in tab_row.children],destination)
+                        self.assertEqual([destination],[x.key for x in tab_row.children if x.style==discord.ButtonStyle.primary],destination)
+                        self.assertLessEqual(screen.total_children_count,40)
                     finance_readable=bot.xbot_system_page_builder(self.uid,'finance')
                     self.assertGreaterEqual(sum(isinstance(x,discord.ui.TextDisplay) and '\n## ' in x.content for x in finance_readable.walk_children()),3)
                     assets_readable=bot.xbot_system_page_builder(self.uid,'assets')

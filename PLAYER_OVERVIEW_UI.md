@@ -34,3 +34,7 @@ Offline coverage includes the 35 player routes, component limits, recruitment co
 Stock Market now leads with a large wallet value and portfolio value/P&L, with company details behind the selector rather than a long duplicate quote list. Company detail separates price, holding and availability. Shop displays available currencies; Backpack highlights item count and selected-item sell value. Mining separates energy, expedition and equipment/material controls. Existing transaction rules are unchanged in this visual pass.
 
 Player Market shows four listing cards per page, with Previous/Next/Refresh, current wallet and single-row shared navigation. All active listings can be paged, replacing the fixed latest-ten list. A nine-listing integration fixture verifies page counts, disabled last-page navigation and component limits. Mobile visual acceptance remains pending.
+
+## Shared Economy workspace
+
+Overview, Earn, Trade, Production and Stocks now share the same five-tab row immediately below the page title, in the same order on each page. Only the active tab is blue. The shared header identifies X SYSTEM / ECONOMY. Content and operations remain below the tabs and Back/Menu/Close remains at the bottom. Old captured navigation routes resolve to current pages. Workshop remains reachable from Earn for crafting/research. Tests explicitly check all five tab layouts and active colours.
