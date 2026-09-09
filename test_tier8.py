@@ -252,6 +252,8 @@ class ResearchTests(unittest.TestCase):
                         self.assertLessEqual(current.total_children_count,40,key)
                         self.assertNotIn('This panel is unavailable',str(current.to_components()),key)
                         self.assertIn('Close',str(current.to_components()),key)
+                        first_text=next(x for x in current.walk_children() if isinstance(x,discord.ui.TextDisplay))
+                        self.assertTrue(first_text.content.startswith('-# ✦ X SYSTEM'),key)
                         footer_row=current.children[-1]
                         self.assertIsInstance(footer_row,discord.ui.ActionRow)
                         self.assertEqual(['help','close'] if key=='menu' else ['back','menu','close'],[getattr(x,'key',None) for x in footer_row.children])
@@ -264,6 +266,10 @@ class ResearchTests(unittest.TestCase):
                     self.assertEqual([],list(x for x in closed.walk_children() if isinstance(x,discord.ui.Button)))
                     self.assertEqual(before_close,self.balance())
                     guild=discord.Object(id=module._staff_guild_id) if module._staff_guild_id else None
+                    for public_name in module.PUBLIC_PLAYER_COMMANDS-{'menu','profile','warfront','economy'}:
+                        public=bot.tree.get_command(public_name,guild=guild) or bot.tree.get_command(public_name)
+                        self.assertIsNotNone(public,public_name)
+                        self.assertTrue(getattr(public.callback,'system_ui_wrapped',False),public_name)
                     for name in ('menu','warfront','profile'):
                         command=bot.tree.get_command(name,guild=guild)
                         self.assertIsNotNone(command)

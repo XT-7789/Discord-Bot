@@ -439,15 +439,24 @@ def register(bot, db, create_player):
     # Wrap only player UI output, leaving native Discord interactions and game
     # state intact. Subpages and modal results inherit navigation from the page
     # that opened them; text-only and legacy map attachments pass through.
+    def style_output(kwargs,owner,key):
+        if isinstance(kwargs.get('view'),discord.ui.LayoutView):
+            kwargs['view']=prepare(kwargs['view'],owner,key)
+        # Maps need image embeds. Keep attachments/fields intact, but use the
+        # same system identity rather than a separate old-looking card.
+        if isinstance(kwargs.get('embed'),discord.Embed):
+            embed=kwargs['embed'].copy()
+            embed.set_author(name='✦ X SYSTEM')
+            kwargs['embed']=embed
+        return kwargs
+
     class Output:
         def __init__(self,target,owner,key):
             self.target,self.owner,self.key=target,owner,key
         def __getattr__(self,name):
             return getattr(self.target,name)
         def options(self,kwargs):
-            if isinstance(kwargs.get('view'),discord.ui.LayoutView):
-                kwargs['view']=prepare(kwargs['view'],self.owner,self.key)
-            return kwargs
+            return style_output(kwargs,self.owner,self.key)
         async def send_message(self,*args,**kwargs):
             return await self.target.send_message(*args,**self.options(kwargs))
         async def edit_message(self,*args,**kwargs):
@@ -478,9 +487,7 @@ def register(bot, db, create_player):
         def __getattr__(self,name):
             return getattr(self.actual,name)
         async def edit(self,**kwargs):
-            if isinstance(kwargs.get('view'),discord.ui.LayoutView):
-                kwargs['view']=prepare(kwargs['view'],self.owner,self.key)
-            return await self.actual.edit(**kwargs)
+            return await self.actual.edit(**style_output(kwargs,self.owner,self.key))
 
     class Interaction:
         def __init__(self,actual,owner,key):
@@ -498,9 +505,7 @@ def register(bot, db, create_player):
         def __getattr__(self,name):
             return getattr(self.actual,name)
         async def edit_original_response(self,**kwargs):
-            if isinstance(kwargs.get('view'),discord.ui.LayoutView):
-                kwargs['view']=prepare(kwargs['view'],self.owner,self.key)
-            return await self.actual.edit_original_response(**kwargs)
+            return await self.actual.edit_original_response(**style_output(kwargs,self.owner,self.key))
 
     def prepare(view,owner,key,force=False):
         if isinstance(view,discord.ui.LayoutView) and not hasattr(view,'system_history'):
@@ -532,10 +537,17 @@ def register(bot, db, create_player):
                         if not row.children:
                             (row.parent or view).remove_item(row)
         first_text=next((child for child in view.walk_children() if isinstance(child,discord.ui.TextDisplay)),None)
-        if first_text is not None and first_text.content.startswith('## '):
-            title,sep,body=first_text.content.partition('\n')
-            title=re.sub(r'\s*[·—-]\s*Tier\s+\d+','',title[3:].replace('X BOT ','')).replace('`','')
-            first_text.content=f'-# ✦ X SYSTEM\n## {title}'+(sep+body if sep else '')
+        if first_text is not None:
+            lines=first_text.content.split('\n')
+            title_line=next((n for n,line in enumerate(lines) if line.startswith('## ')),None)
+            if title_line is not None:
+                title=re.sub(r'\s*[·—-]\s*Tier\s+\d+','',lines[title_line][3:].replace('X BOT ','')).replace('`','')
+                body='\n'.join(lines[title_line+1:])
+                first_text.content=f'-# ✦ X SYSTEM\n## {title}'+ ('\n'+body if body else '')
+        # Gameplay notices and instructions must not become tiny footnotes.
+        for child in view.walk_children():
+            if isinstance(child,discord.ui.TextDisplay):
+                child.content='\n'.join(line if line.startswith('-# ✦ X SYSTEM') else line.removeprefix('-# ') for line in child.content.split('\n'))
         # Older detail pages retain their data and controls, but their heading
         # groups become real visual blocks like the new overview screens.
         if not isinstance(view,Shell) and getattr(view,'finished',None) is not False:
@@ -634,6 +646,8 @@ def register(bot, db, create_player):
                'craft':'craft','stock':'stock','research':'research','missions':'missions','mining':'mining',
                'mine':'mining','sell_item':'economy','shop':'shop','backpack':'inventory','market':'market',
                'attack':'attack','daily':'daily','balance':'wallet','collect':'city'}
+    shortcuts.update({'claim_land':'city','declare_war':'diplomacy','code_redeem':'economy',
+                      'map':'war','map_detail':'war'})
     for command in commands:
         if command.name in shortcuts:
             original=command.callback
@@ -642,5 +656,6 @@ def register(bot, db, create_player):
                 @functools.wraps(handler)
                 async def entry(i,*args,**kwargs):
                     return await handler(Interaction(i,i.user.id,destination),*args,**kwargs)
+                entry.system_ui_wrapped=True
                 return entry
             command._callback=wrap(original,key)
