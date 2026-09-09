@@ -8,6 +8,8 @@ import sqlite3
 import io
 import hashlib
 import calendar
+from functools import lru_cache, wraps
+from collections import OrderedDict
 
 import discord
 from discord import app_commands
@@ -545,6 +547,7 @@ def _ascii_map_label(value, fallback):
     return clean or fallback
 
 
+@lru_cache(maxsize=1)
 def _map_fonts():
     try:
         from PIL import ImageFont
@@ -794,6 +797,45 @@ def build_tactical_map(db, user_id):
     return output
 
 
+_RENDERED_MAP_CACHE = OrderedDict()
+_MAP_CACHE_TTL = 120
+_MAP_CACHE_BYTES = 8 * 1024 * 1024
+
+
+def _map_state_signature(db):
+    """Only map inputs: balances/mining must not invalidate an unchanged map."""
+    players=[tuple(row) for row in db.execute('SELECT user_id,nation_name,capital_name,land FROM players ORDER BY user_id')]
+    territories=[tuple(row) for row in db.execute('SELECT * FROM map_territories ORDER BY territory_code')]
+    return hashlib.sha256(repr((players,territories)).encode('utf-8')).digest()
+
+
+def _cached_map(renderer):
+    @wraps(renderer)
+    def render(db,*args):
+        key=(db,renderer.__name__,args)
+        signature=_map_state_signature(db)
+        now=time.monotonic()
+        cached=_RENDERED_MAP_CACHE.get(key)
+        if cached and cached[0]==signature and now-cached[1]<_MAP_CACHE_TTL:
+            _RENDERED_MAP_CACHE.move_to_end(key)
+            stream=io.BytesIO(cached[2])
+            return (stream,cached[3]) if cached[4] else stream
+        result=renderer(db,*args)
+        paired=isinstance(result,tuple)
+        stream=result[0] if paired else result
+        if stream is not None:
+            payload=stream.getvalue()
+            if len(payload)<=_MAP_CACHE_BYTES:
+                # Renderers may repair legacy ownership before drawing.
+                _RENDERED_MAP_CACHE[key]=(_map_state_signature(db),time.monotonic(),payload,result[1] if paired else None,paired)
+                _RENDERED_MAP_CACHE.move_to_end(key)
+                while len(_RENDERED_MAP_CACHE)>4 or sum(len(entry[2]) for entry in _RENDERED_MAP_CACHE.values())>_MAP_CACHE_BYTES:
+                    _RENDERED_MAP_CACHE.popitem(last=False)
+        return result
+    return render
+
+
+@_cached_map
 def build_real_strategic_map(db):
     """Render Nation territory directly on real province/state polygons."""
     try:
@@ -1028,6 +1070,7 @@ def build_tactical_map_safe(db, user_id):
         return None
 
 
+@_cached_map
 def build_nation_map_resilient(db, user_id):
     """Always prefer a Nation map, then fall back to the proven World map."""
     image = build_tactical_map_safe(db, user_id)

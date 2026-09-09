@@ -16,6 +16,42 @@ import tier6
 
 
 class ResearchTests(unittest.TestCase):
+    def test_map_cache_reuses_bytes_and_invalidates_state(self):
+        import io
+        import war_tier
+        war_tier._RENDERED_MAP_CACHE.clear()
+        self.addCleanup(war_tier._RENDERED_MAP_CACHE.clear)
+        calls=[]
+        @war_tier._cached_map
+        def render(db,owner):
+            calls.append(owner)
+            return io.BytesIO(b'png-fixture'),True
+        first,_=render(self.db,self.uid)
+        first.close()
+        second,detail=render(self.db,self.uid)
+        self.assertTrue(detail)
+        self.assertEqual(b'png-fixture',second.read())
+        self.assertEqual(1,len(calls))
+        self.db.execute('UPDATE players SET xc=xc+1 WHERE user_id=?',(self.uid,))
+        render(self.db,self.uid)
+        self.assertEqual(1,len(calls))
+        self.db.execute("UPDATE players SET nation_name='Map changed' WHERE user_id=?",(self.uid,))
+        render(self.db,self.uid)
+        self.assertEqual(2,len(calls))
+        with patch('war_tier.time.monotonic',return_value=time.monotonic()+121):
+            render(self.db,self.uid)
+        self.assertEqual(3,len(calls))
+
+    def test_phone_font_failure_checked_once(self):
+        import war_tier
+        war_tier._map_fonts.cache_clear()
+        self.addCleanup(war_tier._map_fonts.cache_clear)
+        with patch('PIL.ImageFont.truetype',side_effect=ImportError('no _imagingft')) as font,patch('war_tier.os.path.exists',return_value=True),patch('builtins.print'):
+            first=war_tier._map_fonts()
+            self.assertIs(first,war_tier._map_fonts())
+            self.assertTrue(all(isinstance(item,war_tier._PixelFont) for item in first))
+            self.assertEqual(1,font.call_count)
+
     def test_private_error_guidance_and_expired_token(self):
         from system_ui import report_panel_error
         async def check():

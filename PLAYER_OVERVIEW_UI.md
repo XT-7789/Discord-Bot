@@ -38,3 +38,7 @@ Player Market shows four listing cards per page, with Previous/Next/Refresh, cur
 ## Shared Economy workspace
 
 Overview, Earn, Trade, Production and Stocks now share the same five-tab row immediately below the page title, in the same order on each page. Only the active tab is blue. The shared header identifies X SYSTEM / ECONOMY. Content and operations remain below the tabs and Back/Menu/Close remains at the bottom. Old captured navigation routes resolve to current pages. Workshop remains reachable from Earn for crafting/research. Tests explicitly check all five tab layouts and active colours.
+
+## Phone map rendering
+
+Font discovery/fallback is cached once per process; missing FreeType support selects the existing pixel font without repeating font loads on each map click. Restart after installing or changing fonts. Nation/world map PNG bytes are cached for 120 seconds with a four-entry/8 MiB limit and fresh streams for each Discord upload. Map-relevant player/territory state changes invalidate the cache; balance-only changes do not. The first render and uploads can still be slow; phone timing has not been measured. Tests cover fallback reuse, closed-stream safety, map-state invalidation and expiry.
