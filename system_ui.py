@@ -1,6 +1,7 @@
 """Compact player navigation. Existing game callbacks retain their rules."""
 import discord
 import tier5
+import tier6
 import war_tier
 import casino
 import economy
@@ -214,10 +215,26 @@ def register(bot, db, create_player):
             return view
         if key=='finance':
             view=Shell(owner,'💳 Finance','OVERVIEW',notice)
-            overview_block(view,'Accounts',f"Wallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**\nTotal **{player['xc']+player['bank_xc']:,} XC**",[bot.xbot_finance_button_builder(owner,'deposit'),bot.xbot_finance_button_builder(owner,'withdraw')])
-            overview_block(view,'Assets & Exchange',f"War Credits **{player['money']:,}** · XCrystals **{player['xcrystals']:,}**",[Nav(owner,'View Assets','assets'),Nav(owner,'Exchange','exchange')])
+            overview_block(view,'💰 Wallet',f"## {player['xc']:,} XC\nAvailable to spend",[bot.xbot_finance_button_builder(owner,'deposit')])
+            overview_block(view,'🏦 Bank',f"## {player['bank_xc']:,} XC\nWithdraw to your Wallet",[bot.xbot_finance_button_builder(owner,'withdraw')])
+            overview_block(view,'📋 Assets',f"Total XC **{player['xc']+player['bank_xc']:,}**\nWar Credits **{player['money']:,}**\nXCrystals **{player['xcrystals']:,}**",[Nav(owner,'View Assets','assets'),Nav(owner,'Exchange','exchange')])
             footer(view,owner,key)
             return prepare(view,owner,key,force=True)
+        if key=='assets':
+            data=tier6.economy_summary(db,owner)
+            view=Shell(owner,'💼 Assets','OVERVIEW',notice)
+            overview_block(view,'Estimated Net Worth',f"## {data['net_worth']:,} XC\nIncludes item sell-back and current stock values.",[])
+            overview_block(view,'💳 Accounts',f"Wallet **{player['xc']:,} XC**\nBank **{player['bank_xc']:,} XC**",[Nav(owner,'Finance','finance')])
+            overview_block(view,'🎒 Items',f"## {data['inventory_value']:,} XC\nEstimated sell-back value",[Nav(owner,'Backpack','inventory')])
+            overview_block(view,'📈 Investments',f"Stock value **{data['stock_value']:,} XC**\nCost **{data['stock_cost']:,} XC**\nUnrealised P/L **{data['stock_value']-data['stock_cost']:+,} XC**",[Nav(owner,'Stock Market','stock')])
+            holdings=data['holdings']
+            if holdings:
+                lines=[f"**{discord.utils.escape_markdown(r['symbol'])}** ×{r['quantity']:,} · {int(r['quantity'])*int(r['price']):,} XC" for r in holdings[:12]]
+                overview_block(view,'Portfolio','\n'.join(lines)+ ('\nOpen Stock Market for all holdings.' if len(holdings)>12 else ''),[])
+            else:
+                view.box.add_item(discord.ui.TextDisplay('No stock holdings yet.'))
+            footer(view,owner,key)
+            return view
         if key in sections:
             title,body,links=sections[key]
             if key in {'menu','profile'}:

@@ -160,6 +160,11 @@ class ResearchTests(unittest.TestCase):
                     all_view=i.edit_original_response.call_args.kwargs['view']
                     self.assertIn('Finance',str(all_view.to_components()))
                     self.assertIn('Casino',str(all_view.to_components()))
+                    finance_readable=bot.xbot_system_page_builder(self.uid,'finance')
+                    self.assertGreaterEqual(sum(isinstance(x,discord.ui.TextDisplay) and '\n## ' in x.content for x in finance_readable.walk_children()),3)
+                    assets_readable=bot.xbot_system_page_builder(self.uid,'assets')
+                    self.assertIn('Estimated Net Worth',str(assets_readable.to_components()))
+                    self.assertNotIn('My Economy Assets',str(assets_readable.to_components()))
                     refresh=next(x for x in all_view.walk_children() if getattr(x,'label',None)=='Refresh')
                     refresh_balance=self.balance()
                     await refresh.callback(i)

@@ -588,6 +588,13 @@ def register_commands(bot, db, create_player):
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message("Open `/economy` for your own Economy Centre.", ephemeral=True)
                 return
+            # Resolve old embedded buttons through the current UI, not captured
+            # pre-redesign factories. Old Discord messages remain safe to use.
+            modern=getattr(bot,'xbot_system_page_builder',None)
+            routes={'economy_v2':'economy','legacy_economy':'economy','assets':'assets','earn':'contracts','trade':'market_menu','production':'production','stock':'stock'}
+            if modern and self.action in routes:
+                await replace_panel(interaction,lambda:modern(self.owner_id,routes[self.action]))
+                return
             local = {
                 "economy_v2": lambda: bot.xbot_player_panel_builders['economy'](self.owner_id),
                 "earn": lambda: ContractView(self.owner_id),
