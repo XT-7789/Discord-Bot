@@ -342,6 +342,11 @@ class Tier7WarfrontTests(unittest.TestCase):
         attack_payload = str(attack_page.to_components())
         self.assertIn("Choose an active enemy Nation", attack_payload)
         self.assertIn("Tier 7 Defender", attack_payload)
+        for heading in ('Target & Objective','Deployment','Launch Cost'):
+            self.assertIn(heading,attack_payload)
+        self.assertIn('Defensive Posture',str(pages[2].to_components()))
+        self.assertIn('BATTLE HISTORY',str(pages[4].to_components()))
+        self.assertTrue(all(page.total_children_count<=40 for page in pages))
         self.assertEqual({"war", "attack"}, set(fake.tree.commands))
 
     def test_large_land_and_unit_libraries_have_selectable_pages(self):

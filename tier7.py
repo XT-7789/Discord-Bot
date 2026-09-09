@@ -1519,11 +1519,13 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         )
         body = (
             "## 🎯 Attack Planner\n"
+            "PLAN YOUR OPERATION\n"
+            "### 🎯 Target & Objective\n"
             f"🏳️ Target: **{_player_label(target) if target else 'Not selected'}**\n"
             f"🗺️ Objective: **{territory['territory_name'] if territory else 'Not selected'}**\n"
-            f"{mode['emoji']} Mode: **{mode['label']}** · deploys **{mode['force_percent']}%** per selected model\n"
-            f"🪖 Selected: **{len(deployment_rows):,} models · {deployment_units:,} units**\n"
-            f"📦 Cost on launch: **{mode['supply_cost']:,} Supply**"
+            f"### 🪖 Deployment\n**{deployment_units:,} units** · {len(deployment_rows):,} models\n"
+            f"{mode['emoji']} **{mode['label']}** · {mode['force_percent']}% per selected model\n"
+            f"### 📦 Launch Cost\n## {mode['supply_cost']:,} Supply\nPreview before launching."
         )
         preview_raw = str(plan["preview_json"] or "{}")
         try:
@@ -1544,7 +1546,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 f"🌍 {str(detail.get('terrain','plains')).title()} · Fortification Lv {int(detail.get('fortification_level',0))}"
             )
         if notice:
-            body += f"\n\n-# {notice}"
+            body += f"\n\n{notice}"
         return body
 
     class PreviewButton(discord.ui.Button):
@@ -1614,7 +1616,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 plan_id = int(plan["id"])
                 notice = (notice + " " if notice else "") + "A fresh battle plan was opened safely."
                 target_page = territory_page = force_page = 0
-            container = discord.ui.Container(accent_color=discord.Color.red())
+            container = discord.ui.Container(accent_color=discord.Color.teal())
             container.add_item(discord.ui.TextDisplay(planner_body(plan, notice)))
             targets = eligible_targets(db, owner_id, get_active_war, get_alliance_for_user)
             target_pages = max(1, (len(targets) + 24) // 25)
@@ -1809,9 +1811,10 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         )
         body = (
             "## 🛡️ National Defence Centre\n"
-            f"Threat level: **{risk}** · {len(enemies)} active enemy Nation{'s' if len(enemies) != 1 else ''}\n"
+            f"### Threat Level\n## {risk}\nActive enemy Nations **{len(enemies)}**\n"
+            "### 🪖 Defensive Posture\n"
             f"🪖 Garrison **{int(profile['garrison_percent'])}%** · 🛡️ {str(state['defense_stance']).title()} stance\n"
-            f"📦 Supply **{int(state['supply']):,}** · 🎯 Readiness **{int(state['readiness'])}%**\n"
+            f"### 📦 Logistics\nSupply **{int(state['supply']):,}**\nReadiness **{int(state['readiness'])}%**\n"
             f"🔄 Auto Reinforce **{'On' if profile['auto_reinforce'] else 'Off'}** · "
             f"🏛️ Capital Priority **{'On' if profile['capital_priority'] else 'Off'}**\n\n"
         )
@@ -1822,7 +1825,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             )
         body += f"\n\n💡 {recommendation}"
         if notice:
-            body += f"\n-# {notice}"
+            body += f"\n{notice}"
         return body
 
     class DefenceView(OwnedView):
@@ -2017,13 +2020,15 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             reward += f"\n💰 Captured **{int(report['credits_captured']):,} War Credits**"
         return (
             f"## 📜 Battle Report #{int(report['battle_id'])}\n"
+            f"### 🏆 Winner\n**{winner}**\n"
+            "### Combatants\n"
             f"⚔️ **{attacker}** vs **{defender}**\n"
             f"🗺️ {report['territory_name']} · {str(report['terrain']).title()} · {str(report['mode']).title()}\n\n"
             f"### Three fronts\n✈️ Air: **{str(fronts.get('air','none')).title()}** · "
             f"⚓ Navy: **{str(fronts.get('navy','none')).title()}**\n"
             f"🪖 Final Land Power: **{int(report['attacker_score']):,} vs {int(report['defender_score']):,}**\n"
-            f"🏆 Winner: **{winner}**\n\n{reward}\n\n"
-            f"Attacker losses: {detail.get('attacker_loss_text','No units lost')}\n"
+            f"### Outcome\n{reward}\n\n"
+            f"### Casualties\nAttacker losses: {detail.get('attacker_loss_text','No units lost')}\n"
             f"Defender losses: {detail.get('defender_loss_text','No units lost')}"
         )
 
@@ -2088,8 +2093,8 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                     f"{'🏆' if won else '🛡️'} **#{int(row['battle_id'])} {'Victory' if won else 'Defeat'}** · "
                     f"vs {opponent}\n> {row['territory_name']} · <t:{int(row['created_at'])}:R>"
                 )
-            body = "## 📚 War Reports\n" + ("\n".join(lines) if lines else "No Tier 7 battles yet. Open Attack to begin.")
-            body += f"\n\n-# Page {page + 1}/{pages} · reports are permanent and can be opened below."
+            body = f"## 📚 War Reports\nBATTLE HISTORY\nPage **{page + 1}/{pages}**\n### Recent Battles\n" + ("\n\n".join(lines) if lines else "No battle reports yet.")
+            body += "\n\nSelect a report below to inspect its outcome and losses."
             container = discord.ui.Container(accent_color=discord.Color.dark_gold())
             container.add_item(discord.ui.TextDisplay(body))
             if rows:

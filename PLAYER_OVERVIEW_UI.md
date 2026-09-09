@@ -42,3 +42,9 @@ Overview, Earn, Trade, Production and Stocks now share the same five-tab row imm
 ## Phone map rendering
 
 Font discovery/fallback is cached once per process; missing FreeType support selects the existing pixel font without repeating font loads on each map click. Restart after installing or changing fonts. Nation/world map PNG bytes are cached for 120 seconds with a four-entry/8 MiB limit and fresh streams for each Discord upload. Map-relevant player/territory state changes invalidate the cache; balance-only changes do not. The first render and uploads can still be slow; phone timing has not been measured. Tests cover fallback reuse, closed-stream safety, map-state invalidation and expiry.
+
+## War detail renewal
+
+Attack Planner separates target/objective, deployment, launch cost and battle preview; its neutral planning container uses the shared teal rather than error red. Defence separates threat, posture, logistics and selected territory. Battle reports separate winner, combatants, fronts, outcome and casualties. Report history retains paging and selection. Notices use normal readable text, not small-print styling. No battle rules, selections or costs changed.
+
+Offline tests cover the new headings and component counts along with existing target eligibility, selection/pagination and double-resolution safety. This completes this war-detail implementation pass, not an exhaustive visual sign-off of every modal/result across all devices.
