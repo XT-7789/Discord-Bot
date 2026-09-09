@@ -142,11 +142,16 @@ class ResearchTests(unittest.TestCase):
                         self.assertTrue(panel.to_components())
                     main_buttons=[x for x in panels[0].walk_children() if isinstance(x,discord.ui.Button)]
                     self.assertTrue({'profile','economy','war','missions','help','close','city','army','casino'} <= {getattr(x,'key',None) for x in main_buttons})
-                    self.assertIn('PLAYER HUB',str(panels[0].to_components()))
+                    self.assertIn('MAIN MENU',str(panels[0].to_components()))
+                    menu_content=str(panels[0].to_components())
+                    for heading in ('Profile','Economy','Warfront','Missions'):
+                        self.assertIn(heading,menu_content)
+                    self.assertEqual(4,sum(isinstance(x,discord.ui.Separator) for x in panels[0].walk_children()))
+                    self.assertFalse(any(getattr(x,'action',None) in {'deposit','withdraw'} for x in main_buttons))
                     for button in main_buttons:
                         if getattr(button,'action',None) in {'deposit','withdraw'}:
                             self.assertEqual(discord.ButtonStyle.secondary,button.style)
-                        if getattr(button,'key',None) in {'economy','war','casino','missions'} and button.label not in {'Continue','View Rewards'}:
+                        if getattr(button,'key',None) in {'profile','economy','war','missions'} and button.label not in {'Continue','View Rewards'}:
                             self.assertEqual(discord.ButtonStyle.primary,button.style)
                         if button.label in {'Continue','View Rewards'}:
                             self.assertEqual(discord.ButtonStyle.success,button.style)

@@ -145,7 +145,7 @@ def register(bot, db, create_player):
             view=render_page(owner,key,notice,member)
             if key in {'menu','economy'}:
                 # Overview colour emphasises system entry points, not banking.
-                main_routes={'economy','war','casino','missions'} if key=='menu' else {'finance','market_menu','casino','earn_menu'}
+                main_routes={'profile','economy','war','missions'} if key=='menu' else {'finance','market_menu','casino','earn_menu'}
                 for child in view.walk_children():
                     if isinstance(child,discord.ui.Button):
                         if getattr(child,'action',None) in {'deposit','withdraw'}:
@@ -237,32 +237,32 @@ def register(bot, db, create_player):
                 xp=profile['xp']-profile['current_floor']
                 span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
                 xp_text=f"{progress_bar(xp,span)} {xp:,} / {span:,} XP" if profile['next_threshold'] else 'MAX LEVEL'
-                view=Shell(owner,'PLAYER HUB',f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{xp_text}",notice)
+                view=Shell(owner,'MAIN MENU','OVERVIEW',notice)
                 def block(text,buttons):
                     view.box.add_item(discord.ui.Separator())
                     view.box.add_item(discord.ui.TextDisplay(text))
                     view.box.add_item(discord.ui.ActionRow(*buttons))
-                block(f"### 💰 Economy\nWallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**",[bot.xbot_finance_button_builder(owner,'deposit'),bot.xbot_finance_button_builder(owner,'withdraw'),Nav(owner,'Economy','economy')])
+                block(f"### 👤 Profile\n**{discord.utils.escape_markdown(player['nation_name'])}** · Lv **{profile['level']}**\n{xp_text}",[Nav(owner,'Profile','profile'),Nav(owner,'VIP Status','vip')])
+                block(f"### 💰 Economy\nWallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**",[Nav(owner,'Economy','economy'),Nav(owner,'Finance','finance'),Nav(owner,'Casino','casino')])
                 cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(owner,)).fetchone()[0]
                 lands=db.execute('SELECT COUNT(*) FROM map_territories WHERE owner_user_id=?',(owner,)).fetchone()[0]
                 units=db.execute('SELECT COALESCE(SUM(quantity),0) FROM player_war_units WHERE user_id=?',(owner,)).fetchone()[0]
                 state=db.execute('SELECT last_collect FROM player_city_state WHERE user_id=?',(owner,)).fetchone()
                 ready_at=(int(state['last_collect']) if state else 0)+war_tier.setting(db,'city_collect_cooldown')
                 production='Production ready' if ready_at<=int(time.time()) else f'Production <t:{ready_at}:R>'
-                block(f"### 🏙️ Nation\nCities **{cities}** · Land **{lands}** · Units **{units}**\nWar Credits **{player['money']:,}** · {production}",[Nav(owner,'Cities','city'),Nav(owner,'Army','army'),Nav(owner,'Warfront','war')])
+                block(f"### ⚔️ Warfront\nCities **{cities}** · Land **{lands}** · Units **{units}**\nWar Credits **{player['money']:,}** · {production}",[Nav(owner,'Warfront','war'),Nav(owner,'Cities','city'),Nav(owner,'Army','army')])
                 pending=[(category,m) for category in ('daily','starter') for m in tier5.missions_for(db,owner,category)[1] if not m['claimed']]
                 ready=next(((c,m) for c,m in pending if m['progress']>=m['target']),None)
                 chosen=ready or next(((c,m) for c,m in pending if m['destination'] in ('mining','economy','city')),None)
                 if chosen:
                     category,m=chosen
                     target='mission_'+category if ready else {'economy':'daily'}.get(m['destination'],m['destination'])
-                    text=f"### 🎯 {'Reward Ready' if ready else 'Current Mission'}\n**{m['title']}** · {m['progress']} / {m['target']}\n{progress_bar(m['progress'],m['target'])}\n+{m['xc']} XC · +{m['credits']} WC · +{m['xp']} XP"
-                    actions=[Nav(owner,'View Rewards' if ready else 'Continue',target),Nav(owner,'Missions','missions')]
+                    text=f"### 🎯 Missions\n**{m['title']}** · {m['progress']} / {m['target']}\n{'Reward ready · ' if ready else ''}+{m['xc']} XC · +{m['credits']} WC · +{m['xp']} XP"
+                    actions=[Nav(owner,'Missions','missions'),Nav(owner,'View Rewards' if ready else 'Continue',target)]
                 else:
                     text='### 🎯 Missions\nAll featured goals complete. Explore at your own pace.'
                     actions=[Nav(owner,'Missions','missions')]
                 block(text,actions)
-                block('### 🎰 Casino\nChoose a game · XC stakes can be lost.',[Nav(owner,'Casino','casino'),Nav(owner,'VIP Status','vip'),Nav(owner,'Profile','profile')])
                 footer(view,owner,key)
                 return prepare(view,owner,key,force=True)
             if key in {'economy','profile','war','missions','earn_menu','market_menu'}:

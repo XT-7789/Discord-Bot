@@ -54,6 +54,8 @@ Backlog only until current stages are accepted and feature scope is agreed.
 
 ## Current checkpoint
 
+Latest user direction: use the supplied Economy screenshot as the visual reference and renew Menu first. Suspend balance/new-feature expansion during this UI pass. Main Menu uses the same OVERVIEW heading and four separated groups: Profile, Economy, Warfront and Missions. Each group's system entry is primary blue; secondary shortcuts are grey and mission continuation is green. Banking operations stay inside Economy/Finance rather than competing for attention on Menu. Help and Close share the footer row.
+
 Player UI baseline through commit cc1a55d has offline coverage for 35 entry routes within 27 tests. Main/Economy/Profile are not awaiting first implementation; they are awaiting final refinement and mobile acceptance. Economy now also has a read-only Refresh shortcut to recheck balances and Daily readiness without navigating away.
 
 Permission/error reliability pass: unified private recovery guidance now covers prepared player views and their modal forms as well as slash-command errors. Guidance does not expose exception details or assume a failed UI response means no payment occurred. Expired interaction tokens are not retried. Modal ownership is checked explicitly. Mobile verification remains pending; balance and future-content stages have not been implemented or marked complete.
