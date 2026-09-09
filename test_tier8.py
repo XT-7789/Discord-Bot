@@ -308,6 +308,27 @@ class ResearchTests(unittest.TestCase):
                     self.assertIn('X SYSTEM',str(updated.to_components()))
                     self.assertIn('Close',str(updated.to_components()))
                     self.assertIn('Menu',str(updated.to_components()))
+                    # Finance transfers update both balances in the same panel.
+                    finance=bot.xbot_system_page_builder(self.uid,'finance')
+                    initial=self.balance()
+                    for action,expected,notice in [('Deposit',initial-1,'Deposited'),('Withdraw',initial,'Withdrew')]:
+                        button=next(x for x in finance.walk_children() if getattr(x,'label',None)==action)
+                        await button.callback(i)
+                        form=i.response.send_modal.call_args.args[0]
+                        form.amount._value='1'
+                        await form.on_submit(i)
+                        self.assertEqual(expected,self.balance())
+                        finance=i.message.edit.call_args.kwargs['view']
+                        content=str(finance.to_components())
+                        for text in ('Finance','Wallet','Bank',notice,'Help','Close'):
+                            self.assertIn(text,content)
+                        self.assertLessEqual(finance.total_children_count,40)
+                    await next(x for x in finance.walk_children() if getattr(x,'label',None)=='Deposit').callback(i)
+                    form=i.response.send_modal.call_args.args[0]
+                    form.amount._value=str(initial+1)
+                    await form.on_submit(i)
+                    self.assertEqual(initial,self.balance())
+                    self.assertIn('do not have',i.response.send_message.call_args.args[0])
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()

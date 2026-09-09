@@ -14,7 +14,7 @@ HELP_TOPICS={
     'items':('Where are my items?','Profile > Backpack','Select an item to see its quantity and available Use, Equip or Sell actions.','inventory'),
     'cities':('How do I build or upgrade Cities?','Warfront > Cities','Open Build or Upgrade. Choose one or several Cities or available locations and review the cost before confirming.','city'),
     'rewards':('Where do I claim mission rewards?','Missions > Starter / Daily / Weekly','Choose a category and press Claim Ready after completing its goals. Weekly missions unlock at Nation Level 2.','missions'),
-    'bank':('How do I deposit or withdraw XC?','Economy > Finance > Bank','Deposit moves XC into your Bank. Withdraw moves it back to your Wallet. Neither action creates extra XC.','bank'),
+    'bank':('How do I deposit or withdraw XC?','Economy > Finance','Press Deposit or Withdraw below your balances. Neither action creates extra XC.','finance'),
     'trade':('Where are Shop, Market and Stocks?','Economy > Market','Shop sells bot items; Player Market contains player listings. Stocks shows the fictional market and your holdings.','market_menu'),
     'army':('Where do I recruit an army?','Warfront > Recruit','Select a unit, enter a quantity and review the War Credit cost. Army shows your existing forces.','recruit'),
     'craft':('Where are crafting and research?','Economy > Earn','Craft makes items; Production manages queued jobs; Research improves existing activities.','earn_menu'),
@@ -78,7 +78,7 @@ def register(bot, db, create_player):
             self.owner=owner
             self.system_prepared=True
             self.box=discord.ui.Container(accent_color=discord.Color(0x41D9D0))
-            self.box.add_item(discord.ui.TextDisplay(f'### ✦ X SYSTEM\n`{title}`'+ ('\n'+body if body else '')+ ('\n\n'+notice if notice else '')))
+            self.box.add_item(discord.ui.TextDisplay(f'-# ✦ X SYSTEM\n## {title}'+ ('\n'+body if body else '')+ ('\n\n'+notice if notice else '')))
             self.add_item(self.box)
         async def interaction_check(self,i):
             if i.user.id==self.owner:
@@ -92,10 +92,10 @@ def register(bot, db, create_player):
             if include_back:
                 row.add_item(Nav(owner,'‹ Back',parents.get(key,'menu')))
             row.add_item(Nav(owner,'⌂ Menu','menu'))
-        else:
+        if key!='help':
             row.add_item(Nav(owner,'? Help','help'))
-        row.add_item(Nav(owner,'× Close','close'))
         view.add_item(row)
+        view.add_item(discord.ui.ActionRow(Nav(owner,'× Close','close')))
 
     def page(owner,key='menu',notice=''):
         player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
@@ -124,6 +124,16 @@ def register(bot, db, create_player):
                 view.box.add_item(discord.ui.TextDisplay('The image is unavailable. All directions remain available in Help.'))
             footer(view,owner,key)
             return view
+        if key=='finance':
+            view=Shell(owner,'💳 Finance','Manage your XC in one place.',notice)
+            view.box.add_item(discord.ui.TextDisplay(f"### Wallet\n## {player['xc']:,} XC\nAvailable to spend."))
+            view.box.add_item(discord.ui.Separator())
+            view.box.add_item(discord.ui.TextDisplay(f"### Bank\n## {player['bank_xc']:,} XC\nWithdraw to use these savings."))
+            view.box.add_item(discord.ui.ActionRow(bot.xbot_finance_button_builder(owner,'deposit'),bot.xbot_finance_button_builder(owner,'withdraw')))
+            view.box.add_item(discord.ui.TextDisplay(f"**Total XC: {player['xc']+player['bank_xc']:,}** · Transfers do not change your total."))
+            view.box.add_item(discord.ui.ActionRow(Nav(owner,'View Assets','assets'),Nav(owner,'Exchange','exchange')))
+            footer(view,owner,key)
+            return prepare(view,owner,key,force=True)
         if key in sections:
             title,body,links=sections[key]
             if key in {'menu','profile'}:
@@ -139,6 +149,13 @@ def register(bot, db, create_player):
                     lines.append(f'{category.title()} · {ready} ready')
                 body='\n'.join(lines)
             view=Shell(owner,title,body,notice)
+            if key=='menu':
+                descriptions={'profile':'Your progress, items and assets.','economy':'Earn XC, manage savings, trade and play Casino.','war':'Build Cities, recruit units and manage battles.','missions':'See your goals and claim completed rewards.'}
+                for label,dest in links:
+                    view.box.add_item(discord.ui.TextDisplay(f'### {label}\n{descriptions[dest]}'))
+                    view.box.add_item(discord.ui.ActionRow(Nav(owner,'Open '+label.split(' ',1)[1],dest)))
+                footer(view,owner,key)
+                return view
             for n in range(0,len(links),2):
                 row=discord.ui.ActionRow()
                 for label,dest in links[n:n+2]:
@@ -244,7 +261,7 @@ def register(bot, db, create_player):
                 return False
             return await check(i)
         view.interaction_check=owner_check
-        can_footer=view.total_children_count<=35 and getattr(view,'finished',None) is not False
+        can_footer=view.total_children_count<=34 and getattr(view,'finished',None) is not False
         if can_footer:
             for child in list(view.walk_children()):
                 if isinstance(child,discord.ui.Button) and not isinstance(child,Nav) and (child.label or '').strip() in {'Lobby','✨ Lobby','Menu'}:
@@ -257,7 +274,7 @@ def register(bot, db, create_player):
         if first_text is not None and first_text.content.startswith('## '):
             title,sep,body=first_text.content.partition('\n')
             title=re.sub(r'\s*[·—-]\s*Tier\s+\d+','',title[3:].replace('X BOT ','')).replace('`','')
-            first_text.content=f'### ✦ X SYSTEM\n`{title}`'+(sep+body if sep else '')
+            first_text.content=f'-# ✦ X SYSTEM\n## {title}'+(sep+body if sep else '')
         for child in list(view.walk_children()):
             if isinstance(child,discord.ui.Container) and child.accent_colour not in (discord.Color.red(),discord.Color.green(),discord.Color(0xFF5470)):
                 child.accent_colour=discord.Color(0x41D9D0)

@@ -96,10 +96,11 @@ def register_commands(bot, db, create_player, find_item):
         return EconomyCentreView(owner_id, notice)
 
     class EconomyAmountModal(discord.ui.Modal):
-        def __init__(self, action: str, source_message: discord.Message):
+        def __init__(self, action: str, source_message: discord.Message, return_to_finance=False):
             super().__init__(title=f"{action.title()} XC")
             self.action = action
             self.source_message = source_message
+            self.return_to_finance = return_to_finance
             self.amount = discord.ui.TextInput(
                 label="Amount of XC",
                 placeholder="For example: 500",
@@ -135,19 +136,21 @@ def register_commands(bot, db, create_player, find_item):
             # Modal submits are a separate Discord interaction. Update the
             # original Economy Centre message instead of posting a result.
             await interaction.response.defer()
-            await self.source_message.edit(view=EconomyBankView(interaction.user.id))
+            result = bot.xbot_system_page_builder(interaction.user.id,'finance',notice=detail) if self.return_to_finance else EconomyBankView(interaction.user.id)
+            await self.source_message.edit(view=result)
 
     class EconomyPanelButton(discord.ui.Button):
-        def __init__(self, owner_id: int, action: str, label: str, emoji: str, style=discord.ButtonStyle.secondary):
+        def __init__(self, owner_id: int, action: str, label: str, emoji: str, style=discord.ButtonStyle.secondary, return_to_finance=False):
             super().__init__(label=label, emoji=emoji, style=style)
             self.owner_id, self.action = owner_id, action
+            self.return_to_finance = return_to_finance
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message("Open `/menu` for your own Economy Centre.", ephemeral=True)
                 return
             if self.action in {"deposit", "withdraw"}:
-                await interaction.response.send_modal(EconomyAmountModal(self.action, interaction.message))
+                await interaction.response.send_modal(EconomyAmountModal(self.action, interaction.message,self.return_to_finance))
                 return
             if self.action == "refresh":
                 # Refresh in place: the player stays in the same Economy
@@ -579,6 +582,7 @@ def register_commands(bot, db, create_player, find_item):
     bot.xbot_player_panel_builders['wallet'] = lambda owner_id: EconomyBalanceView(owner_id)
     bot.xbot_player_lobby_builder = lambda owner_id: XBotLobbyView(owner_id)
     bot.xbot_daily_button_builder = lambda owner_id: EconomyPanelButton(owner_id, 'daily_lobby', 'Claim Daily', '🎁', discord.ButtonStyle.success)
+    bot.xbot_finance_button_builder = lambda owner_id, action: EconomyPanelButton(owner_id, action, action.title(), '📥' if action=='deposit' else '📤', discord.ButtonStyle.primary, return_to_finance=True)
 
     @bot.tree.command(name="market", description="Open the X BOT player marketplace")
     async def market(interaction: discord.Interaction):
