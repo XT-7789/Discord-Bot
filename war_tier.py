@@ -2530,9 +2530,29 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
         async def interaction_check(self, interaction): return interaction.user.id == self.owner_id
 
+    class CityBrowseSelect(discord.ui.Select):
+        def __init__(self,owner_id,rows,page):
+            super().__init__(placeholder='Choose a City to inspect…',options=[discord.SelectOption(label=row['name'][:100],value=str(row['id']),description=f"{row['city_type'].title()} · Level {row['level']}") for row in rows])
+            self.owner_id,self.page=owner_id,page
+        async def callback(self,interaction):
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open /city for your own Cities.',ephemeral=True)
+                return
+            await replace_slow_panel(interaction,lambda:CitySystemView(self.owner_id,selected_city=int(self.values[0]),city_page=self.page))
+
+    class CityBrowsePage(discord.ui.Button):
+        def __init__(self,owner_id,page,label,disabled=False):
+            super().__init__(label=label,style=discord.ButtonStyle.secondary,disabled=disabled)
+            self.owner_id,self.page=owner_id,page
+        async def callback(self,interaction):
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open /city for your own Cities.',ephemeral=True)
+                return
+            await replace_slow_panel(interaction,lambda:CitySystemView(self.owner_id,city_page=self.page))
+
     class CitySystemView(discord.ui.LayoutView):
         """A player-friendly City dashboard; prices are visible before a command is used."""
-        def __init__(self, user_id: int, show_costs: bool = False, notice: str | None = None):
+        def __init__(self, user_id: int, show_costs: bool = False, notice: str | None = None, selected_city=None, city_page=0):
             super().__init__(timeout=300)
             self.owner_id = user_id
             # /city always creates the profile before opening this panel.  Querying
@@ -2578,22 +2598,47 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                     f"Use **Build**, **Upgrade**, **Land**, and **Rename City** below."
                 )
             else:
-                city_lines = [f"🏛️ **{player['capital_name']}** · Capital · 📍 {capital_location} · Base production"]
-                city_lines += [
-                    f"{'🏙️' if row['city_type']=='civilian' else '🏭'} **{row['name']}** · Lv {row['level']}"
-                    f" · 📍 {city_locations.get(row['id'], 'Unmapped location')}"
-                    f" · Next upgrade **{tier8.discounted(db, user_id, 'construction', base_upgrade * int(row['level'])):,} WC**"
-                    for row in cities
-                ]
-                collect_text = "✅ **Ready to collect now**" if remaining == 0 else f"⏳ Ready <t:{int(time.time()) + remaining}:R>"
-                body = (
-                    f"## 🏙️ {player['nation_name']} — City Centre\n"
-                    f"💰 **{player['money']:,} War Credits** · 🗺️ Land **{player['land']}** · "
-                    f"City slots **{len(cities)}/{city_slots(db, user_id)}**\n"
-                    f"{collect_text}\n\n"
-                    f"### Every 12 hours\n💰 **+{credits:,} War Credits** · 📦 **+{supply:,} Supply**\n\n"
-                    f"### Cities\n" + "\n".join(city_lines)
-                )
+                slots=city_slots(db,user_id)
+                available=max(0,slots-len(cities))
+                upgradeable=sum(int(row['level'])<10 for row in cities)
+                container.add_item(discord.ui.TextDisplay(f"## 🏙️ City Centre\n**{discord.utils.escape_markdown(player['nation_name'])}**\nWar Credits **{player['money']:,}** · Cities **{len(cities)}** · Slots **{len(cities)}/{slots}**"))
+                if notice:
+                    container.add_item(discord.ui.TextDisplay(notice))
+                collect_text='● Ready to collect' if remaining==0 else f'Ready <t:{int(state["last_collect"])+cooldown}:R>'
+                container.add_item(discord.ui.Separator())
+                container.add_item(discord.ui.TextDisplay(f"### 💰 Production\n**+{credits:,} WC** · **+{supply:,} Supply** / {cooldown/3600:g}h\n{collect_text}"))
+                collect=CityMenuButton(user_id,'collect','Collect' if not remaining else 'Collect · Cooldown','💰',discord.ButtonStyle.success if not remaining else discord.ButtonStyle.secondary)
+                collect.disabled=remaining>0
+                container.add_item(discord.ui.ActionRow(collect,CityMenuButton(user_id,'refresh','Refresh','🔄',discord.ButtonStyle.secondary)))
+                container.add_item(discord.ui.Separator())
+                container.add_item(discord.ui.TextDisplay(f'### 🏗️ Development\n**{available}** free slots · **{upgradeable}** Cities below max level'))
+                build=CityMenuButton(user_id,'build','Build','🏗️',discord.ButtonStyle.primary)
+                build.disabled=available==0
+                upgrade=CityMenuButton(user_id,'upgrade','Upgrade','⬆️',discord.ButtonStyle.primary)
+                upgrade.disabled=upgradeable==0
+                container.add_item(discord.ui.ActionRow(build,upgrade,CityMenuButton(user_id,'land','Land / Slots','🗺️',discord.ButtonStyle.secondary)))
+                container.add_item(discord.ui.Separator())
+                container.add_item(discord.ui.TextDisplay(f"### 🏘️ Your Cities\nCapital **{discord.utils.escape_markdown(player['capital_name'])}** · {capital_location}"))
+                if cities:
+                    pages=(len(cities)+24)//25
+                    city_page=max(0,min(int(city_page),pages-1))
+                    container.add_item(discord.ui.ActionRow(CityBrowseSelect(user_id,cities[city_page*25:(city_page+1)*25],city_page)))
+                    if pages>1:
+                        container.add_item(discord.ui.TextDisplay(f'Page {city_page+1}/{pages}'))
+                        container.add_item(discord.ui.ActionRow(CityBrowsePage(user_id,city_page-1,'Previous Cities',city_page==0),CityBrowsePage(user_id,city_page+1,'Next Cities',city_page==pages-1)))
+                    selected=next((row for row in cities if row['id']==selected_city),None)
+                    if selected:
+                        level=int(selected['level'])
+                        cost=tier8.discounted(db,user_id,'construction',base_upgrade*level)
+                        wc=setting(db,'city_'+selected['city_type']+'_war_credits')*level
+                        output=setting(db,'city_industrial_supply')*level if selected['city_type']=='industrial' else 0
+                        next_cost=f'Next upgrade **{cost:,} WC**' if level<10 else '**Max level**'
+                        container.add_item(discord.ui.TextDisplay(f"**{discord.utils.escape_markdown(selected['name'])}** · Lv {level}\n{city_locations.get(selected['id'],'Unmapped location')}\n+{wc:,} WC · +{output:,} Supply / cycle\n{next_cost}"))
+                else:
+                    container.add_item(discord.ui.TextDisplay('No Cities built yet. Start with Build.'))
+                container.add_item(discord.ui.ActionRow(CityMenuButton(user_id,'overview','Overview','🏙️',discord.ButtonStyle.secondary),CityMenuButton(user_id,'rename','Rename','🏷️',discord.ButtonStyle.secondary),CityMenuButton(user_id,'costs','Costs','🧾',discord.ButtonStyle.secondary)))
+                self.add_item(container)
+                return
             container.add_item(discord.ui.TextDisplay(body))
             if notice:
                 container.add_item(discord.ui.TextDisplay(f"-# {notice}"))

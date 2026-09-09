@@ -395,6 +395,32 @@ class ResearchTests(unittest.TestCase):
                     result=i.message.edit.call_args.kwargs['view']
                     self.assertEqual('economy',result.system_history[-1])
                     self.assertEqual(before-1,self.balance())
+                    # City overview handles paging, details and cooldown states.
+                    module.db.execute('DELETE FROM player_cities WHERE user_id=?',(self.uid,))
+                    for number in range(26):
+                        module.db.execute("INSERT INTO player_cities(user_id,city_type,name,level,created_at) VALUES(?,'civilian',?,10,?)",(self.uid,f'UI City {number:02}',number))
+                    module.db.execute("INSERT OR REPLACE INTO player_city_state(user_id,last_collect) VALUES(?,strftime('%s','now'))",(self.uid,))
+                    module.db.commit()
+                    city=bot.xbot_system_page_builder(self.uid,'city')
+                    self.assertLessEqual(city.total_children_count,40)
+                    self.assertIn('Page 1/2',str(city.to_components()))
+                    self.assertTrue(next(x for x in city.walk_children() if getattr(x,'action',None)=='collect').disabled)
+                    self.assertTrue(next(x for x in city.walk_children() if getattr(x,'action',None)=='upgrade').disabled)
+                    next_page=next(x for x in city.walk_children() if getattr(x,'label',None)=='Next Cities')
+                    i.response.is_done=lambda:False
+                    await next_page.callback(i)
+                    city=i.edit_original_response.call_args.kwargs['view']
+                    self.assertIn('Page 2/2',str(city.to_components()))
+                    selector=next(x for x in city.walk_children() if isinstance(x,discord.ui.Select))
+                    self.assertEqual(1,len(selector.options))
+                    selector._values=[selector.options[0].value]
+                    before=self.balance()
+                    await selector.callback(i)
+                    detail=i.edit_original_response.call_args.kwargs['view']
+                    self.assertIn('Max level',str(detail.to_components()))
+                    self.assertIn('UI City 25',str(detail.to_components()))
+                    self.assertLessEqual(detail.total_children_count,40)
+                    self.assertEqual(before,self.balance())
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()

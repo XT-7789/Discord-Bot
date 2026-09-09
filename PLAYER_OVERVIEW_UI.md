@@ -16,3 +16,7 @@ Existing detailed selectors, confirmation flows and game results retain their in
 Daily claims stay in Economy/Earn and cannot pay twice on retry. Economy transfers refresh Economy in place. No balance or membership purchase occurs simply by opening a page. Values are derived from game data; unavailable Discord role context is not represented as a verified membership tier.
 
 Verification uses temporary-database integration tests without Discord login. Mobile layout still requires checking in Discord after deployment.
+
+## City Centre
+
+Production, Development and Your Cities replace the long city list. Collect is green when ready and disabled during cooldown; Refresh rechecks readiness. Build/Upgrade retain the existing selection and cost-confirmation flows. Land/Slots remains available when building space is exhausted. City inspection is read-only, paginated in groups of 25, and shows the selected City's location, level, production and discounted next-level cost (or Max level). Integration coverage includes 26-city pagination, selected details, cooldown/max-level disabled states and Discord component limits.
