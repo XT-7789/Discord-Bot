@@ -1,6 +1,6 @@
 # Readable navigation and Finance
 
-Main Menu is now a Player Hub: player level and XP bar, Wallet/Bank with transfer buttons, Nation city/land/unit counts and production readiness, a current or claimable mission with progress and rewards, and Casino/Daily/Profile shortcuts. These are live database summaries, not decorative sample numbers. Native Discord controls retain their platform-defined size.
+Main Menu is now a Player Hub: player level and XP bar, Wallet/Bank with transfer buttons, Nation city/land/unit counts and production readiness, a current or claimable mission with progress and rewards, and Casino/VIP Status/Profile shortcuts. VIP Status is read-only, checks the interaction member's SVIP role and existing paid VIP expiry, and never purchases membership. Daily remains under Economy > Earn. These are live database summaries, not decorative sample numbers. Native Discord controls retain their platform-defined size.
 
 Finance shows Wallet and Bank separately, with Deposit and Withdraw directly below. Transfers reuse the existing banking rules and refresh the original Finance message with the updated balances and a success notice. Assets and Exchange remain accessible.
 

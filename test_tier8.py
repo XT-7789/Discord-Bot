@@ -130,6 +130,18 @@ class ResearchTests(unittest.TestCase):
                     async def navigate(view,key):
                         await next(x for x in view.walk_children() if getattr(x,'key',None)==key).callback(i)
                         return i.edit_original_response.call_args.kwargs['view']
+                    self.assertFalse(any(getattr(x,'label',None)=='Daily Reward' for x in main_buttons))
+                    import casino
+                    vip_balance=self.balance()
+                    saved_user=i.user
+                    for roles,expected in (([],'STANDARD'),([SimpleNamespace(id=casino.setting(module.db,'server_svip_role_id'))],'SVIP')):
+                        i.user=SimpleNamespace(id=self.uid,roles=roles)
+                        vip_view=await navigate(panels[0],'vip')
+                        self.assertIn(expected,str(vip_view.to_components()))
+                        self.assertIn('No XC charged',str(vip_view.to_components()))
+                        self.assertEqual(('menu',),(await navigate(vip_view,'back')).system_history)
+                    i.user=saved_user
+                    self.assertEqual(vip_balance,self.balance())
                     finance_route=await navigate(all_view,'finance')
                     assets_route=await navigate(finance_route,'assets')
                     restored=await navigate(assets_route,'back')

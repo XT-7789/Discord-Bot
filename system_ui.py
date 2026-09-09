@@ -2,6 +2,7 @@
 import discord
 import tier5
 import war_tier
+import casino
 import os
 import functools
 import time
@@ -72,7 +73,7 @@ def register(bot, db, create_player):
             token=navigation.set(history)
             try:
                 attachments=[discord.File(GUIDE_IMAGE,filename='navigation-guide.png')] if destination=='help_map' and GUIDE_IMAGE.is_file() else []
-                await i.edit_original_response(view=page(self.owner,destination),attachments=attachments)
+                await i.edit_original_response(view=page(self.owner,destination,member=i.user),attachments=attachments)
             finally:
                 navigation.reset(token)
 
@@ -113,12 +114,12 @@ def register(bot, db, create_player):
         view.add_item(row)
         view.add_item(discord.ui.ActionRow(Nav(owner,'× Close','close')))
 
-    def page(owner,key='menu',notice=''):
+    def page(owner,key='menu',notice='',member=None):
         history=navigation.get()
         history=('menu',) if key=='menu' else history if history and history[-1]==key else (*history,key)
         token=navigation.set(history[-40:])
         try:
-            view=render_page(owner,key,notice)
+            view=render_page(owner,key,notice,member)
             view.system_history=navigation.get()
             for child in view.walk_children():
                 if isinstance(child,(Nav,HelpSelect)):
@@ -131,12 +132,25 @@ def register(bot, db, create_player):
         filled=min(10,max(0,int(10*value/max(1,total))))
         return '▰'*filled+'▱'*(10-filled)
 
-    def render_page(owner,key='menu',notice=''):
+    def render_page(owner,key='menu',notice='',member=None):
         player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
         if key=='mission_weekly' and tier5.profile_summary(db,owner)['level']<2:
             return page(owner,'missions','Weekly missions unlock at Nation Level 2.')
         if key=='close':
             view=Shell(owner,'CLOSED','Panel closed. /menu opens a new menu.')
+            return view
+        if key=='vip':
+            active=db.execute('SELECT expires_at FROM casino_vip_members WHERE user_id=?',(owner,)).fetchone()
+            expires=int(active['expires_at']) if active else 0
+            paid_active=expires>int(time.time())
+            if member is not None and hasattr(member,'roles'):
+                info=casino.cooldown_info(db,member,'blackjack')
+                body=f"### {info['tier']}\nCasino cooldown reduction: **{info['reduction']}%**"
+            else:
+                body=f"### {'VIP' if paid_active else 'No active Casino VIP'}\nServer SVIP role cannot be checked here. Open this panel inside your server."
+            body+=f'\nCasino VIP expires <t:{expires}:R>.' if paid_active else '\nCasino VIP subscription: inactive.'
+            view=Shell(owner,'💎 VIP Status',body+'\n-# Status check only · No XC charged.')
+            footer(view,owner,key)
             return view
         if key=='help':
             view=Shell(owner,'HELP / QUICK FIND','What would you like to do?\nChoose a question for directions and a direct link.')
@@ -212,7 +226,7 @@ def register(bot, db, create_player):
                     text='### 🎯 Missions\nAll featured goals complete. Explore at your own pace.'
                     actions=[Nav(owner,'Missions','missions')]
                 block(text,actions)
-                block('### 🎰 Casino\nChoose a game · XC stakes can be lost.',[Nav(owner,'Casino','casino'),Nav(owner,'Daily Reward','daily'),Nav(owner,'Profile','profile')])
+                block('### 🎰 Casino\nChoose a game · XC stakes can be lost.',[Nav(owner,'Casino','casino'),Nav(owner,'VIP Status','vip'),Nav(owner,'Profile','profile')])
                 footer(view,owner,key)
                 return prepare(view,owner,key,force=True)
             if key=='economy':
