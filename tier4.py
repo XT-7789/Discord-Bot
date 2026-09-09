@@ -303,7 +303,7 @@ class TradeModal(discord.ui.Modal, title="Propose a Nation Trade"):
             (interaction.user.id, self.target_id, *give, *receive, now, now + REQUEST_TTL),
         )
         self.panel.db.commit()
-        await _notify(self.panel.bot, self.target_id, f"📦 **{_nation(self.panel.db,interaction.user.id)}** sent your Nation a trade offer. Open `/war` → **Diplomacy** → **Inbox**.")
+        await _notify(self.panel.bot, self.target_id, f"📦 **{_nation(self.panel.db,interaction.user.id)}** sent your Nation a trade offer. Open `/warfront` → **Diplomacy** → **Inbox**.")
         await interaction.response.edit_message(view=DiplomacyView(
             self.panel.bot, self.panel.db, self.panel.create_player, interaction.user.id,
             page="trade", selected_target=self.target_id, notice="Trade offer sent. It expires in 3 days.",
@@ -347,7 +347,7 @@ class ConfirmView(discord.ui.LayoutView):
         if self.action == "declare":
             ok, notice = self.panel.declare_war(self.owner_id, self.target_id)
             if ok:
-                await _notify(self.panel.bot, self.target_id, f"⚔️ **{_nation(self.panel.db,self.owner_id)}** declared war on your Nation. Open `/war` for details.")
+                await _notify(self.panel.bot, self.target_id, f"⚔️ **{_nation(self.panel.db,self.owner_id)}** declared war on your Nation. Open `/warfront` for details.")
             await interaction.response.edit_message(view=DiplomacyView(
                 self.panel.bot, self.panel.db, self.panel.create_player, self.owner_id,
                 page="relations", selected_target=self.target_id, notice=notice,
@@ -393,7 +393,7 @@ class DiplomacyView(discord.ui.LayoutView):
     async def interaction_check(self, interaction):
         if interaction.user.id == self.owner_id:
             return True
-        await interaction.response.send_message("This Diplomacy panel belongs to another player. Open `/war` for your own panel.", ephemeral=True)
+        await interaction.response.send_message("This Diplomacy panel belongs to another player. Open `/warfront` for your own panel.", ephemeral=True)
         return False
 
     def _content(self, notice):
@@ -530,7 +530,7 @@ class DiplomacyView(discord.ui.LayoutView):
             self.db.execute("INSERT INTO alliance_invites(alliance_id,inviter_id,target_id,created_at,expires_at) VALUES(?,?,?,?,?)",
                             (alliance["id"], self.owner_id, self.selected_target, now, now + REQUEST_TTL))
             self.db.commit()
-            await _notify(self.bot, self.selected_target, f"🤝 You were invited to **[{alliance['tag']}] {alliance['name']}**. Open `/war` → **Diplomacy** → **Inbox**.")
+            await _notify(self.bot, self.selected_target, f"🤝 You were invited to **[{alliance['tag']}] {alliance['name']}**. Open `/warfront` → **Diplomacy** → **Inbox**.")
             notice = "Private Alliance invitation sent."
         else:
             if self.selected_target == self.owner_id:
@@ -555,7 +555,7 @@ class DiplomacyView(discord.ui.LayoutView):
         self.db.execute("""INSERT INTO nation_relation_requests(sender_id,target_id,relation_type,created_at,expires_at)
             VALUES(?,?,?,?,?)""", (self.owner_id, self.selected_target, relation_type, now, now + REQUEST_TTL))
         self.db.commit()
-        await _notify(self.bot, self.selected_target, f"🕊️ **{_nation(self.db,self.owner_id)}** sent a {RELATION_LABELS[relation_type]} request. Open `/war` → **Diplomacy** → **Inbox**.")
+        await _notify(self.bot, self.selected_target, f"🕊️ **{_nation(self.db,self.owner_id)}** sent a {RELATION_LABELS[relation_type]} request. Open `/warfront` → **Diplomacy** → **Inbox**.")
         await interaction.response.edit_message(view=DiplomacyView(self.bot, self.db, self.create_player, self.owner_id,
             page="relations", selected_target=self.selected_target, notice="Relation request sent. It requires the other Nation to accept."))
 
@@ -569,7 +569,7 @@ class DiplomacyView(discord.ui.LayoutView):
         self.db.execute("INSERT INTO nation_peace_offers(war_id,offered_by,target_id,created_at,expires_at) VALUES(?,?,?,?,?)",
                         (war["id"], self.owner_id, target, now, now + REQUEST_TTL))
         self.db.commit()
-        await _notify(self.bot, target, f"🏳️ **{_nation(self.db,self.owner_id)}** offered peace. Open `/war` → **Diplomacy** → **Inbox**.")
+        await _notify(self.bot, target, f"🏳️ **{_nation(self.db,self.owner_id)}** offered peace. Open `/warfront` → **Diplomacy** → **Inbox**.")
         await interaction.response.edit_message(view=DiplomacyView(self.bot, self.db, self.create_player, self.owner_id,
             page="relations", selected_target=target, notice="Peace offer sent. The other Nation must accept."))
 
@@ -688,7 +688,7 @@ class DiplomacyView(discord.ui.LayoutView):
             self.db.rollback()
             await interaction.response.send_message(str(exc), ephemeral=True); return
         if notify_id:
-            await _notify(self.bot, notify_id, f"📨 **{_nation(self.db,self.owner_id)}** {'accepted' if accept else 'rejected'} your diplomatic request. Open `/war` → **Diplomacy**.")
+            await _notify(self.bot, notify_id, f"📨 **{_nation(self.db,self.owner_id)}** {'accepted' if accept else 'rejected'} your diplomatic request. Open `/warfront` → **Diplomacy**.")
         await interaction.response.edit_message(view=DiplomacyView(self.bot, self.db, self.create_player, self.owner_id,
             page="inbox", notice=notice))
 

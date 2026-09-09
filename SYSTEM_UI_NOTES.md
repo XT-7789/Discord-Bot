@@ -17,4 +17,4 @@ Back returns to the parent category; Menu goes home; Close replaces the message 
 
 `system_ui.register` runs after existing player systems. It retains their builders and callbacks, replaces the three major entry screens, and forwards view output through a presentation layer. Modal and stored-message updates are covered. Staff commands are not wrapped.
 
-Restart the phone bot after pulling and open a fresh `/lobby`, `/economy` or `/war`. Old posted panels retain their original callbacks until replaced or expired.
+Restart the phone bot after pulling and open a fresh `/menu`, `/economy` or `/warfront`. Old posted panels retain their original callbacks until replaced or expired.

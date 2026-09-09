@@ -1683,7 +1683,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
     async def free_land_autocomplete(interaction: discord.Interaction, current: str):
         """Let a Nation choose a connected, unclaimed real province/state."""
-        # A brand-new player may open /claim_land before ever opening /lobby.
+        # A brand-new player may open /claim_land before ever opening /menu.
         create_player(interaction.user)
         tiles = world_city_tiles(_province_features())
         # Repair only this player. Full world synchronisation is far too slow
@@ -1749,7 +1749,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             "🗺️ Free Land Claimed",
             f"**{land_name}** is now part of **{player['nation_name']}**.\n"
             f"🌍 Nation Land: **{int(player['land']) + 1}** · Next free claim: <t:{now + cooldown}:R>\n\n"
-            "This Land is connected to your Nation. Open `/war` → **City Centre** to upgrade or develop it."
+            "This Land is connected to your Nation. Open `/warfront` → **City Centre** to upgrade or develop it."
         ))
 
     @bot.tree.command(name="map", description="View the X BOT strategic world map", **player_command_kwargs)
@@ -1773,7 +1773,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             colour=discord.Colour.teal(),
         )
         embed.set_image(url="attachment://xbot-strategic-map.png")
-        embed.set_footer(text="Use /war to inspect your Land, armed forces, Cities and Season progress.")
+        embed.set_footer(text="Use /warfront to inspect your Land, armed forces, Cities and Season progress.")
         await interaction.followup.send(embed=embed, file=file)
 
     @bot.tree.command(name="map_detail", description="Open a zoomed real-region tactical map for a Nation", **player_command_kwargs)
@@ -3173,7 +3173,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.owner_id:
-                await interaction.response.send_message("Open your own X BOT panel with `/lobby`.", ephemeral=True)
+                await interaction.response.send_message("Open your own X BOT panel with `/menu`.", ephemeral=True)
                 return
             builder = getattr(bot, "xbot_player_lobby_builder", None)
             if builder is None:
@@ -3248,7 +3248,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This War panel belongs to another player. Open `/lobby` for your own panel.", ephemeral=True)
+            await interaction.response.send_message("This War panel belongs to another player. Open `/menu` for your own panel.", ephemeral=True)
             return False
 
     class SeasonMissionsButton(discord.ui.Button):
@@ -3289,7 +3289,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This Season panel belongs to another player. Open `/war` for your own panel.", ephemeral=True)
+            await interaction.response.send_message("This Season panel belongs to another player. Open `/warfront` for your own panel.", ephemeral=True)
             return False
 
     class WarOperationsButton(discord.ui.Button):
@@ -3328,7 +3328,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This War panel belongs to another player. Open `/lobby` for your own panel.", ephemeral=True)
+            await interaction.response.send_message("This War panel belongs to another player. Open `/menu` for your own panel.", ephemeral=True)
             return False
 
     class WarQuickButton(discord.ui.Button):
@@ -3490,7 +3490,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This War panel belongs to another player. Open `/lobby` for your own panel.", ephemeral=True)
+            await interaction.response.send_message("This War panel belongs to another player. Open `/menu` for your own panel.", ephemeral=True)
             return False
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})

@@ -288,7 +288,7 @@ def register_commands(bot, db, create_player):
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.owner_id:
-                await interaction.response.send_message("Open `/lobby` for your own Missions.", ephemeral=True)
+                await interaction.response.send_message("Open `/menu` for your own Missions.", ephemeral=True)
                 return
             if self.action.startswith("page:"):
                 if self.action=='page:home':
@@ -376,7 +376,7 @@ def register_commands(bot, db, create_player):
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("Open `/lobby` for your own Missions.", ephemeral=True)
+            await interaction.response.send_message("Open `/menu` for your own Missions.", ephemeral=True)
             return False
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})

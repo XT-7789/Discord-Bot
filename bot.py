@@ -272,8 +272,8 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 # the Lobby panels, without filling Discord's slash-command picker.
 PUBLIC_PLAYER_COMMANDS = {
     # Main panels: short, memorable direct access for ordinary players.
-    "lobby", "economy", "shop", "backpack", "market", "mining", "stock",
-    "war", "city", "army", "recruit", "diplomacy", "casino", "craft", "research",
+    "menu", "profile", "economy", "shop", "backpack", "market", "mining", "stock",
+    "warfront", "city", "army", "recruit", "diplomacy", "casino", "craft", "research",
     # Fast actions that are still useful without opening a panel first.
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
     "declare_war", "attack", "balance", "code_redeem", "daily",
@@ -540,9 +540,9 @@ def xb_prefix_help():
     return xbot_ui.panel(
         "⌨️ X BOT Prefix Commands",
         "The main player experience now uses the guided panels.\n\n"
-        "`/lobby` or `XBlobby` · all systems\n"
+        "`/menu` or `XBmenu` · all systems\n"
         "`/economy` or `XBeconomy` · Economy Centre\n"
-        "`/war` or `XBwar` · War Centre\n"
+        "`/warfront` or `XBwarfront` · War Centre\n"
         "`/casino` or `XBcasino` · Casino\n"
         "`/craft` or `XBcraft` · Crafting Centre\n\n"
         "Use `XBcommands` to view the small supported command list.",
@@ -631,7 +631,7 @@ async def run_xb_prefix(message: discord.Message):
     if command_name not in PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS:
         await message.channel.send(view=xbot_ui.danger(
             "Command Moved to a Panel",
-            f"`XB{command_name}` is no longer a public shortcut. Open `XBlobby`, `XBeconomy`, `XBwar`, `XBcasino`, or `XBcraft` instead.",
+            f"`XB{command_name}` is no longer a public shortcut. Open `XBmenu`, `XBeconomy`, `XBwarfront`, `XBcasino`, or `XBcraft` instead.",
         ))
         return True
     command = bot.tree.get_command(command_name)
@@ -1695,7 +1695,7 @@ async def attack(interaction: discord.Interaction, target: discord.Member):
     await interaction.followup.send(view=xbot_ui.panel("⚔️ Battle Report", result, colour=discord.Color.dark_red()))
 
 
-# Tier 7 replaces the legacy /war and /attack registrations above after every
+# Tier 7 replaces the legacy /warfront and /attack registrations above after every
 # dependency and panel builder exists.  It keeps the same two command names,
 # so Discord's command catalogue does not grow.
 tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)

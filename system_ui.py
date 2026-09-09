@@ -5,6 +5,21 @@ import os
 import functools
 import time
 import re
+from pathlib import Path
+
+GUIDE_IMAGE=Path(__file__).parent/'assets'/'ui'/'navigation-guide.png'
+HELP_TOPICS={
+    'earn':('How do I earn XC?','Economy > Earn','Collect Daily rewards and complete Contracts. Mining materials can also be sold for XC.','earn_menu'),
+    'casino':('Where can I play Casino games?','Economy > Casino','Choose a game, review its bet range, then submit one round. XC is fictional currency; you can lose your stake.','casino'),
+    'items':('Where are my items?','Profile > Backpack','Select an item to see its quantity and available Use, Equip or Sell actions.','inventory'),
+    'cities':('How do I build or upgrade Cities?','Warfront > Cities','Open Build or Upgrade. Choose one or several Cities or available locations and review the cost before confirming.','city'),
+    'rewards':('Where do I claim mission rewards?','Missions > Starter / Daily / Weekly','Choose a category and press Claim Ready after completing its goals. Weekly missions unlock at Nation Level 2.','missions'),
+    'bank':('How do I deposit or withdraw XC?','Economy > Finance > Bank','Deposit moves XC into your Bank. Withdraw moves it back to your Wallet. Neither action creates extra XC.','bank'),
+    'trade':('Where are Shop, Market and Stocks?','Economy > Market','Shop sells bot items; Player Market contains player listings. Stocks shows the fictional market and your holdings.','market_menu'),
+    'army':('Where do I recruit an army?','Warfront > Recruit','Select a unit, enter a quantity and review the War Credit cost. Army shows your existing forces.','recruit'),
+    'craft':('Where are crafting and research?','Economy > Earn','Craft makes items; Production manages queued jobs; Research improves existing activities.','earn_menu'),
+    'cooldown':('Why do I still wait with SVIP?','Economy > Casino','SVIP reduces the configured cooldown; it does not normally remove it. Results show your actual tier, cooldown and next-round time.','casino'),
+}
 
 
 def register(bot, db, create_player):
@@ -18,12 +33,12 @@ def register(bot, db, create_player):
         'reports':bot.xbot_tier7_reports_builder,
     })
     sections={
-        'menu':('MAIN MENU','Select a system.', [('👤 Profile','profile'),('💰 Economy','economy'),('⚔️ War','war'),('🎯 Missions','missions')]),
+        'menu':('MAIN MENU','Select a system.', [('👤 Profile','profile'),('💰 Economy','economy'),('⚔️ Warfront','war'),('🎯 Missions','missions')]),
         'economy':('ECONOMY','Earn, trade and play.', [('💳 Finance','finance'),('💼 Earn','earn_menu'),('📊 Market','market_menu'),('⛏️ Mines','mining'),('🎰 Casino','casino'),('🏆 Rankings','rankings')]),
         'finance':('FINANCE','Your wallet and savings.', [('💰 Wallet','wallet'),('🏦 Bank','bank'),('📋 Assets','assets'),('💱 Exchange','exchange')]),
         'earn_menu':('EARN','Collect rewards or make something.', [('🎁 Daily','daily'),('💼 Contracts','contracts'),('⛏️ Mines','mining'),('🛠️ Craft','craft'),('🏭 Production','production'),('🔬 Research','research')]),
         'market_menu':('MARKET','Browse before you spend.', [('🛒 Shop','shop'),('🤝 Player Market','market'),('📈 Stocks','stock'),('🎒 Backpack','inventory')]),
-        'war':('WAR','Your nation and armed forces.', [('🏙️ Cities','city'),('🪖 Army','army'),('➕ Recruit','recruit'),('🕊️ Diplomacy','diplomacy'),('⚔️ Attack','attack'),('🛡️ Defence','defence'),('📋 Reports','reports'),('🗺️ Overview','war_overview')]),
+        'war':('WARFRONT','Your nation and armed forces.', [('🏙️ Cities','city'),('🪖 Army','army'),('➕ Recruit','recruit'),('🕊️ Diplomacy','diplomacy'),('⚔️ Attack','attack'),('🛡️ Defence','defence'),('📋 Reports','reports'),('🗺️ Overview','war_overview')]),
         'profile':('PROFILE','', [('🎒 Backpack','inventory'),('📋 Assets','assets'),('🎯 Missions','missions')]),
         'missions':('MISSIONS','Choose your goals.', [('🌱 Starter','mission_starter'),('☀️ Daily','mission_daily'),('📅 Weekly','mission_weekly')]),
     }
@@ -35,6 +50,7 @@ def register(bot, db, create_player):
              'stock':'market_menu','casino':'economy','city':'war','army':'war','recruit':'war',
              'diplomacy':'war','attack':'war','defence':'war','reports':'war','war_overview':'war',
              'mission_starter':'missions','mission_daily':'missions','mission_weekly':'missions'}
+    parents.update({'help':'menu','help_map':'help',**{'help:'+key:'help' for key in HELP_TOPICS}})
 
     class Nav(discord.ui.Button):
         def __init__(self,owner,label,key):
@@ -42,10 +58,19 @@ def register(bot, db, create_player):
             self.owner,self.key=owner,key
         async def callback(self,i):
             if i.user.id!=self.owner:
-                await i.response.send_message('Open /lobby for your own menu.',ephemeral=True)
+                await i.response.send_message('Open /menu for your own menu.',ephemeral=True)
                 return
             await i.response.defer()
-            await i.edit_original_response(view=page(self.owner,self.key))
+            attachments=[discord.File(GUIDE_IMAGE,filename='navigation-guide.png')] if self.key=='help_map' and GUIDE_IMAGE.is_file() else []
+            await i.edit_original_response(view=page(self.owner,self.key),attachments=attachments)
+
+    class HelpSelect(discord.ui.Select):
+        def __init__(self,owner):
+            super().__init__(placeholder='What would you like to do?',options=[discord.SelectOption(label=topic[0],value=key) for key,topic in HELP_TOPICS.items()])
+            self.owner=owner
+        async def callback(self,i):
+            await i.response.defer()
+            await i.edit_original_response(view=page(self.owner,'help:'+self.values[0]),attachments=[])
 
     class Shell(discord.ui.LayoutView):
         def __init__(self,owner,title,body='',notice=''):
@@ -58,7 +83,7 @@ def register(bot, db, create_player):
         async def interaction_check(self,i):
             if i.user.id==self.owner:
                 return True
-            await i.response.send_message('Open /lobby for your own menu.',ephemeral=True)
+            await i.response.send_message('Open /menu for your own menu.',ephemeral=True)
             return False
 
     def footer(view,owner,key,include_back=True):
@@ -67,6 +92,8 @@ def register(bot, db, create_player):
             if include_back:
                 row.add_item(Nav(owner,'‹ Back',parents.get(key,'menu')))
             row.add_item(Nav(owner,'⌂ Menu','menu'))
+        else:
+            row.add_item(Nav(owner,'? Help','help'))
         row.add_item(Nav(owner,'× Close','close'))
         view.add_item(row)
 
@@ -75,7 +102,27 @@ def register(bot, db, create_player):
         if key=='mission_weekly' and tier5.profile_summary(db,owner)['level']<2:
             return page(owner,'missions','Weekly missions unlock at Nation Level 2.')
         if key=='close':
-            view=Shell(owner,'CLOSED','Panel closed. /lobby opens a new menu.')
+            view=Shell(owner,'CLOSED','Panel closed. /menu opens a new menu.')
+            return view
+        if key=='help':
+            view=Shell(owner,'HELP / QUICK FIND','What would you like to do?\nChoose a question for directions and a direct link.')
+            view.box.add_item(discord.ui.ActionRow(HelpSelect(owner)))
+            view.box.add_item(discord.ui.ActionRow(Nav(owner,'▧ Visual Guide','help_map')))
+            footer(view,owner,key)
+            return view
+        if key.startswith('help:') and key[5:] in HELP_TOPICS:
+            question,path,answer,destination=HELP_TOPICS[key[5:]]
+            view=Shell(owner,'HELP',f'**{question}**\n`Menu > {path}`\n\n{answer}')
+            view.box.add_item(discord.ui.ActionRow(Nav(owner,'Open Panel',destination)))
+            footer(view,owner,key)
+            return view
+        if key=='help_map':
+            view=Shell(owner,'VISUAL GUIDE','Tap the image to zoom. Use Help questions for direct links.')
+            if GUIDE_IMAGE.is_file():
+                view.box.add_item(discord.ui.MediaGallery(discord.MediaGalleryItem('attachment://navigation-guide.png',description='X SYSTEM navigation: Profile, Economy, Warfront and Missions.')))
+            else:
+                view.box.add_item(discord.ui.TextDisplay('The image is unavailable. All directions remain available in Help.'))
+            footer(view,owner,key)
             return view
         if key in sections:
             title,body,links=sections[key]
@@ -193,7 +240,7 @@ def register(bot, db, create_player):
         view.system_original_check=check
         async def owner_check(i):
             if i.user.id!=owner:
-                await i.response.send_message('Open /lobby for your own panel.',ephemeral=True)
+                await i.response.send_message('Open /menu for your own panel.',ephemeral=True)
                 return False
             return await check(i)
         view.interaction_check=owner_check
@@ -248,6 +295,19 @@ def register(bot, db, create_player):
                     create_player(i.user)
                     await i.edit_original_response(view=page(i.user.id,dest))
                 command._callback=entry
+    # Keep old names internally for existing panel callbacks; startup's public
+    # allowlist hides the old names and publishes their replacements.
+    def add_entry(name,destination,description):
+        async def entry(i:discord.Interaction):
+            await i.response.defer()
+            create_player(i.user)
+            await i.edit_original_response(view=page(i.user.id,destination),attachments=[])
+        kwargs={'guild':discord.Object(id=guild_id)} if guild_id else {}
+        bot.tree.remove_command(name,**kwargs)
+        bot.tree.command(name=name,description=description,**kwargs)(entry)
+    add_entry('menu','menu','Open X SYSTEM: Profile, Economy, Warfront and Missions')
+    add_entry('warfront','war','Open your Cities, Army, Diplomacy and Battles')
+    add_entry('profile','profile','View your profile, progress, Backpack and assets')
     shortcuts={'casino':'casino','city':'city','army':'army','recruit':'recruit','diplomacy':'diplomacy',
                'craft':'craft','stock':'stock','research':'research','missions':'missions','mining':'mining',
                'mine':'mining','sell_item':'economy','shop':'shop','backpack':'inventory','market':'market',

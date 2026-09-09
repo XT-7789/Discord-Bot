@@ -1,0 +1,7 @@
+# Navigation guide artwork
+
+Generated using the built-in imagegen tool (not CLI), then copied into this repository as `navigation-guide.png`. English text and routes were visually checked. The Help panel attaches this local asset; no third-party image hosting is required.
+
+## Final prompt
+
+Create a polished English-only visual navigation guide for a Discord game bot called X SYSTEM. Infographic-diagram, landscape 1536x1024, high legibility. Dark charcoal navy background, restrained luminous cyan outlines and violet small accents, crisp modern typography, generous spacing, four equal large cards in a 2x2 grid connected subtly to top heading. EXACT text only: heading 'X SYSTEM' subtitle 'FIND YOUR NEXT ACTION' small top command '/menu'. Top left card heading 'PROFILE' command '/profile', three lines 'Personal progress', 'Backpack & items', 'Assets'. Top right card heading 'ECONOMY' command '/economy', four lines 'Earn & Daily rewards', 'Bank, Shop & Market', 'Casino & Stocks', 'Craft & Research'. Bottom left heading 'WARFRONT' command '/warfront', three lines 'Cities & Army', 'Recruit & Diplomacy', 'Attack & Defence'. Bottom right heading 'MISSIONS', three lines 'Starter goals', 'Daily & Weekly goals', 'Claim rewards'. Footer exact text 'Need directions? Open Menu > Help'. Small elegant line icons person, wallet, shield, target. This is a useful feature map, not a screenshot, no fake buttons, no extra text, no Chinese, no tiny paragraphs, no external logos, no watermark.

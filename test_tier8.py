@@ -120,7 +120,7 @@ class ResearchTests(unittest.TestCase):
                         self.assertLessEqual(panel.total_children_count,40)
                         self.assertTrue(panel.to_components())
                     main_buttons=[x for x in panels[0].walk_children() if isinstance(x,discord.ui.Button)]
-                    self.assertEqual({'profile','economy','war','missions','close'},{x.key for x in main_buttons})
+                    self.assertEqual({'profile','economy','war','missions','help','close'},{x.key for x in main_buttons})
                     i=SimpleNamespace(user=SimpleNamespace(id=self.uid),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock(),followup=SimpleNamespace(send=AsyncMock()))
                     await next(x for x in main_buttons if x.key=='economy').callback(i)
                     all_view=i.edit_original_response.call_args.kwargs['view']
@@ -143,6 +143,33 @@ class ResearchTests(unittest.TestCase):
                     self.assertEqual([],list(x for x in closed.walk_children() if isinstance(x,discord.ui.Button)))
                     self.assertEqual(before_close,self.balance())
                     guild=discord.Object(id=module._staff_guild_id) if module._staff_guild_id else None
+                    for name in ('menu','warfront','profile'):
+                        command=bot.tree.get_command(name,guild=guild)
+                        self.assertIsNotNone(command)
+                        self.assertIn(name,module.PUBLIC_PLAYER_COMMANDS)
+                        await command.callback(i)
+                        self.assertIn('X SYSTEM',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
+                    self.assertNotIn('lobby',module.PUBLIC_PLAYER_COMMANDS)
+                    self.assertNotIn('war',module.PUBLIC_PLAYER_COMMANDS)
+                    import system_ui
+                    help_view=bot.xbot_system_page_builder(self.uid,'help')
+                    picker=next(x for x in help_view.walk_children() if isinstance(x,discord.ui.Select))
+                    for topic in system_ui.HELP_TOPICS:
+                        picker._values=[topic]
+                        await picker.callback(i)
+                        answer=i.edit_original_response.call_args.kwargs['view']
+                        self.assertIn('Open Panel',str(answer.to_components()))
+                        self.assertLessEqual(answer.total_children_count,40)
+                    visual=next(x for x in help_view.walk_children() if getattr(x,'key',None)=='help_map')
+                    await visual.callback(i)
+                    self.assertEqual(1,len(i.edit_original_response.call_args.kwargs['attachments']))
+                    self.assertIn('attachment://navigation-guide.png',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
+                    i.edit_original_response.call_args.kwargs['attachments'][0].close()
+                    await next(x for x in main_buttons if x.key=='help').callback(i)
+                    self.assertEqual([],i.edit_original_response.call_args.kwargs['attachments'])
+                    with patch.object(system_ui,'GUIDE_IMAGE',Path(self.tmp.name)/'missing.png'):
+                        fallback=bot.xbot_system_page_builder(self.uid,'help_map')
+                        self.assertIn('directions remain available',str(fallback.to_components()))
                     for name in ('lobby','research'):
                         command=bot.tree.get_command(name,guild=guild)
                         self.assertIsNotNone(command)

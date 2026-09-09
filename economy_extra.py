@@ -144,7 +144,7 @@ def register_commands(bot, db, create_player, find_item):
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.owner_id:
-                await interaction.response.send_message("Open `/lobby` for your own Economy Centre.", ephemeral=True)
+                await interaction.response.send_message("Open `/menu` for your own Economy Centre.", ephemeral=True)
                 return
             if self.action in {"deposit", "withdraw"}:
                 await interaction.response.send_modal(EconomyAmountModal(self.action, interaction.message))
@@ -206,7 +206,7 @@ def register_commands(bot, db, create_player, find_item):
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.owner_id:
-                await interaction.response.send_message("Open `/lobby` for your own Economy Centre.", ephemeral=True)
+                await interaction.response.send_message("Open `/menu` for your own Economy Centre.", ephemeral=True)
                 return
             await interaction.response.edit_message(view=economy_home_view(self.owner_id))
 
@@ -254,7 +254,7 @@ def register_commands(bot, db, create_player, find_item):
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.owner_id:
-                await interaction.response.send_message("Open your own X BOT panel with `/lobby`.", ephemeral=True)
+                await interaction.response.send_message("Open your own X BOT panel with `/menu`.", ephemeral=True)
                 return
             if self.destination == "economy":
                 await interaction.response.edit_message(view=economy_home_view(self.owner_id))
@@ -309,7 +309,7 @@ def register_commands(bot, db, create_player, find_item):
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("Open your own X BOT panel with `/lobby`.", ephemeral=True)
+            await interaction.response.send_message("Open your own X BOT panel with `/menu`.", ephemeral=True)
             return False
 
     def create_player_from_id(user_id: int):
@@ -388,7 +388,7 @@ def register_commands(bot, db, create_player, find_item):
 
     @bot.tree.command(name="economy", description="Open your X BOT Economy Centre")
     async def economy_centre(interaction: discord.Interaction):
-        """Fast shortcut to the Economy page; /lobby remains the main home."""
+        """Fast shortcut to the Economy page; /menu remains the main home."""
         await interaction.response.defer()
         create_player(interaction.user)
         await interaction.edit_original_response(view=economy_home_view(interaction.user.id))

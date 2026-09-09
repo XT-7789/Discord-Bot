@@ -1221,7 +1221,7 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             if interaction.user.id == self.owner_id:
                 return True
             await interaction.response.send_message(
-                "This panel belongs to another player. Open your own panel with `/war`.", ephemeral=True
+                "This panel belongs to another player. Open your own panel with `/warfront`.", ephemeral=True
             )
             return False
 
@@ -2112,8 +2112,8 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
     bot.xbot_tier7_health = lambda: health_report(db)
     bot.xbot_tier7_repair = lambda: repair(db)
 
-    # /war may be a server-only command while the old /attack is global.
-    # war_tier may have registered /war globally on an older installation.
+    # /warfront may be a server-only command while the old /attack is global.
+    # war_tier may have registered /warfront globally on an older installation.
     # Remove both scopes so setup_hook cannot copy a legacy global command
     # back over this immediate guild version during synchronisation.
     bot.tree.remove_command("war")

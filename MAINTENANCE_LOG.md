@@ -1,5 +1,13 @@
 # X BOT Maintenance Log
 
+## 2026-09-09 — Command names and English Help
+
+- Public entry commands are now /menu, /warfront and /profile. Legacy lobby/war callbacks remain internal but are excluded from the public startup sync catalogue.
+- Added an English Help question selector with ten routes, concise answers and direct Open Panel buttons. Main Menu retains four primary entries, with Help alongside Close in the footer.
+- Added a generated, visually checked navigation graphic under Help → Visual Guide, attached from a repository asset. Leaving the guide clears its attachment. Text directions work if the asset is unavailable.
+- Updated player-facing command hints while preserving Dashboard URLs and admin commands.
+- Offline tests cover command registration, public allowlists, all Help topics and the attached visual guide. Actual Discord command sync requires a phone restart.
+
 ## 2026-09-09 — X SYSTEM player menu redesign
 
 - Replaced the default Lobby with four entries only: Profile, Economy, War and Missions, plus Close. Old easy/detailed preferences no longer change the main-menu layout.

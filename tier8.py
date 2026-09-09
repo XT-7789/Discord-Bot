@@ -213,7 +213,7 @@ def register_commands(bot,db,create_player):
         async def interaction_check(self,i):
             if i.user.id==self.owner:
                 return True
-            await i.response.send_message('Open /lobby for your own panel.',ephemeral=True)
+            await i.response.send_message('Open /menu for your own panel.',ephemeral=True)
             return False
 
     class Go(discord.ui.Button):

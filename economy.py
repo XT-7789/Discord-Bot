@@ -1040,7 +1040,7 @@ def register_commands(bot, db, create_player) -> None:
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This shop menu belongs to the player who opened it. Open `/lobby` for your own menu.", ephemeral=True)
+            await interaction.response.send_message("This shop menu belongs to the player who opened it. Open `/menu` for your own menu.", ephemeral=True)
             return False
 
     @bot.tree.command(name="shop", description="Open the interactive X BOT Economy Shop")
@@ -1283,7 +1283,7 @@ def register_commands(bot, db, create_player) -> None:
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This Backpack belongs to the player who opened it. Open `/lobby` for your own Backpack.", ephemeral=True)
+            await interaction.response.send_message("This Backpack belongs to the player who opened it. Open `/menu` for your own Backpack.", ephemeral=True)
             return False
 
     async def area_autocomplete(interaction: discord.Interaction, current: str):
@@ -1595,7 +1595,7 @@ def register_commands(bot, db, create_player) -> None:
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This Mining Hub belongs to the player who opened it. Open `/lobby` for your own hub.", ephemeral=True)
+            await interaction.response.send_message("This Mining Hub belongs to the player who opened it. Open `/menu` for your own hub.", ephemeral=True)
             return False
 
     @bot.tree.command(name="mining", description="Open the X BOT interactive Mining Hub")
@@ -1777,7 +1777,7 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message("This Army Recruit menu belongs to another player. Use `/army_recruit` for your own menu.", ephemeral=True)
             return False
 
-    # Other player panels (especially /war -> Operations) must use this
+    # Other player panels (especially /warfront -> Operations) must use this
     # shared builder. ArmyShopView is local to economy.register_commands and
     # cannot be referenced directly from war_tier.py.
     bot.xbot_army_recruit_builder = lambda owner_id: ArmyShopView(owner_id)
@@ -1970,7 +1970,7 @@ def register_commands(bot, db, create_player) -> None:
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("Open `/lobby` to use your own exchange menu.", ephemeral=True)
+            await interaction.response.send_message("Open `/menu` to use your own exchange menu.", ephemeral=True)
             return False
 
     @bot.tree.command(name="exchange", description="Exchange XC and War Credits")

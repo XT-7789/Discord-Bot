@@ -10,7 +10,9 @@ Casino result panels show your membership tier, effective cooldown and next-roun
 
 ## 1. Start here
 
-1. Use `/lobby` for the four-entry menu. Profile contains personal progress, assets and Backpack.
+Use `/menu`, `/profile`, `/economy` or `/warfront` for direct access. The previous `/lobby` and `/war` names are no longer public shortcuts. **Menu → Help** answers common questions in English and provides an **Open Panel** button for each answer. **Visual Guide** shows a feature map you can tap to enlarge.
+
+1. Use `/menu` for the four-entry menu. Profile contains personal progress, assets and Backpack.
 2. Open **Economy → Earn → Daily** for your 50 XC reward. **Economy → Mines** opens mining and selling.
 3. Open **War → Cities** to build and upgrade several Cities together.
 4. Open **Missions** and choose Starter, Daily or Weekly to review progress and claim rewards.
@@ -56,7 +58,7 @@ Use `/map` for the world view and `/map_detail` for one Nation's real Land. `/cl
 
 ## 4. Build an army
 
-Use `/recruit` for the fastest access, or open `/war` → **Army**.
+Use `/recruit` for the fastest access, or open `/warfront` → **Army**.
 
 1. Recruit at least one Land Army model. An attack cannot launch without Land units.
 2. Buy Supply in the Army page.
@@ -65,7 +67,7 @@ Use `/recruit` for the fastest access, or open `/war` → **Army**.
 
 ## 5. Fight with Warfront 2.0
 
-First use `/diplomacy` or `/declare_war` against a bordering Nation. Then use `/attack` or `/war` → **Attack**.
+First use `/diplomacy` or `/declare_war` against a bordering Nation. Then use `/attack` or `/warfront` → **Attack**.
 
 The Attack Planner has five quick steps:
 
@@ -83,7 +85,7 @@ Ordinary Land must be captured before a Capital can be attacked. Battle results 
 
 ## 6. Defend your Nation
 
-Open `/war` → **Defence**.
+Open `/warfront` → **Defence**.
 
 - Choose a Land and press **Fortify Selected**.
 - **Fortify Weak Lands** upgrades several weakest Lands in one click when you have enough War Credits.
@@ -94,7 +96,7 @@ Open `/war` → **Defence**.
 
 ## Fast command list
 
-Main centres: `/lobby`, `/economy`, `/war`, `/casino`, `/craft`, `/city`, `/army`, `/recruit`, `/diplomacy`, `/mining`, `/stock`.
+Main centres: `/menu`, `/economy`, `/warfront`, `/casino`, `/craft`, `/city`, `/army`, `/recruit`, `/diplomacy`, `/mining`, `/stock`.
 
 Fast actions: `/daily`, `/collect`, `/mine`, `/sell_item`, `/map`, `/map_detail`, `/claim_land`, `/declare_war`, `/attack`, `/balance`, `/code_redeem`.
 
