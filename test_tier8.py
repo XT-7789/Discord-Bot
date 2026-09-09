@@ -16,6 +16,27 @@ import tier6
 
 
 class ResearchTests(unittest.TestCase):
+    def test_private_error_guidance_and_expired_token(self):
+        from system_ui import report_panel_error
+        async def check():
+            i=SimpleNamespace(response=SimpleNamespace(is_done=lambda:False,send_message=AsyncMock()),followup=SimpleNamespace(send=AsyncMock()))
+            with patch('system_ui.logging.getLogger'):
+                await report_panel_error(i,ValueError('private database details'))
+                text=i.response.send_message.call_args.args[0]
+                self.assertIn('check your balance',text)
+                self.assertNotIn('private database details',text)
+                self.assertTrue(i.response.send_message.call_args.kwargs['ephemeral'])
+                i.response.is_done=lambda:True
+                await report_panel_error(i,RuntimeError('internal'))
+                self.assertTrue(i.followup.send.call_args.kwargs['ephemeral'])
+                i.followup.send.reset_mock()
+                expired=discord.NotFound(SimpleNamespace(status=404,reason='Not Found'),{'code':10062,'message':'Unknown interaction'})
+                await report_panel_error(i,expired)
+                i.followup.send.assert_not_awaited()
+                i.followup.send.side_effect=expired
+                await report_panel_error(i,RuntimeError('original error'))
+        asyncio.run(check())
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

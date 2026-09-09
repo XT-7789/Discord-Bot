@@ -8,6 +8,7 @@ import os
 import functools
 import time
 import re
+import logging
 from pathlib import Path
 from contextvars import ContextVar
 
@@ -24,6 +25,25 @@ HELP_TOPICS={
     'craft':('Where are crafting and research?','Economy > Earn','Craft makes items; Production manages queued jobs; Research improves existing activities.','earn_menu'),
     'cooldown':('Why do I still wait with SVIP?','Economy > Casino','SVIP reduces the configured cooldown; it does not normally remove it. Results show your actual tier, cooldown and next-round time.','casino'),
 }
+
+
+async def report_panel_error(interaction,error):
+    """Best-effort private guidance; never retry a game or financial action."""
+    logger=logging.getLogger('xbot.player_ui')
+    logger.error('Player panel failed: %s',type(error).__name__,exc_info=(type(error),error,error.__traceback__))
+    if isinstance(error,discord.HTTPException) and error.code==10062:
+        # The interaction token itself has expired; another reply cannot fix it.
+        return
+    message=('⚠️ This action could not finish normally. Open /menu to refresh your panel. '
+             'If this involved a payment or reward, check your balance and items before trying again. '
+             'The issue has been logged for the administrator.')
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message,ephemeral=True)
+        else:
+            await interaction.response.send_message(message,ephemeral=True)
+    except discord.HTTPException:
+        logger.warning('Could not deliver player panel error guidance.')
 
 
 def register(bot, db, create_player):
@@ -103,6 +123,8 @@ def register(bot, db, create_player):
                 return True
             await i.response.send_message('Open /menu for your own menu.',ephemeral=True)
             return False
+        async def on_error(self,i,error,item):
+            await report_panel_error(i,error)
 
     def footer(view,owner,key,include_back=True):
         row=discord.ui.ActionRow()
@@ -368,12 +390,16 @@ def register(bot, db, create_player):
                 original=modal.on_submit
                 history=navigation.get()
                 async def submit(i):
+                    if i.user.id!=self.owner:
+                        await i.response.send_message('Open /menu for your own panel.',ephemeral=True)
+                        return
                     token=navigation.set(history)
                     try:
                         await original(Interaction(i,self.owner,self.key))
                     finally:
                         navigation.reset(token)
                 modal.on_submit=submit
+                modal.on_error=report_panel_error
                 modal.system_wrapped=True
             return await self.target.send_modal(modal)
 
@@ -416,6 +442,9 @@ def register(bot, db, create_player):
         if getattr(view,'system_signature',None)==signature:
             return view
         view.system_prepared=True
+        async def panel_error(i,error,item):
+            await report_panel_error(i,error)
+        view.on_error=panel_error
         check=getattr(view,'system_original_check',view.interaction_check)
         view.system_original_check=check
         async def owner_check(i):

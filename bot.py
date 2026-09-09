@@ -396,7 +396,7 @@ class XCommandTree(app_commands.CommandTree):
         traceback.print_exception(type(original), original, original.__traceback__)
         message = xbot_ui.danger(
             "⚠️ Command Error",
-            "X BOT could not complete this command. The error has been written to the Bot terminal for the administrator.",
+            "Open /menu to refresh your panel. If this involved a payment or reward, check your balance and items before trying again. The issue has been logged for the administrator.",
         )
         try:
             if interaction.response.is_done():
