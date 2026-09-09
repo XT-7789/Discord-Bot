@@ -1631,21 +1631,56 @@ def register_commands(bot, db, create_player) -> None:
             if player['money'] < total:
                 await interaction.response.send_message(f"You need **{total:,} War Credits**.", ephemeral=True)
                 return
-            db.execute("UPDATE players SET money=money-? WHERE user_id=?", (total, interaction.user.id))
-            db.execute("""INSERT INTO player_war_units(user_id,unit_type_id,quantity) VALUES(?,?,?)
-                ON CONFLICT(user_id,unit_type_id) DO UPDATE SET quantity=quantity+excluded.quantity""", (interaction.user.id, self.unit_id, amount))
-            log(db, interaction.user.id, "recruit",
-                f"Recruited {amount:,}x {name} for {total:,} War Credits ({unit_cost:,} each)")
+            await interaction.response.defer()
+            await interaction.edit_original_response(view=RecruitConfirmView(interaction.user.id,unit,amount))
+
+    class RecruitConfirmButton(discord.ui.Button):
+        def __init__(self,owner_id,unit,amount):
+            super().__init__(label='Confirm Recruitment',style=discord.ButtonStyle.success)
+            self.owner_id,self.unit_id,self.amount,self.cost=owner_id,unit['id'],amount,int(unit['cost'])
+            self.done=False
+        async def callback(self,interaction):
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open /recruit for your own army.',ephemeral=True)
+                return
+            await interaction.response.defer()
+            if self.done:
+                await interaction.followup.send('This recruitment was already completed.',ephemeral=True)
+                return
+            unit=db.execute('SELECT * FROM war_unit_types WHERE id=? AND enabled=1',(self.unit_id,)).fetchone()
+            if unit is None or int(unit['cost'])!=self.cost:
+                await interaction.edit_original_response(view=ArmyShopView(self.owner_id,notice='Unit or price changed. Choose again; no payment taken.'))
+                return
+            total=self.cost*self.amount
+            changed=db.execute('UPDATE players SET money=money-? WHERE user_id=? AND money>=?',(total,self.owner_id,total))
+            if not changed.rowcount:
+                await interaction.edit_original_response(view=ArmyShopView(self.owner_id,notice=f'Not enough War Credits. Required: {total:,}.'))
+                return
+            db.execute('''INSERT INTO player_war_units(user_id,unit_type_id,quantity) VALUES(?,?,?)
+                ON CONFLICT(user_id,unit_type_id) DO UPDATE SET quantity=quantity+excluded.quantity''',(self.owner_id,self.unit_id,self.amount))
+            log(db,self.owner_id,'recruit',f"Recruited {self.amount:,}x {unit['name']} for {total:,} War Credits ({self.cost:,} each)")
             db.commit()
-            await interaction.response.send_message(view=xbot_ui.success("⚔️ Recruitment Complete", f"Recruited **{amount}x {emoji} {name}** for **{total:,} War Credits**."), ephemeral=True)
+            self.done=True
+            await interaction.edit_original_response(view=ArmyShopView(self.owner_id,notice=f"✅ Recruited {self.amount:,} × {unit['name']} · Paid {total:,} WC"))
+
+    class RecruitConfirmView(discord.ui.LayoutView):
+        def __init__(self,owner_id,unit,amount):
+            super().__init__(timeout=180)
+            self.owner_id=owner_id
+            container=discord.ui.Container(accent_color=discord.Color.teal())
+            container.add_item(discord.ui.TextDisplay(f"## 🪖 Review Recruitment\n**{discord.utils.escape_markdown(unit['name'])}** × {amount:,}\nUnit cost **{unit['cost']:,} WC** · Total **{unit['cost']*amount:,} WC**\nAdded power **{unit['power']*amount:,}**\nNothing charged until you confirm."))
+            container.add_item(discord.ui.ActionRow(RecruitConfirmButton(owner_id,unit,amount),ArmyWarCentreButton(owner_id)))
+            self.add_item(container)
+        async def interaction_check(self,interaction):
+            return interaction.user.id==self.owner_id
 
     class RecruitButton(discord.ui.Button):
         def __init__(self, unit):
             name, emoji, cost = unit['name'], unit['emoji'], unit['cost']
             super().__init__(
-                label=f"Recruit 1 ({cost})",
+                label="Choose Quantity",
                 emoji=safe_discord_component_emoji(emoji),
-                style=discord.ButtonStyle.success,
+                style=discord.ButtonStyle.primary,
             )
             self.unit_id = unit['id']
 
@@ -1716,7 +1751,7 @@ def register_commands(bot, db, create_player) -> None:
             "name": "name COLLATE NOCASE",
         }
 
-        def __init__(self, owner_id: int, branch: str = "land", category_id: int | None = None, page: int = 0, sort_mode: str | None = None):
+        def __init__(self, owner_id: int, branch: str = "land", category_id: int | None = None, page: int = 0, sort_mode: str | None = None, notice=None):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             if branch not in {"land", "air", "navy"}:
@@ -1728,6 +1763,7 @@ def register_commands(bot, db, create_player) -> None:
             if not categories:
                 container = discord.ui.Container(accent_color=discord.Color.dark_red())
                 container.add_item(discord.ui.TextDisplay(f"## ⚔️ X BOT Army Recruit\nNo **{branch.title()}** unit classes are enabled yet."))
+                container.add_item(discord.ui.ActionRow(*(ArmyServiceButton(owner_id,service,branch==service,sort_mode) for service in ('land','air','navy'))))
                 self.add_item(container); return
             if category_id is None:
                 configured_default = setting(db, "army_recruit_default_category_id")
@@ -1746,6 +1782,8 @@ def register_commands(bot, db, create_player) -> None:
                 f"### {service_emoji} {service_name} · {category['emoji']} {category['label']}\n"
                 f"💰 **{player['money']:,} War Credits** available · Choose a unit, then enter quantity."
             ))
+            if notice:
+                container.add_item(discord.ui.TextDisplay(notice))
             container.add_item(discord.ui.ActionRow(
                 ArmyServiceButton(owner_id, "land", branch == "land", sort_mode),
                 ArmyServiceButton(owner_id, "air", branch == "air", sort_mode),
@@ -1754,12 +1792,13 @@ def register_commands(bot, db, create_player) -> None:
             container.add_item(discord.ui.ActionRow(ArmyCategorySelect(owner_id, branch, categories, category_id, sort_mode)))
             container.add_item(discord.ui.Separator())
             units = db.execute(f"SELECT * FROM war_unit_types WHERE enabled=1 AND category_id=? ORDER BY {self.SORT_SQL[sort_mode]}", (category_id,)).fetchall()
-            pages = max(1, (len(units) + 4) // 5)
+            pages = max(1, (len(units) + 2) // 3)
             page = max(0, min(page, pages - 1))
-            for unit in units[page * 5:(page + 1) * 5]:
+            for unit in units[page * 3:(page + 1) * 3]:
                 name, emoji, cost, power_value = unit['name'], unit['emoji'], unit['cost'], unit['power']
                 button = RecruitButton(unit)
-                container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"### {emoji} {name}\n🏷️ Branch: **{unit['branch'].title()}**\n💰 Price: **{cost:,} War Credits** · 💥 Power: **{power_value:,}**\n{unit['description'][:120]}"), accessory=button))
+                owned=db.execute('SELECT quantity FROM player_war_units WHERE user_id=? AND unit_type_id=?',(owner_id,unit['id'])).fetchone()
+                container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"### {emoji} {discord.utils.escape_markdown(name)}\nOwned **{owned[0] if owned else 0:,}** · Power **{power_value:,}** / unit\nPrice **{cost:,} WC** / unit"), accessory=button))
                 container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(
                 ArmyPageButton(owner_id, branch, category_id, 0, sort_mode, "⏪", page == 0),
@@ -1812,9 +1851,30 @@ def register_commands(bot, db, create_player) -> None:
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.edit_message(view=ArmedForcesView(self.owner_id, self.branch))
 
+    class ArmedUnitSelect(discord.ui.Select):
+        def __init__(self,owner_id,branch,page,units):
+            super().__init__(placeholder='Choose a unit to inspect',options=[discord.SelectOption(label=u['name'][:100],value=str(u['id']),description=f"Owned {u['quantity']:,} · {u['power']:,} power each") for u in units])
+            self.owner_id,self.branch,self.page=owner_id,branch,page
+        async def callback(self,i):
+            await i.response.edit_message(view=ArmedForcesView(self.owner_id,self.branch,self.page,int(self.values[0])))
+
+    class ArmedUnitPage(discord.ui.Button):
+        def __init__(self,owner_id,branch,page,label,disabled=False):
+            super().__init__(label=label,style=discord.ButtonStyle.secondary,disabled=disabled)
+            self.owner_id,self.branch,self.page=owner_id,branch,page
+        async def callback(self,i):
+            await i.response.edit_message(view=ArmedForcesView(self.owner_id,self.branch,self.page))
+
+    class OpenRecruitButton(discord.ui.Button):
+        def __init__(self,owner_id,branch):
+            super().__init__(label='Recruit',style=discord.ButtonStyle.primary)
+            self.owner_id,self.branch=owner_id,branch
+        async def callback(self,i):
+            await i.response.edit_message(view=ArmyShopView(self.owner_id,self.branch))
+
     class ArmedForcesView(discord.ui.LayoutView):
         """The unified replacement for /army, /airforce and /navy viewing."""
-        def __init__(self, owner_id: int, branch: str = "land"):
+        def __init__(self, owner_id: int, branch: str = "land",page=0,selected_unit=None):
             super().__init__(timeout=300)
             # Keep the message private to the player who opened it.
             # The service buttons need this value when Discord checks clicks.
@@ -1855,9 +1915,9 @@ def register_commands(bot, db, create_player) -> None:
             container = discord.ui.Container(accent_color=info[2])
             container.add_item(discord.ui.TextDisplay(
                 f"## ⚔️ {player['nation_name']} — {overall_name}\n"
-                f"> Select a service below to inspect its units.\n\n"
+                f"Total Power **{sum(service_powers.values()):,}** · War Credits **{player['money']:,}**\n\n"
                 f"### {info[1]} {names[branch]}\n"
-                f"💥 **{branch_power:,} Service Power**\n\n"
+                f"💥 **{branch_power:,} Service Power** · Units **{sum(int(u['quantity']) for u in units):,}**\n\n"
                 f"🪖 **{names['land']}** — {service_powers['land']:,} power\n"
                 f"✈️ **{names['air']}** — {service_powers['air']:,} power\n"
                 f"⚓ **{names['navy']}** — {service_powers['navy']:,} power"
@@ -1870,16 +1930,19 @@ def register_commands(bot, db, create_player) -> None:
             ))
             container.add_item(discord.ui.Separator())
             if units:
-                for unit in units[:10]:
-                    unit_power = int(unit["quantity"]) * int(unit["power"])
-                    container.add_item(discord.ui.TextDisplay(
-                        f"**{unit['emoji']} {unit['name']}**  ·  "
-                        f"📦 {int(unit['quantity']):,} units  ·  💥 {unit_power:,} power"
-                    ))
+                pages=(len(units)+24)//25
+                page=max(0,min(page,pages-1))
+                container.add_item(discord.ui.TextDisplay(f'### Unit Details\n{len(units)} models · Page {page+1}/{pages}'))
+                container.add_item(discord.ui.ActionRow(ArmedUnitSelect(owner_id,branch,page,units[page*25:(page+1)*25])))
+                if pages>1:
+                    container.add_item(discord.ui.ActionRow(ArmedUnitPage(owner_id,branch,page-1,'Previous',page==0),ArmedUnitPage(owner_id,branch,page+1,'Next',page==pages-1)))
+                selected=next((u for u in units if u['id']==selected_unit),None)
+                if selected:
+                    container.add_item(discord.ui.TextDisplay(f"**{discord.utils.escape_markdown(selected['name'])}**\nOwned **{selected['quantity']:,}** · Unit Power **{selected['power']:,}**\nTotal Power **{selected['quantity']*selected['power']:,}**\n{discord.utils.escape_markdown(selected['description'][:250])}"))
             else:
-                container.add_item(discord.ui.TextDisplay(f"### No {names[branch]} units yet\nRecruit units with `/army_recruit`."))
+                container.add_item(discord.ui.TextDisplay(f"### No {names[branch]} units yet\nOpen Recruit to choose your first unit."))
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay("-# Use `/military_name` to customise these names · `/divisions` for battle templates."))
+            container.add_item(discord.ui.ActionRow(OpenRecruitButton(owner_id,branch)))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:

@@ -421,6 +421,57 @@ class ResearchTests(unittest.TestCase):
                     self.assertIn('UI City 25',str(detail.to_components()))
                     self.assertLessEqual(detail.total_children_count,40)
                     self.assertEqual(before,self.balance())
+                    module.db.execute('UPDATE players SET money=1000000 WHERE user_id=?',(self.uid,))
+                    module.db.commit()
+                    recruit=bot.xbot_system_page_builder(self.uid,'recruit')
+                    choose=next(x for x in recruit.walk_children() if getattr(x,'label',None)=='Choose Quantity')
+                    await choose.callback(i)
+                    form=i.response.send_modal.call_args.args[0]
+                    form.quantity_input._value='2'
+                    unit_id=form.unit_id
+                    unit=module.db.execute('SELECT * FROM war_unit_types WHERE id=?',(unit_id,)).fetchone()
+                    previous=module.db.execute('SELECT COALESCE(SUM(quantity),0) FROM player_war_units WHERE user_id=? AND unit_type_id=?',(self.uid,unit_id)).fetchone()[0]
+                    await form.on_submit(i)
+                    confirmation=i.edit_original_response.call_args.kwargs['view']
+                    self.assertIn('Total',str(confirmation.to_components()))
+                    self.assertEqual(1000000,module.db.execute('SELECT money FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
+                    confirm=next(x for x in confirmation.walk_children() if getattr(x,'label',None)=='Confirm Recruitment')
+                    await confirm.callback(i)
+                    expected=1000000-2*unit['cost']
+                    self.assertEqual(expected,module.db.execute('SELECT money FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
+                    self.assertEqual(previous+2,module.db.execute('SELECT quantity FROM player_war_units WHERE user_id=? AND unit_type_id=?',(self.uid,unit_id)).fetchone()[0])
+                    self.assertIn('Recruited',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
+                    await confirm.callback(i)
+                    self.assertEqual(expected,module.db.execute('SELECT money FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
+                    # A new quote must recheck its price before payment.
+                    await choose.callback(i)
+                    form=i.response.send_modal.call_args.args[0]
+                    form.quantity_input._value='1'
+                    await form.on_submit(i)
+                    confirmation=i.edit_original_response.call_args.kwargs['view']
+                    confirm=next(x for x in confirmation.walk_children() if getattr(x,'label',None)=='Confirm Recruitment')
+                    module.db.execute('UPDATE war_unit_types SET cost=cost+1 WHERE id=?',(unit_id,))
+                    module.db.commit()
+                    await confirm.callback(i)
+                    self.assertEqual(expected,module.db.execute('SELECT money FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
+                    self.assertIn('changed',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
+                    await choose.callback(i)
+                    form=i.response.send_modal.call_args.args[0]
+                    form.quantity_input._value='1'
+                    await form.on_submit(i)
+                    confirmation=i.edit_original_response.call_args.kwargs['view']
+                    confirm=next(x for x in confirmation.walk_children() if getattr(x,'label',None)=='Confirm Recruitment')
+                    module.db.execute('UPDATE players SET money=0 WHERE user_id=?',(self.uid,))
+                    module.db.commit()
+                    await confirm.callback(i)
+                    self.assertEqual(0,module.db.execute('SELECT money FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
+                    self.assertEqual(previous+2,module.db.execute('SELECT quantity FROM player_war_units WHERE user_id=? AND unit_type_id=?',(self.uid,unit_id)).fetchone()[0])
+                    self.assertIn('Not enough',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
+                    army=bot.xbot_system_page_builder(self.uid,'army')
+                    select=next(x for x in army.walk_children() if isinstance(x,discord.ui.Select))
+                    select._values=[select.options[0].value]
+                    await select.callback(i)
+                    self.assertIn('Unit Power',str(i.response.edit_message.call_args.kwargs['view'].to_components()))
                     await bot.close()
                 asyncio.run(inspect())
                 login.assert_not_called()

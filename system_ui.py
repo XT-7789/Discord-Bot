@@ -438,6 +438,30 @@ def register(bot, db, create_player):
             title,sep,body=first_text.content.partition('\n')
             title=re.sub(r'\s*[·—-]\s*Tier\s+\d+','',title[3:].replace('X BOT ','')).replace('`','')
             first_text.content=f'-# ✦ X SYSTEM\n## {title}'+(sep+body if sep else '')
+        # Older detail pages retain their data and controls, but their heading
+        # groups become real visual blocks like the new overview screens.
+        if not isinstance(view,Shell) and getattr(view,'finished',None) is not False:
+            for box in list(view.children):
+                if not isinstance(box,discord.ui.Container):
+                    continue
+                original=list(box.children)
+                replacement=[]
+                extra=0
+                for child in original:
+                    parts=child.content.split('\n### ') if isinstance(child,discord.ui.TextDisplay) else []
+                    needed=2*(len(parts)-1)
+                    if len(parts)>1 and view.total_children_count+extra+needed<=34:
+                        replacement.append(discord.ui.TextDisplay(parts[0].rstrip()))
+                        for part in parts[1:]:
+                            replacement.extend([discord.ui.Separator(),discord.ui.TextDisplay('### '+part.strip())])
+                        extra+=needed
+                    else:
+                        replacement.append(child)
+                if extra:
+                    for child in original:
+                        box.remove_item(child)
+                    for child in replacement:
+                        box.add_item(child)
         # Preserve specialised forms/results, while clearly separating their
         # readable content from controls. Never change active-game actions.
         if not isinstance(view,Shell) and getattr(view,'finished',None) is not False and view.total_children_count<=32:
