@@ -165,6 +165,9 @@ class ResearchTests(unittest.TestCase):
                         self.assertLessEqual(current.total_children_count,40,key)
                         self.assertNotIn('This panel is unavailable',str(current.to_components()),key)
                         self.assertIn('Close',str(current.to_components()),key)
+                        footer_row=current.children[-1]
+                        self.assertIsInstance(footer_row,discord.ui.ActionRow)
+                        self.assertEqual(['help','close'] if key=='menu' else ['back','menu','close'],[getattr(x,'key',None) for x in footer_row.children])
                         if key!='menu':
                             self.assertFalse(any(getattr(x,'key',None)=='help' for x in current.walk_children()),key)
                     before_close=self.balance()

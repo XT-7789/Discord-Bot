@@ -111,8 +111,8 @@ def register(bot, db, create_player):
             row.add_item(Nav(owner,'⌂ Menu','menu'))
         if key=='menu':
             row.add_item(Nav(owner,'? Help','help'))
+        row.add_item(Nav(owner,'× Close','close'))
         view.add_item(row)
-        view.add_item(discord.ui.ActionRow(Nav(owner,'× Close','close')))
 
     def page(owner,key='menu',notice='',member=None):
         history=navigation.get()
