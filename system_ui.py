@@ -355,12 +355,16 @@ def register(bot, db, create_player):
                     energy_text=f'Energy **{energy}/{maximum}**' if economy.setting(db,'mining_energy_enabled') else 'Energy costs off'
                     block('💼 Earn',f'{status} · {energy_text}',[daily,*navs(('Mines','mining'),('Contracts','contracts'))])
                 if key=='economy':
+                    import economy_journey
+                    for component in economy_journey.goal_block(bot,db,owner):
+                        if isinstance(component,discord.ui.ActionRow):
+                            component.add_item(Nav(owner,'Refresh','economy'))
+                        view.box.add_item(component)
                     block('💳 Finance',funds(),[bot.xbot_finance_button_builder(owner,'deposit',key),bot.xbot_finance_button_builder(owner,'withdraw',key),*navs(('Finance','finance'))])
                     earning()
                     block('📊 Market','Items · Player trading · Stocks',navs(('Market','market_menu'),('Shop','shop'),('Stocks','stock')))
                     membership=casino.cooldown_info(db,member,'blackjack')['tier'] if member is not None and hasattr(member,'roles') else 'Check VIP Status'
                     block('🎰 Casino',f'Membership **{membership}** · XC stakes can be lost.',navs(('Casino','casino'),('VIP Status','vip'),('Rankings','rankings')))
-                    view.box.add_item(discord.ui.ActionRow(*navs(('Earn & Create','earn_menu'),('Assets','assets'),('Refresh','economy'))))
                 elif key=='profile':
                     span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
                     xp=profile['xp']-profile['current_floor']

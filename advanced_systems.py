@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 
 import xbot_ui
+import economy_journey
 
 
 DEFAULTS = {
@@ -60,6 +61,7 @@ def initialise(db):
             if ingredient is not None:
                 db.execute("""INSERT OR IGNORE INTO recipe_ingredients(recipe_id,item_id,quantity)
                     VALUES(?,?,?)""", (recipe["id"], ingredient["id"], quantity))
+    economy_journey.initialise(db)
     db.execute("""CREATE TABLE IF NOT EXISTS bills(
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
         emoji TEXT NOT NULL DEFAULT '🧾', amount INTEGER NOT NULL DEFAULT 100,
@@ -291,30 +293,10 @@ def register_commands(bot, db, create_player):
         return min(limits) if limits else 100
 
     def perform_craft(user_id, recipe, amount):
-        ingredients = recipe_ingredients(recipe["id"])
-        player = db.execute("SELECT xc FROM players WHERE user_id=?", (user_id,)).fetchone()
-        total_cost = recipe["xc_cost"] * amount
-        missing = [
-            f"{item['emoji']} {item['name']} ×{item['quantity'] * amount}"
-            for item in ingredients
-            if _inventory_quantity(db, user_id, item["item_id"]) < item["quantity"] * amount
-        ]
-        if missing:
-            return False, "Missing materials: " + ", ".join(missing)
-        if player is None or player["xc"] < total_cost:
-            return False, f"You need **{total_cost:,} XC**."
-        for ingredient in ingredients:
-            db.execute("UPDATE inventories SET quantity=quantity-? WHERE user_id=? AND item_id=?",
-                (ingredient["quantity"] * amount, user_id, ingredient["item_id"]))
-        db.execute("DELETE FROM inventories WHERE user_id=? AND quantity<=0", (user_id,))
-        db.execute("UPDATE players SET xc=xc-? WHERE user_id=?", (total_cost, user_id))
-        db.execute("""INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
-            ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""",
-            (user_id, recipe["output_item_id"], recipe["output_quantity"] * amount))
-        db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
-            (user_id, "craft", f"{amount}x {recipe['name']}", int(time.time())))
-        db.commit()
-        return True, f"Created **{recipe['output_quantity'] * amount}× {recipe['output_emoji']} {recipe['output_name']}**."
+        try:
+            return True, economy_journey.craft(db,user_id,recipe['id'],amount)
+        except ValueError as error:
+            return False,str(error)
 
     class CraftNavigationButton(discord.ui.Button):
         def __init__(self, owner_id, destination, label, emoji):
@@ -363,14 +345,20 @@ def register_commands(bot, db, create_player):
         def __init__(self, owner_id, recipe_id, amount):
             super().__init__(label="Confirm Craft", emoji="✅", style=discord.ButtonStyle.success)
             self.owner_id = owner_id; self.recipe_id = recipe_id; self.amount = amount
+            self.used = False
 
         async def callback(self, interaction):
+            if interaction.user.id != self.owner_id or self.used:
+                await interaction.response.send_message('Open your own fresh crafting confirmation.',ephemeral=True);return
+            self.used = True
             recipe = db.execute("""SELECT r.*,o.name output_name,o.emoji output_emoji FROM recipes r
                 JOIN items o ON o.id=r.output_item_id WHERE r.id=? AND r.enabled=1""", (self.recipe_id,)).fetchone()
             if recipe is None:
                 await interaction.response.edit_message(view=CraftingCentreView(self.owner_id, notice="❌ This recipe is no longer available.")); return
             ok, message = perform_craft(self.owner_id, recipe, self.amount)
-            await interaction.response.edit_message(view=CraftingCentreView(self.owner_id, recipe["id"], ("✅ " if ok else "❌ ") + message))
+            previous = CraftingCentreView(self.owner_id, recipe["id"], ("✅ " if ok else "❌ ") + message)
+            result = economy_journey.JourneyView(bot, db, self.owner_id, page='product', rid=recipe['id'], iid=recipe['output_item_id'], back=previous, notice=message) if ok else previous
+            await interaction.response.edit_message(view=result)
 
     class CraftBackButton(discord.ui.Button):
         def __init__(self, owner_id, recipe_id):
@@ -453,10 +441,11 @@ def register_commands(bot, db, create_player):
             await interaction.response.send_message(view=xbot_ui.warning("🧪 Recipes Closed", "Crafting is currently disabled."), ephemeral=True); return
         await interaction.response.defer()
         create_player(interaction.user)
-        await interaction.edit_original_response(view=CraftingCentreView(interaction.user.id))
+        await interaction.edit_original_response(view=economy_journey.JourneyView(bot, db, interaction.user.id))
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
-    bot.xbot_player_panel_builders["craft"] = lambda owner_id: CraftingCentreView(owner_id)
+    bot.xbot_player_panel_builders["craft_advanced"] = lambda owner_id: CraftingCentreView(owner_id)
+    bot.xbot_player_panel_builders["craft"] = lambda owner_id: economy_journey.JourneyView(bot, db, owner_id)
 
     @bot.tree.command(name="bills", description="View your recurring X BOT bills")
     async def bills(interaction: discord.Interaction):

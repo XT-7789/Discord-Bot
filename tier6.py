@@ -6,6 +6,7 @@ import math
 import random
 import time
 import tier8
+import economy_journey
 from datetime import datetime, timezone
 
 import discord
@@ -399,12 +400,21 @@ def claim_contracts(db, user_id: int):
     return f"✅ Claimed **{count} Contracts**: **+{xc:,} XC** and **+{credits:,} War Credits**."
 
 
-def start_production(db, user_id: int, recipe_id: int, quantity: int):
+@economy_journey.atomic_action
+def start_production(db, user_id: int, recipe_id: int, quantity: int, expected=None):
     if not setting(db, "tier6_economy_enabled") or not setting(db, "tier6_production_enabled"):
         return False, "Production is currently closed."
     quantity = int(quantity)
     if quantity <= 0 or quantity > 1000:
         return False, "Production quantity must be between 1 and 1,000."
+    try:
+        quote = economy_journey.quote(db,user_id,recipe_id,quantity)
+    except ValueError as error:
+        return False,str(error)
+    if not quote['available']:
+        return False,'Crafting or this recipe is disabled.'
+    if expected is not None and expected != quote['fingerprint']:
+        return False,'Recipe or prices changed. Review again.'
     active = int(db.execute("SELECT COUNT(*) FROM tier6_production_queue WHERE user_id=? AND status='working'", (user_id,)).fetchone()[0])
     if active >= setting(db, "tier6_production_queue_limit"):
         return False, "Your Production Queue is full."
@@ -445,10 +455,10 @@ def start_production(db, user_id: int, recipe_id: int, quantity: int):
             (cursor.lastrowid, row["item_id"], int(row["quantity"]) * quantity),
         )
     db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (user_id, "production_start", f"{recipe['name']} x{quantity}, ready {now + seconds}", now))
-    db.commit()
     return True, f"✅ Started **{recipe['emoji']} {recipe['name']} ×{quantity:,}**. Ready <t:{now + seconds}:R>. Industrial speed bonus: **{speed}%**."
 
 
+@economy_journey.atomic_action
 def claim_production(db, user_id: int):
     now = int(time.time())
     rows = db.execute(
@@ -469,6 +479,7 @@ def claim_production(db, user_id: int):
         output_item_id = int(row["resolved_output_item_id"])
         totals[output_item_id] = totals.get(output_item_id, 0) + amount
         db.execute("UPDATE tier6_production_queue SET status='claimed',claimed_at=? WHERE id=? AND status='working'", (now, row["id"]))
+        economy_journey.audit(db,user_id,'journey_craft',__import__('json').dumps({'recipe':row['recipe_id'],'item':output_item_id,'quantity':amount}))
     for item_id, amount in totals.items():
         db.execute(
             """INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
@@ -476,7 +487,6 @@ def claim_production(db, user_id: int):
             (user_id, item_id, amount),
         )
     db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (user_id, "production_claim", f"Claimed {len(rows)} production jobs", now))
-    db.commit()
     return f"✅ Collected **{len(rows)}** completed Production job(s)."
 
 
@@ -874,17 +884,23 @@ def register_commands(bot, db, create_player):
         def __init__(self, owner_id: int, recipe_id: int, source_message):
             super().__init__()
             self.owner_id, self.recipe_id, self.source_message = owner_id, recipe_id, source_message
+            self.token = __import__('secrets').token_hex(16)
             self.quantity = discord.ui.TextInput(label="Number of production batches", default="1", min_length=1, max_length=4)
             self.add_item(self.quantity)
 
         async def on_submit(self, interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message('Open your own Production panel.',ephemeral=True);return
             try:
                 quantity = int(str(self.quantity.value).strip())
             except ValueError:
                 await interaction.response.send_message("Enter a whole number.", ephemeral=True)
                 return
             await interaction.response.defer()
-            _success, notice = start_production(db, self.owner_id, self.recipe_id, quantity)
+            try:
+                _success, notice = start_production(db, self.owner_id, self.recipe_id, quantity,token=self.token)
+            except ValueError as error:
+                notice = str(error)
             await self.source_message.edit(view=ProductionView(self.owner_id, notice))
 
     class ProductionClaimButton(discord.ui.Button):
@@ -893,6 +909,8 @@ def register_commands(bot, db, create_player):
             self.owner_id = owner_id
 
         async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message('Open your own Production panel.',ephemeral=True);return
             notice = claim_production(db, self.owner_id)
             await interaction.response.edit_message(view=ProductionView(self.owner_id, notice))
 
@@ -946,6 +964,7 @@ def register_commands(bot, db, create_player):
             ready = any(int(row["ready_at"]) <= now for row in queue)
             container.add_item(discord.ui.ActionRow(
                 ProductionClaimButton(owner_id, ready),
+                economy_journey.Entry(bot,db,owner_id,'View Products',page='products'),
                 EconomyNavButton(owner_id, "craft", "Instant Craft", "🧪", style=discord.ButtonStyle.primary),
                 EconomyNavButton(owner_id, "economy_v2", "Economy", "💰"),
             ))

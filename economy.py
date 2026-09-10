@@ -1084,12 +1084,15 @@ def register_commands(bot, db, create_player) -> None:
             return
         reward = item['sell_price'] * amount
         currency_column = 'xc' if item['currency'] == 'xc' else 'xcrystals'
-        db.execute(f"UPDATE players SET {currency_column}={currency_column}+? WHERE user_id=?", (reward, interaction.user.id))
-        db.execute("UPDATE inventories SET quantity=quantity-? WHERE user_id=? AND item_id=?", (amount, interaction.user.id, item['id']))
-        log(db, interaction.user.id, "sell_item", f"{amount}x {item['name']}: +{reward} {item['currency']}")
-        db.commit()
+        import economy_journey
+        try:
+            economy_journey.sell(db,interaction.user.id,item['id'],amount,expected=(item['sell_price'],item['currency']))
+        except ValueError as error:
+            await interaction.response.send_message(str(error),ephemeral=True);return
         currency = 'XC' if currency_column == 'xc' else 'XCrystals'
-        await interaction.response.send_message(view=xbot_ui.success("💰 Item Sold", f"Sold **{amount}x {item['name']}** for **{reward:,} {currency}**."))
+        result=xbot_ui.success("💰 Item Sold", f"Sold **{amount}x {item['name']}** for **{reward:,} {currency}**.")
+        result.add_item(discord.ui.ActionRow(economy_journey.Entry(bot,db,interaction.user.id,'Craft Again')))
+        await interaction.response.send_message(view=result)
 
     @bot.tree.command(name="use", description="Use an item from your inventory")
     @app_commands.describe(name="Exact item name")
@@ -1139,14 +1142,18 @@ def register_commands(bot, db, create_player) -> None:
         await interaction.response.send_message(view=xbot_ui.success("⛏️ Pickaxe Equipped", f"Equipped **{item['name']}**. Use `/mine` to start mining."))
 
     class BackpackSellModal(discord.ui.Modal):
-        def __init__(self, item_id: int, item_name: str, source_message: discord.Message, page: int, selected_id: int):
+        def __init__(self, item_id: int, item_name: str, source_message: discord.Message, page: int, selected_id: int, owner_id=None):
             super().__init__(title=f"Sell {item_name}"[:45])
             self.item_id, self.source_message = item_id, source_message
             self.page, self.selected_id = page, selected_id
+            self.owner_id = owner_id
+            self.token = __import__('secrets').token_hex(16)
             self.quantity_input = discord.ui.TextInput(label="Quantity to sell", default="1", min_length=1, max_length=7)
             self.add_item(self.quantity_input)
 
         async def on_submit(self, interaction: discord.Interaction):
+            if self.owner_id is not None and self.owner_id != interaction.user.id:
+                await interaction.response.send_message('Open your own Backpack.',ephemeral=True);return
             try:
                 amount = int(self.quantity_input.value)
                 if amount <= 0:
@@ -1165,10 +1172,11 @@ def register_commands(bot, db, create_player) -> None:
             total = item['sell_price'] * amount
             column = 'xc' if item['currency'] == 'xc' else 'xcrystals'
             currency = 'XC' if column == 'xc' else 'XCrystals'
-            db.execute(f"UPDATE players SET {column}={column}+? WHERE user_id=?", (total, interaction.user.id))
-            db.execute("UPDATE inventories SET quantity=quantity-? WHERE user_id=? AND item_id=?", (amount, interaction.user.id, item['id']))
-            log(db, interaction.user.id, "backpack_sell", f"Sold {amount}x {item['name']} for {total} {currency}")
-            db.commit()
+            import economy_journey
+            try:
+                economy_journey.sell(db,interaction.user.id,item['id'],amount,expected=(item['sell_price'],item['currency']),action='backpack_sell',token=self.token)
+            except ValueError as error:
+                await interaction.response.send_message(str(error),ephemeral=True);return
             # A modal has no original message to edit through interaction.response.
             # Edit the Backpack panel that launched it so a sale never creates a
             # second Discord message in the channel.
@@ -1205,7 +1213,7 @@ def register_commands(bot, db, create_player) -> None:
 
         async def callback(self, interaction: discord.Interaction):
             if self.action == "sell":
-                await interaction.response.send_modal(BackpackSellModal(self.item_id, self.item_name, interaction.message, self.page, self.item_id))
+                await interaction.response.send_modal(BackpackSellModal(self.item_id, self.item_name, interaction.message, self.page, self.item_id,interaction.user.id))
             elif self.action == "use":
                 item = find_item(db, self.item_name, interaction.user.id)
                 if item is None or item['quantity'] <= 0 or item['effect'] == 'none':
@@ -1432,12 +1440,12 @@ def register_commands(bot, db, create_player) -> None:
         body = (f"## {area['emoji']} {area['name']}\nFound **{amount}x {material['emoji']} {material['name']}**\n"
             f"🛠️ {pickaxe['name']} · Power {pickaxe['pickaxe_power']} · Luck {pickaxe['pickaxe_luck']}%\n"
             f"📈 **+{gained_exp} EXP** · Level {new_level}\n⚡ Energy: **{max(0,energy-area['energy_cost'])}/{setting(db,'mining_max_energy')}**\n"
-            f"💰 Use the buttons below to mine again or sell all mined materials.{extras}{level_up}")
+            f"💰 Craft a product, review material sales, or mine again below.{extras}{level_up}")
         result = MiningActionResultView(
             interaction.user.id,
             "⛏️ Mining Expedition Complete",
             body,
-            discord.Color.dark_gold(),
+            discord.Color.dark_gold(), material_id=material['item_id'],
         )
         if interaction.message is not None:
             await interaction.response.edit_message(view=result)
@@ -1528,7 +1536,7 @@ def register_commands(bot, db, create_player) -> None:
 
     class MiningActionResultView(discord.ui.LayoutView):
         """Keep a Mining result useful instead of leaving an orphan message."""
-        def __init__(self, owner_id: int, title: str, body: str, colour: discord.Color):
+        def __init__(self, owner_id: int, title: str, body: str, colour: discord.Color, material_id=None):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             container = discord.ui.Container(accent_color=colour)
@@ -1542,12 +1550,14 @@ def register_commands(bot, db, create_player) -> None:
                 lobby_button.style=discord.ButtonStyle.success
             container.add_item(discord.ui.ActionRow(
                 MiningHubButton("mine", "Mine Again", "⛏️", discord.ButtonStyle.success),
-                MiningHubButton("sell", "Sell Materials", "💰", discord.ButtonStyle.primary),
+                __import__('economy_journey').Entry(bot,db,owner_id,'Craft',material=material_id,back=self),
+                __import__('economy_journey').Entry(bot,db,owner_id,'Sell Materials',page='materials',back=self),
                 MiningHubButton("hub", "Mining Hub", "🗺️", discord.ButtonStyle.secondary),
                 EconomyCentreButton(owner_id, "Economy"),
-                lobby_button,
             ))
-            container.add_item(discord.ui.TextDisplay("-# Continue mining or return to a main centre without creating another channel message."))
+            if goal_ready:
+                container.add_item(discord.ui.ActionRow(lobby_button))
+            container.add_item(discord.ui.TextDisplay("-# Keep materials for crafting or review a sale. Nothing is sold automatically."))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
