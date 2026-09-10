@@ -19,6 +19,14 @@ PAGES = {
 TOOL_GROUPS = {'members': 'Members', 'assets': 'Assets', 'server': 'Server', 'war_tools': 'War'}
 
 
+def code_status(row):
+    if not row['enabled']:
+        return 'Disabled'
+    if row['max_uses'] and row['uses'] >= row['max_uses']:
+        return 'Fully redeemed'
+    return 'Ready to redeem'
+
+
 class AdminPageSelect(discord.ui.Select):
     def __init__(self, page):
         super().__init__(placeholder='Switch admin section…', row=0, options=[
@@ -97,7 +105,7 @@ class RewardCodeSelect(discord.ui.Select):
             discord.SelectOption(
                 label=row["code"][:100],
                 value=str(row["id"]),
-                description=(f"{'Enabled' if row['enabled'] else 'Disabled'} · {row['uses']}/{row['max_uses'] or '∞'} uses")[:100],
+                description=(f"{code_status(row)} · {row['reward_xc']} XC / {row['reward_war_credits']} WC / {row['reward_xcrystals']} XCrystals")[:100],
                 default=int(row["id"]) == int(selected_id or 0),
             )
             for row in rows[:25]
@@ -225,7 +233,7 @@ class RewardCodeModal(StaffModal, title="Create reward code"):
 
 
 class AdminPanel(discord.ui.LayoutView):
-    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice="", history=(), offsets=None, pending_action=None):
+    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice="", history=(), offsets=None, pending_action=None, code_filter='all'):
         super().__init__(timeout=900)
         self.bot = bot
         self.db = db
@@ -241,9 +249,19 @@ class AdminPanel(discord.ui.LayoutView):
         self.offsets = dict(offsets or {})
         self.pending_action = pending_action
         self.maintenance_used = False
+        self.code_filter = code_filter if code_filter in {'all','enabled','disabled'} else 'all'
+        self.list_pages = {}
         self._controls = []
         self._build_controls()
         content = self.build_embed()
+        if self.page != 'home':
+            import staff_sections
+            parts = staff_sections.build(self, content)
+            super().add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
+            super().add_item(discord.ui.ActionRow(
+                AdminActionButton('back','‹ Back'),AdminActionButton('page:home','⌂ Home'),
+                AdminActionButton('refresh','Refresh'),AdminActionButton('close','× Close')))
+            return
         parts = [discord.ui.TextDisplay(f"-# ✦ X SYSTEM · ADMIN / {PAGES.get(self.page,self.page)}\n# {PAGES.get(self.page,self.page).upper()}\n{content.description or ''}")]
         for field in content.fields:
             parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f"### {field.name}\n{field.value}")))
@@ -260,15 +278,6 @@ class AdminPanel(discord.ui.LayoutView):
                         (4,'⚙️ System','Read-only economy status and maintenance.'))
             for row, title, hint in sections:
                 parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f'### {title}\n{hint}'),discord.ui.ActionRow(*rows.pop(row))))
-        elif 0 in rows:
-            parts.append(discord.ui.ActionRow(*rows.pop(0)))
-        if self.page == 'maintenance' and self.pending_action:
-            parts.append(discord.ui.TextDisplay('### Confirm maintenance\n'+{'backup_now':'Create a database backup. No player assets are changed.', 'tier5_repair':'Repair mission data. This can change stored records.', 'tier6_repair':'Repair economy data. This can change stored records.'}[self.pending_action]))
-        for row in sorted(rows):
-            controls = rows[row]
-            width = 2 if all(isinstance(c,discord.ui.Button) for c in controls) else 1
-            for start in range(0, len(controls), width):
-                parts.append(discord.ui.ActionRow(*controls[start:start + width]))
         super().add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
         super().add_item(discord.ui.ActionRow(
             AdminActionButton("back", "‹ Back"), AdminActionButton("page:home", "⌂ Home"),
@@ -290,6 +299,7 @@ class AdminPanel(discord.ui.LayoutView):
             "history": self.history,
             "offsets": self.offsets,
             "pending_action": self.pending_action,
+            "code_filter": self.code_filter,
         }
         values.update(changes)
         return AdminPanel(self.bot, self.db, self.staff_check, self.owner_id, **values)
@@ -316,6 +326,7 @@ class AdminPanel(discord.ui.LayoutView):
     def _page_rows(self, rows, kind):
         offset = min(max(0, self.offsets.get(kind, 0)), max(0, (len(rows) - 1) // 25 * 25))
         self.offsets[kind] = offset
+        self.list_pages[kind] = f"Page {offset // 25 + 1} / {max(1,(len(rows)+24)//25)} · {len(rows)} records"
         if len(rows) > 25:
             for direction, target, label in ((-1, offset - 25, f"‹ {kind.title()}"), (1, offset + 25, f"{kind.title()} ›")):
                 button = AdminActionButton(f"list:{kind}:{direction}", label, row=3)
@@ -360,11 +371,15 @@ class AdminPanel(discord.ui.LayoutView):
                 self.add_item(AdminActionButton("reject_feedback", "Reject", emoji="❌", style=discord.ButtonStyle.danger, row=2))
         elif self.page == "codes":
             codes = self.reward_codes()
+            for value,label in (('all','All codes'),('enabled','Enabled'),('disabled','Disabled')):
+                self.add_item(AdminActionButton('filter_codes:'+value,label,style=discord.ButtonStyle.primary if value==self.code_filter else discord.ButtonStyle.secondary,row=3))
+            if self.selected_code_id is None and codes:
+                self.selected_code_id = codes[0]['id']
             if codes:
                 self.add_item(RewardCodeSelect(self._page_rows(codes, "codes"), self.selected_code_id))
             self.add_item(AdminActionButton("create_code", "Create Code", emoji="➕", style=discord.ButtonStyle.success, row=2))
             if self.selected_code():
-                self.add_item(AdminActionButton("toggle_code", "Enable / Disable", emoji="🔁", row=2))
+                self.add_item(AdminActionButton("toggle_code", "Disable Code" if self.selected_code()['enabled'] else "Enable Code", emoji="🔁", row=2))
         elif self.page == "home":
             pending=len(self.pending_applications());reports=len(self.pending_feedback())
             for row,pages in ((0,('applications','tester')),(1,('members','assets')),(2,('server','war_tools')),(3,('verification','codes')),(4,('economy','maintenance'))):
@@ -410,7 +425,8 @@ class AdminPanel(discord.ui.LayoutView):
         ).fetchone()
 
     def reward_codes(self):
-        return self.db.execute("SELECT * FROM reward_codes ORDER BY enabled DESC,id DESC").fetchall()
+        condition = {'all':'1=1','enabled':'enabled=1','disabled':'enabled=0'}[self.code_filter]
+        return self.db.execute(f"SELECT * FROM reward_codes WHERE {condition} ORDER BY enabled DESC,id DESC").fetchall()
 
     def selected_code(self):
         if not self.selected_code_id:
@@ -450,7 +466,7 @@ class AdminPanel(discord.ui.LayoutView):
                 'war_tools':'Review alliance targets before starting or ending a war.',
             }[self.page] + '\n**1 Choose tool → 2 Fill details → 3 Review & confirm**'
         elif self.page == "applications":
-            embed.description = f"Applications are **{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}**. Choose any open form to post, or review a pending submission."
+            embed.description = f"**{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}** · **{len(self.pending_applications())}** awaiting review"
             form = self.selected_form()
             if form:
                 embed.add_field(name="Form selected to post", value=f"{form['emoji']} **{form['name']}**\n{form['description'] or 'No description.'}"[:1024], inline=False)
@@ -467,7 +483,7 @@ class AdminPanel(discord.ui.LayoutView):
             embed.add_field(name="Guest role", value=f"<@&{_setting(self.db, 'verification_guest_role_id')}>", inline=True)
             embed.add_field(name="Member role", value=f"<@&{_setting(self.db, 'verification_member_role_id')}>", inline=True)
         elif self.page == "tester":
-            embed.description = "Post a simple bug/suggestion panel for Testers. Review each report and optionally reward useful testing."
+            embed.description = f"**{len(self.pending_feedback())}** pending reports · Review before accepting or rejecting."
             report = self.selected_feedback()
             if report:
                 embed.add_field(name=f"#{report['id']} · {report['kind'].title()} · {report['user_name']}",
@@ -475,13 +491,16 @@ class AdminPanel(discord.ui.LayoutView):
             elif not self.pending_feedback():
                 embed.add_field(name="Queue", value="No pending Tester reports.", inline=False)
         elif self.page == "codes":
-            embed.description = "Create currency reward codes or enable/disable an existing code. Players redeem them with `/code_redeem`."
+            counts=self.db.execute('SELECT COUNT(*) total,COALESCE(SUM(enabled=1),0) enabled FROM reward_codes').fetchone()
+            embed.description = f"**{counts['enabled']} enabled** · **{counts['total']-counts['enabled']} disabled**\nPlayers redeem with `/code_redeem`."
             selected = self.selected_code()
             if selected:
-                uses = f"{selected['uses']:,}/{selected['max_uses']:,}" if selected["max_uses"] else f"{selected['uses']:,}/∞"
+                uses = f"{selected['uses']:,} / {selected['max_uses']:,}" if selected["max_uses"] else f"{selected['uses']:,} used · Unlimited total uses"
+                item=self.db.execute('SELECT name FROM items WHERE id=?',(selected['item_id'],)).fetchone() if selected['item_id'] else None
+                item_text=f"\n📦 {selected['item_quantity']}× {item['name'] if item else 'Unavailable item'}" if selected['item_id'] else ''
                 embed.add_field(
-                    name=f"{selected['code']} · {'Enabled' if selected['enabled'] else 'Disabled'}",
-                    value=f"🪙 {selected['reward_xc']:,} XC\n⚔️ {selected['reward_war_credits']:,} War Credits\n💎 {selected['reward_xcrystals']:,} XCrystals\nUses: {uses}",
+                    name=f"{selected['code']} · {code_status(selected)}",
+                    value=f"**Reward per redemption**\n🪙 {selected['reward_xc']:,} XC · ⚔️ {selected['reward_war_credits']:,} WC\n💎 {selected['reward_xcrystals']:,} XCrystals{item_text}\n**Usage** · {uses}",
                     inline=False,
                 )
             elif not self.reward_codes():
@@ -497,6 +516,11 @@ class AdminPanel(discord.ui.LayoutView):
 
     async def handle_action(self, interaction, action):
         if not await self.interaction_check(interaction):
+            return
+        if action.startswith('filter_codes:'):
+            value=action.split(':',1)[1]
+            if value not in {'all','enabled','disabled'}:return
+            await self._edit(interaction,self.clone(code_filter=value,selected_code_id=None,offsets={**self.offsets,'codes':0}))
             return
         if action in {'backup_now','tier5_repair','tier6_repair'}:
             await self._edit(interaction,self.clone(page='maintenance',pending_action=action))

@@ -212,6 +212,20 @@ class StaffToolsTests(unittest.IsolatedAsyncioTestCase):
         await tools.StepButton(w,'Use default','clear').callback(self.interaction())
         self.assertNotIn('winner_alliance',w.values)
 
+    async def test_field_jump_preserves_values_without_execution(self):
+        command=self.commands['economy_adjust']
+        values=self.values(command)
+        wizard=tools.ToolView(self.root,command,values)
+        selector=next(c for c in wizard.walk_children() if isinstance(c,tools.FieldSelect))
+        selector._values=[str(len(command.parameters)-1)]
+        i=self.interaction();await selector.callback(i)
+        rebuilt=i.response.edit_message.call_args.kwargs['view']
+        self.assertEqual(rebuilt.step,len(command.parameters)-1)
+        self.assertEqual(rebuilt.values,values)
+        self.assertFalse(self.calls)
+        rebuilt.to_components();self.assertLessEqual(rebuilt.total_children_count,40)
+        i=self.interaction(uid=20);await selector.callback(i);i.response.edit_message.assert_not_awaited()
+
     async def test_concurrent_confirmations_only_execute_once(self):
         command=self.commands['economy_adjust']; w=tools.ToolView(self.root,command,self.values(command))
         confirmation=tools.ConfirmView(w)

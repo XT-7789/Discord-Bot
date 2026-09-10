@@ -364,6 +364,72 @@ class AdminDashboardTests(unittest.TestCase):
             repair.assert_not_called()
         asyncio.run(check())
 
+    def test_reward_code_filters_preview_and_navigation_are_readonly(self):
+        self.seed_admin()
+        self.db.execute("UPDATE reward_codes SET enabled=0 WHERE code='TEST0'")
+        self.db.execute("UPDATE reward_codes SET max_uses=1,uses=1 WHERE code='TEST1'");self.db.commit()
+        async def check():
+            root=staff_panel.AdminPanel(SimpleNamespace(),self.db,lambda i:True,990088,page='codes')
+            before=self.db.total_changes
+            self.assertIsNotNone(root.selected_code())
+            self.assertIn('Reward per redemption',str(root.to_components()))
+            i=self.interaction();await root.handle_action(i,'filter_codes:disabled')
+            view=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(view.selected_code()['code'],'TEST0')
+            self.assertIn('Enable Code',[getattr(c,'label',None) for c in view.walk_children()])
+            refreshed=view.clone();self.assertEqual(refreshed.code_filter,'disabled')
+            self.assertEqual(refreshed.selected_code_id,view.selected_code_id)
+            i=self.interaction();await view.handle_action(i,'page:members')
+            group=i.response.edit_message.call_args.kwargs['view']
+            i=self.interaction();await group.handle_action(i,'back')
+            restored=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(restored.selected_code_id,view.selected_code_id)
+            self.assertEqual(restored.code_filter,'disabled')
+            self.assertEqual(self.db.total_changes,before)
+            row=self.db.execute("SELECT * FROM reward_codes WHERE code='TEST1'").fetchone()
+            self.assertEqual(staff_panel.code_status(row),'Fully redeemed')
+            # No-match lists remain usable and can still create a code.
+            self.db.execute('DELETE FROM reward_codes');self.db.commit()
+            empty=root.clone();empty.to_components()
+            self.assertIn('No code selected',str(empty.to_components()))
+            self.assertIn('create_code',[getattr(c,'action',None) for c in empty.walk_children()])
+        asyncio.run(check())
+
+    def test_complete_report_and_application_readers_keep_owner_and_selection(self):
+        self.seed_admin()
+        import staff_sections
+        application=self.db.execute('SELECT id FROM application_submissions LIMIT 1').fetchone()[0]
+        report=self.db.execute('SELECT id FROM tester_feedback LIMIT 1').fetchone()[0]
+        full='START '+('Long answer and detail. '*450)+' END'
+        self.db.execute('INSERT INTO application_answers VALUES(?,?,?,?)',(application,990099,'Question',full))
+        self.db.execute('UPDATE tester_feedback SET details=? WHERE id=?',(full,report));self.db.commit()
+        async def check():
+            allowed={'value':True}
+            for page in ('applications','tester'):
+                root=staff_panel.AdminPanel(SimpleNamespace(),self.db,lambda i:allowed['value'],990088,page=page,selected_application_id=application,selected_feedback_id=report)
+                button=next(c for c in root.walk_children() if isinstance(c,staff_sections.DetailsButton))
+                before=self.db.total_changes
+                i=self.interaction();await button.callback(i)
+                view=i.response.edit_message.call_args.kwargs['view'];parts=[]
+                while True:
+                    view.to_components();self.assertLessEqual(view.total_children_count,40)
+                    texts=[c.content for c in view.walk_children() if isinstance(c,discord.ui.TextDisplay)]
+                    parts.append(texts[1])
+                    forward=next((c for c in view.walk_children() if isinstance(c,staff_sections.DetailNav) and c.direction==1),None)
+                    if forward is None or forward.disabled:break
+                    i=self.interaction();await forward.callback(i);view=i.response.edit_message.call_args.kwargs['view']
+                self.assertIn(discord.utils.escape_markdown(full),''.join(parts))
+                back=next(c for c in view.walk_children() if isinstance(c,staff_sections.DetailNav) and c.direction==0)
+                i=self.interaction();await back.callback(i)
+                restored=i.response.edit_message.call_args.kwargs['view']
+                self.assertEqual(restored.selected_application_id,application)
+                self.assertEqual(restored.selected_feedback_id,report)
+                self.assertEqual(self.db.total_changes,before)
+                allowed['value']=False;i=self.interaction();await back.callback(i)
+                i.response.edit_message.assert_not_awaited();allowed['value']=True
+                i=self.interaction(uid=123);await button.callback(i);i.response.edit_message.assert_not_awaited()
+        asyncio.run(check())
+
     def test_admin_review_toggle_close_and_readonly_economy(self):
         self.seed_admin()
         self.db.execute('INSERT OR REPLACE INTO players(user_id,nation_name,xc,money) VALUES(?,?,?,?)', (990088, 'Fixture', 100, 100))

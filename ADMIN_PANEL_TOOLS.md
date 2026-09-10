@@ -2,9 +2,21 @@
 
 ## Entry and coverage
 
-Open `/admin` → Home → **Choose a management tool…**. Choose targets, move between fields, review the complete action, then Confirm. No slash-command syntax, member IDs or role IDs need to be typed. Numeric amounts, reasons and announcement text still require text entry.
+Open `/admin` → Home → **Members / Player Assets / Server Tools / Alliance War**. Choose a tool and targets, move between fields, review the complete action, then Confirm. No slash-command syntax, member IDs or role IDs need to be typed. Numeric amounts, reasons and announcement text still require text entry.
 
-Home now has three clearly separated sections: Management tools first, Review & access in two-button rows, and Status & maintenance. Counts are a compact summary rather than four tall cards. Backup/repair buttons live on the Maintenance page, not among everyday actions. Home appears once in the footer; navigation and maintenance buttons use neutral styling, with the active page highlighted. Actual phone rendering of this revision still needs screenshot acceptance.
+Home has five sections: Needs attention, Manage players, Manage server, Access & rewards, and System. Pending counts appear on the review buttons. Backup/repair controls live on Maintenance and require confirmation. Home appears once in the footer. Actual phone rendering still needs screenshot acceptance.
+
+## Secondary-page refresh
+
+- Shared large section headings, short English instructions and paired action buttons. Section navigation follows page content rather than separating record pickers from their actions. Back / Home / Refresh / Close stay in one footer row.
+- Reward Codes: All / Enabled / Disabled filters; automatic read-only preview of the first code on initial entry; selected status, per-redemption currency/item rewards and usage limits; explicit Enable Code / Disable Code labels. Fully redeemed codes are identified separately from disabled codes. Selections and filters survive refresh and returning from another section. A selection outside the current list is explicitly identified.
+- Applications: separate Post a form and Review an application sections, with independent list-page indicators. No open form disables the posting button. Read full answers opens an owner-checked, read-only paged reader without truncating long answers.
+- Tester Reports: record list, selected preview and review actions, then the feedback-posting tool. Read full report uses the same complete-content reader; returning keeps the selected record.
+- Verification: role mapping separated from posting/open/close actions; unset roles display Not configured. Economy Status remains read only. Maintenance separates health inspection, backups and repairs.
+- Tool categories separate inspections from state-changing tools. Multi-field forms offer Jump to a field, retaining previously entered values. Results use the same Admin heading and return to the originating category.
+- Filters, record selection, full-content reading and field navigation do not execute transactions or change permissions. No rewards, prices, stored player assets or Dashboard settings are changed by this UI update.
+
+Verification: 71 combined Admin, staff-tool, Tier 6/7/8 and Economy journey tests passed against disposable databases. New coverage includes filters, empty lists, complete long-answer/report pagination, restored selection, owner/permission rejection and field jumping without command execution. Maintenance services remain mocked. Fresh Discord phone screenshots are still required after deployment; offline checks do not replace visual acceptance.
 
 The current `STAFF_SLASH_COMMANDS` catalogue contains 14 retained shortcuts. This panel covers 12 tools plus the `/admin` entry itself: **13/14 (92.9%)**. This denominator is the retained staff shortcut set, not every historical command or every Dashboard record editor.
 

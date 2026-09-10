@@ -61,7 +61,7 @@ class ResultResponse:
                 text += f'\n## {embed.title or "Result"}\n{embed.description or ""}'
                 for field in embed.fields:
                     text += f'\n### {field.name}\n{field.value}'
-            view.add_item(discord.ui.Container(discord.ui.TextDisplay(text[:3900] or 'Completed.'), accent_colour=0x36CFC9))
+            view.add_item(discord.ui.Container(discord.ui.TextDisplay('-# ✦ X SYSTEM · ADMIN / RESULT\n# ACTION RESULT\n'+(text[:3750] or 'Completed.')), accent_colour=0x36CFC9))
             content = None
         if isinstance(view, discord.ui.LayoutView):
             view.add_item(discord.ui.ActionRow(ReturnButton(self.root)))
@@ -226,6 +226,19 @@ class StepButton(discord.ui.Button):
             await interaction.response.edit_message(view=w.rebuild())
 
 
+class FieldSelect(discord.ui.Select):
+    def __init__(self,wizard):
+        self.wizard=wizard
+        super().__init__(placeholder='Jump to a field…',options=[discord.SelectOption(
+            label=f"{p.name.replace('_',' ').title()}",value=str(n),default=n==wizard.step,
+            description='Selected' if wizard.values.get(p.name) is not None else 'Required · not set' if p.required else 'Optional · using default')
+            for n,p in enumerate(wizard.command.parameters)])
+    async def callback(self,i):
+        if await self.wizard.interaction_check(i):
+            self.wizard.step=int(self.values[0]);self.wizard.offset=0
+            await i.response.edit_message(view=self.wizard.rebuild())
+
+
 class ToolView(discord.ui.LayoutView):
     def __init__(self, root, command, values=None, step=0, offset=0):
         super().__init__(timeout=900)
@@ -239,6 +252,8 @@ class ToolView(discord.ui.LayoutView):
             summary = '\n'.join(f"{p.name.replace('_',' ').title()}: {display(self.values[p.name])}" for p in command.parameters if p.name in self.values)
             parts.append(discord.ui.TextDisplay('### Your selection\n'+summary[:1700]))
         if command.parameters:
+            if len(command.parameters)>1:
+                parts.append(discord.ui.ActionRow(FieldSelect(self)))
             p = command.parameters[step]
             shown = self.values.get(p.name)
             parts.append(discord.ui.TextDisplay(f'### {step + 1} / {len(command.parameters)} · {p.name.replace("_", " ").title()}\n{p.description}\nSelected: **{display(shown)}**'))
