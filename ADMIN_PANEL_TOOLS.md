@@ -4,6 +4,8 @@
 
 Open `/admin` → Home → **Choose a management tool…**. Choose targets, move between fields, review the complete action, then Confirm. No slash-command syntax, member IDs or role IDs need to be typed. Numeric amounts, reasons and announcement text still require text entry.
 
+Home now has three clearly separated sections: Management tools first, Review & access in two-button rows, and Status & maintenance. Counts are a compact summary rather than four tall cards. Backup/repair buttons live on the Maintenance page, not among everyday actions. Home appears once in the footer; navigation and maintenance buttons use neutral styling, with the active page highlighted. Actual phone rendering of this revision still needs screenshot acceptance.
+
 The current `STAFF_SLASH_COMMANDS` catalogue contains 14 retained shortcuts. This panel covers 12 tools plus the `/admin` entry itself: **13/14 (92.9%)**. This denominator is the retained staff shortcut set, not every historical command or every Dashboard record editor.
 
 | Group | Panel action | Existing command |

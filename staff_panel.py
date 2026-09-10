@@ -232,9 +232,17 @@ class AdminPanel(discord.ui.LayoutView):
             row = control.row or 0
             control.row = None
             rows.setdefault(row, []).append(control)
+        if self.page == "home":
+            parts.extend((discord.ui.Separator(), discord.ui.TextDisplay("### ⚡ Management tools\nMembers · Assets · Announcements · War")))
+            parts.append(discord.ui.ActionRow(*rows.pop(2)))
+            navigation = rows.pop(0)
+            parts.extend((discord.ui.Separator(), discord.ui.TextDisplay("### 📋 Review & access")))
+            for start in (0, 2):
+                parts.append(discord.ui.ActionRow(*navigation[start:start + 2]))
+            parts.extend((discord.ui.Separator(), discord.ui.TextDisplay("### ⚙️ Status & maintenance"), discord.ui.ActionRow(*navigation[4:])))
         for row in sorted(rows):
             controls = rows[row]
-            width = 3 if row == 0 else 5
+            width = 3 if row == 0 else 2 if self.page == "maintenance" else 5
             for start in range(0, len(controls), width):
                 parts.append(discord.ui.ActionRow(*controls[start:start + width]))
         super().add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
@@ -292,12 +300,12 @@ class AdminPanel(discord.ui.LayoutView):
 
     def _build_controls(self):
         navigation = (
-            ("home", "Home", "🏠"),
             ("applications", "Applications", "📋"),
             ("tester", "Tester Reports", "🐛"),
             ("verification", "Verification", "✅"),
             ("codes", "Reward Codes", "🎟️"),
-            ("economy", "Economy", "💰"),
+            ("economy", "Economy Status", "💰"),
+            ("maintenance", "Maintenance", "🛠️"),
         )
         for page, label, emoji in navigation:
             self.add_item(AdminActionButton(f"page:{page}", label, emoji=emoji, style=discord.ButtonStyle.primary if self.page == page else discord.ButtonStyle.secondary, row=0))
@@ -338,8 +346,9 @@ class AdminPanel(discord.ui.LayoutView):
         elif self.page == "home":
             import staff_tools
             self.add_item(staff_tools.ToolSelect(self))
+        elif self.page == "maintenance":
             self.add_item(AdminActionButton("system_status", "System Status", emoji="📡", style=discord.ButtonStyle.primary, row=1))
-            self.add_item(AdminActionButton("backup_now", "Backup Now", emoji="💾", style=discord.ButtonStyle.success, row=1))
+            self.add_item(AdminActionButton("backup_now", "Create Backup", emoji="💾", style=discord.ButtonStyle.secondary, row=1))
             self.add_item(AdminActionButton("tier5_repair", "Repair Missions", emoji="🛠️", style=discord.ButtonStyle.secondary, row=1))
             self.add_item(AdminActionButton("tier6_repair", "Repair Economy", emoji="💰", style=discord.ButtonStyle.secondary, row=1))
 
@@ -398,12 +407,11 @@ class AdminPanel(discord.ui.LayoutView):
         elif self.page == "home":
             pending = self.db.execute("SELECT COUNT(*) FROM application_submissions WHERE status IN ('pending','hold')").fetchone()[0]
             active_codes = self.db.execute("SELECT COUNT(*) FROM reward_codes WHERE enabled=1").fetchone()[0]
-            embed.description = "Choose a management tool below — no command typing. Select targets, fill in details, then confirm.\nMember tools · Assets · Announcements · Alliance War\nEconomy rules remain editable in Dashboard only."
-            embed.add_field(name="📋 Pending applications", value=str(pending), inline=True)
-            embed.add_field(name="🎟️ Active reward codes", value=str(active_codes), inline=True)
-            embed.add_field(name="✅ Verification", value="Open" if _setting(self.db, "verification_enabled", "1") == "1" else "Closed", inline=True)
             reports = self.db.execute("SELECT COUNT(*) FROM tester_feedback WHERE status='pending'").fetchone()[0]
-            embed.add_field(name="🐛 Tester reports", value=str(reports), inline=True)
+            verification = "Open" if _setting(self.db, "verification_enabled", "1") == "1" else "Closed"
+            embed.description = f"**{pending}** applications · **{reports}** reports\n**{active_codes}** active codes · Verification **{verification}**"
+        elif self.page == "maintenance":
+            embed.description = "Check system health or create a backup.\nRepair buttons change stored data — use only when needed."
         elif self.page == "applications":
             embed.description = f"Applications are **{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}**. Choose any open form to post, or review a pending submission."
             form = self.selected_form()

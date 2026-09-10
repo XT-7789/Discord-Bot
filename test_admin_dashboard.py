@@ -240,7 +240,7 @@ class AdminDashboardTests(unittest.TestCase):
             application = self.db.execute('SELECT id FROM application_submissions LIMIT 1').fetchone()[0]
             code = self.db.execute('SELECT id FROM reward_codes LIMIT 1').fetchone()[0]
             feedback = self.db.execute('SELECT id FROM tester_feedback LIMIT 1').fetchone()[0]
-            for page in ('home', 'applications', 'tester', 'verification', 'codes', 'economy'):
+            for page in ('home', 'applications', 'tester', 'verification', 'codes', 'economy', 'maintenance'):
                 async def war_end(interaction):
                     pass
                 command = discord.app_commands.Command(name='war_end', description='Test command', callback=war_end)
@@ -250,6 +250,14 @@ class AdminDashboardTests(unittest.TestCase):
                 self.assertIsInstance(panel, discord.ui.LayoutView)
                 self.assertLessEqual(panel.total_children_count, 40, page)
                 panel.to_components()
+                actions = [x.action for x in panel.walk_children() if isinstance(x, staff_panel.AdminActionButton)]
+                if page == 'home':
+                    self.assertNotIn('backup_now', actions)
+                    self.assertNotIn('tier6_repair', actions)
+                    self.assertEqual(actions.count('page:home'), 1)
+                if page == 'maintenance':
+                    self.assertIn('backup_now', actions)
+                    self.assertIn('tier6_repair', actions)
                 for item in panel.walk_children():
                     if isinstance(item, (discord.ui.Select, discord.ui.Button)):
                         self.assertIs(item.view, panel)
