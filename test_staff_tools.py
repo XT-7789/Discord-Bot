@@ -127,6 +127,20 @@ class StaffToolsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['allowed_mentions'].to_dict(),discord.AllowedMentions.none().to_dict())
         self.assertEqual(len(self.calls),len(tools.TOOLS))
 
+    async def test_category_buttons_and_return_keep_origin(self):
+        for name in tools.TOOLS:
+            button=tools.ToolButton(self.root,name)
+            i=self.interaction();await button.callback(i)
+            wizard=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(wizard.command.name,name)
+            self.assertFalse(self.calls)
+        self.root.clone=Mock(return_value=discord.ui.LayoutView())
+        back=tools.ReturnButton(self.root)
+        await back.callback(self.interaction())
+        self.root.clone.assert_called_once_with()
+        i=self.interaction(uid=20);await tools.ToolButton(self.root,'spawn').callback(i)
+        i.response.edit_message.assert_not_awaited()
+
     async def test_permission_revoked_owner_disabled_and_defaults(self):
         command=self.commands['setlevel']; w=tools.ToolView(self.root,command,self.values(command))
         await tools.ConfirmView(w).execute(self.interaction(uid=20)); self.assertFalse(self.calls)

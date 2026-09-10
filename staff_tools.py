@@ -70,12 +70,27 @@ class ResultResponse:
 
 class ReturnButton(discord.ui.Button):
     def __init__(self, root):
-        super().__init__(label='‹ Admin Home', style=discord.ButtonStyle.secondary)
+        super().__init__(label='‹ Back to tools', style=discord.ButtonStyle.secondary)
         self.root = root
 
     async def callback(self, interaction):
         if await self.root.interaction_check(interaction):
-            await interaction.response.edit_message(content=None, embed=None, view=self.root.clone(page='home'))
+            await interaction.response.edit_message(content=None, embed=None, view=self.root.clone())
+
+
+class ToolButton(discord.ui.Button):
+    def __init__(self, root, name):
+        self.root, self.name = root, name
+        super().__init__(label=TOOLS[name][1], style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction):
+        if not await self.root.interaction_check(interaction):
+            return
+        command = lookup(self.root, self.name, interaction.guild)
+        if command is None:
+            await interaction.response.send_message('This tool is unavailable in this server. Refresh after the Bot finishes loading.', ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=None, view=ToolView(self.root, command))
 
 
 class ToolSelect(discord.ui.Select):
@@ -217,7 +232,12 @@ class ToolView(discord.ui.LayoutView):
         self.root, self.command = root, command
         self.values = dict(values or {})
         self.step, self.offset = step, offset
-        parts = [discord.ui.TextDisplay(f'-# ✦ X SYSTEM · ADMIN\n# {TOOLS[command.name][1]}\nChoose fields, then review. Nothing changes before confirmation.')]
+        required = [p for p in command.parameters if p.required]
+        complete = sum(self.values.get(p.name) is not None for p in required)
+        parts = [discord.ui.TextDisplay(f'-# ✦ X SYSTEM · ADMIN / {TOOLS[command.name][0]}\n# {TOOLS[command.name][1]}\n**Details → Review → Result** · Required fields **{complete}/{len(required)}**\nNothing changes before confirmation.')]
+        if self.values:
+            summary = '\n'.join(f"{p.name.replace('_',' ').title()}: {display(self.values[p.name])}" for p in command.parameters if p.name in self.values)
+            parts.append(discord.ui.TextDisplay('### Your selection\n'+summary[:1700]))
         if command.parameters:
             p = command.parameters[step]
             shown = self.values.get(p.name)
@@ -242,10 +262,12 @@ class ToolView(discord.ui.LayoutView):
                 else:
                     parts.append(discord.ui.ActionRow(InputButton(self, p)))
             field_buttons = [StepButton(self, '‹ Field', 'previous'), StepButton(self, 'Next field ›', 'next')]
+            field_buttons[0].disabled = step == 0
+            field_buttons[1].disabled = step == len(command.parameters)-1
             if not p.required:
                 field_buttons.append(StepButton(self, 'Use default', 'clear'))
             parts.append(discord.ui.ActionRow(*field_buttons))
-        parts.append(discord.ui.ActionRow(StepButton(self, 'Review', 'review'), ReturnButton(root)))
+        parts.append(discord.ui.ActionRow(StepButton(self, 'Review & Confirm', 'review'), ReturnButton(root)))
         self.add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
 
     def rebuild(self):

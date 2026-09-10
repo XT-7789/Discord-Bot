@@ -1,5 +1,35 @@
 # Connected Economy update
 
+## Economy 2.0 and Admin navigation follow-up
+
+- Economy overview now shows affordable target batches, finished jobs and
+  sellable crafted stock. Goals & Activity opens a focused work page with
+  products, collection, queue, workshop and mining shortcuts.
+- Choose Craft for profit (default), Earn XC or Prepare War support. The last
+  choice is saved in existing economy_logs as journey_goal; changing focus
+  grants no rewards and changes no assets or economy settings.
+- Batch production offers 1 / 5 / 10 where affordable, Max, and custom quantity.
+  Max respects materials, wallet and the existing 1,000-batch cap. All options
+  open review, including output quantity, fee and current resale comparison.
+  Queue availability and current prices are rechecked on confirmation.
+- Sell Max reviews up to the existing 1,000-item UI limit. It does not sell
+  immediately. Ready production can be collected from Goals & Activity using
+  the existing atomic collection service.
+- Admin Home is organized as Needs attention, Manage players, Manage server,
+  Access & rewards, and System. Category buttons expose the existing 12 command
+  tools. Section switching retains selected records and list positions.
+- Tool pages show required-field progress and selected values. Back to tools
+  returns to the originating category. Maintenance requires explicit review;
+  opening, cancelling, or losing permission does not execute it.
+- English UI, existing role policies, Dashboard-only economy-rule editing,
+  recipe prices, rewards, Casino odds and VIP benefits remain unchanged.
+
+Follow-up acceptance: test the three goals across a refresh, Max review with
+insufficient/stale balance, queue collection, all Admin categories, tool return
+navigation and maintenance cancellation. Use only mocked maintenance services
+in automated tests. Phone screenshots remain pending; desktop/offline tests do
+not establish actual mobile visual acceptance.
+
 ## Player flow
 
 Economy now shows one next step and current material quantities. Mining results

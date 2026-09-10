@@ -240,7 +240,7 @@ class AdminDashboardTests(unittest.TestCase):
             application = self.db.execute('SELECT id FROM application_submissions LIMIT 1').fetchone()[0]
             code = self.db.execute('SELECT id FROM reward_codes LIMIT 1').fetchone()[0]
             feedback = self.db.execute('SELECT id FROM tester_feedback LIMIT 1').fetchone()[0]
-            for page in ('home', 'applications', 'tester', 'verification', 'codes', 'economy', 'maintenance'):
+            for page in staff_panel.PAGES:
                 async def war_end(interaction):
                     pass
                 command = discord.app_commands.Command(name='war_end', description='Test command', callback=war_end)
@@ -314,6 +314,16 @@ class AdminDashboardTests(unittest.TestCase):
             for action in ('system_status', 'tier5_repair', 'tier6_repair', 'backup_now', 'post_application', 'post_verification', 'post_tester_feedback'):
                 i = self.interaction()
                 await panel.handle_action(i, action)
+                if action in {'tier5_repair','tier6_repair','backup_now'}:
+                    confirmation=i.response.edit_message.call_args.kwargs['view']
+                    service={'tier5_repair':bot.xbot_tier5_repair,'tier6_repair':bot.xbot_tier6_repair,'backup_now':bot.xbot_tier4_backup}[action]
+                    service.assert_not_called()
+                    confirmation.to_components()
+                    i=self.interaction()
+                    await confirmation.handle_action(i,'confirm_maintenance:'+action)
+                    service.assert_called_once()
+                    await confirmation.handle_action(self.interaction(),'confirm_maintenance:'+action)
+                    service.assert_called_once()
                 i.response.defer.assert_awaited_once()
                 self.assertIsInstance(i.edit_original_response.call_args.kwargs['view'], discord.ui.LayoutView)
             modal = staff_panel.RewardCodeModal(panel)
@@ -327,6 +337,31 @@ class AdminDashboardTests(unittest.TestCase):
             await modal.on_submit(i)
             self.assertIn('already exists', str(i.response.edit_message.call_args.kwargs['view'].to_components()))
             self.assertFalse(self.db.in_transaction)
+        asyncio.run(check())
+
+    def test_admin_categories_and_maintenance_cancel_or_revocation(self):
+        self.seed_admin()
+        async def check():
+            import staff_tools
+            allowed={'value':True}
+            repair=Mock()
+            bot=SimpleNamespace(xbot_tier6_repair=repair)
+            root=staff_panel.AdminPanel(bot,self.db,lambda i:allowed['value'],990088)
+            found=set()
+            for page in staff_panel.TOOL_GROUPS:
+                view=root.clone(page=page)
+                view.to_components()
+                for button in view.walk_children():
+                    if isinstance(button,staff_tools.ToolButton):found.add(button.name)
+            self.assertEqual(found,set(staff_tools.TOOLS))
+            i=self.interaction();await root.handle_action(i,'tier6_repair')
+            confirmation=i.response.edit_message.call_args.kwargs['view']
+            i=self.interaction();await confirmation.handle_action(i,'cancel_maintenance')
+            self.assertIsNone(i.response.edit_message.call_args.kwargs['view'].pending_action)
+            repair.assert_not_called()
+            allowed['value']=False
+            await confirmation.handle_action(self.interaction(),'confirm_maintenance:tier6_repair')
+            repair.assert_not_called()
         asyncio.run(check())
 
     def test_admin_review_toggle_close_and_readonly_economy(self):

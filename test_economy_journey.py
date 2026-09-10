@@ -159,7 +159,7 @@ class JourneyTests(unittest.TestCase):
             self.fund(3)
             bot=SimpleNamespace(xbot_player_panel_builders={'economy':lambda uid:discord.ui.LayoutView()},xbot_mine_button_builder=lambda:discord.ui.Button(label='Mine'))
             def interaction(uid=None):return SimpleNamespace(user=SimpleNamespace(id=uid or self.uid),response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock(),defer=AsyncMock(),send_modal=AsyncMock()),edit_original_response=AsyncMock())
-            for page in ('recipes','detail','product','products','materials','areas','confirm','result'):
+            for page in ('activity','batch','recipes','detail','product','products','materials','areas','confirm','result'):
                 v=j.JourneyView(bot,self.db,self.uid,page=page,rid=self.rid,iid=self.iid,operation='craft')
                 v.to_components();self.assertLessEqual(v.total_children_count,40)
             v=j.JourneyView(bot,self.db,self.uid,rid=self.rid)
@@ -170,6 +170,61 @@ class JourneyTests(unittest.TestCase):
             await confirm.act(interaction(),('execute',));self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],1)
             button=next(x for x in detail.walk_children() if isinstance(x,j.Button));await button.callback(interaction(self.uid+1))
             self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],1)
+        asyncio.run(run())
+
+    def test_goal_persists_and_only_changes_preference(self):
+        before=self.cash()
+        self.assertEqual(j.selected_goal(self.db,self.uid),'craft')
+        for mode in j.GOALS:
+            j.set_goal(self.db,self.uid,mode)
+            with closing(sqlite3.connect(self.path)) as other:
+                other.row_factory=sqlite3.Row
+                self.assertEqual(j.selected_goal(other,self.uid),mode)
+            self.assertTrue(j.next_step(self.db,self.uid)[0])
+        self.assertEqual(self.cash(),before)
+        with self.assertRaises(ValueError):j.set_goal(self.db,self.uid,'invalid')
+
+    def test_live_capacity_queue_and_prices(self):
+        self.fund(20)
+        q=j.quote(self.db,self.uid,self.rid)
+        self.assertEqual(j.capacity(q),20)
+        self.db.execute('UPDATE players SET xc=? WHERE user_id=?',(q['cost']*3,self.uid));self.db.commit()
+        self.assertEqual(j.capacity(j.quote(self.db,self.uid,self.rid)),3)
+        self.assertTrue(tier6.start_production(self.db,self.uid,self.rid,2)[0])
+        self.assertEqual(j.activity(self.db,self.uid)['active'],1)
+        self.db.execute('UPDATE tier6_production_queue SET ready_at=0 WHERE user_id=?',(self.uid,));self.db.commit()
+        self.assertEqual(j.activity(self.db,self.uid)['ready'],1)
+        self.assertEqual(j.next_step(self.db,self.uid)[1]['page'],'activity')
+        tier6.claim_production(self.db,self.uid)
+        self.assertEqual(j.activity(self.db,self.uid)['products'],2)
+        j.set_goal(self.db,self.uid,'earn')
+        self.assertEqual(j.next_step(self.db,self.uid)[1]['page'],'products')
+
+    def test_goal_selector_max_review_and_stale_balance(self):
+        async def run():
+            self.fund(6)
+            bot=SimpleNamespace(xbot_player_panel_builders={})
+            def interaction(uid=None):return SimpleNamespace(user=SimpleNamespace(id=uid or self.uid),response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock(),defer=AsyncMock()),edit_original_response=AsyncMock())
+            v=j.JourneyView(bot,self.db,self.uid,page='activity')
+            selector=next(c for c in v.walk_children() if isinstance(c,j.GoalSelect))
+            selector._values=['war']
+            await selector.callback(interaction(self.uid+1));self.assertEqual(j.selected_goal(self.db,self.uid),'craft')
+            await selector.callback(interaction());self.assertEqual(j.selected_goal(self.db,self.uid),'war')
+            v=j.JourneyView(bot,self.db,self.uid,page='detail',rid=self.rid,iid=self.iid)
+            i=interaction();await v.act(i,('batch',));batch=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(batch.page,'batch')
+            i=interaction();await batch.act(i,('max','queue'));confirm=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(confirm.amount,6);self.assertEqual(j.activity(self.db,self.uid)['active'],0)
+            self.assertIn('After fee',str(confirm.to_components()))
+            self.db.execute('UPDATE players SET xc=0 WHERE user_id=?',(self.uid,));self.db.commit()
+            await confirm.act(interaction(),('execute',));self.assertEqual(j.activity(self.db,self.uid)['active'],0)
+            self.db.execute('UPDATE players SET xc=1000 WHERE user_id=?',(self.uid,));self.db.commit()
+            j.craft(self.db,self.uid,self.rid,2)
+            v=j.JourneyView(bot,self.db,self.uid,page='product',rid=self.rid,iid=self.iid)
+            i=interaction();await v.act(i,('max','sell'));confirm=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(confirm.amount,2);self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],2)
+            await confirm.act(interaction(),('execute',));await confirm.act(interaction(),('execute',))
+            self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],0)
         asyncio.run(run())
 
 

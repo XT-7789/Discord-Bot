@@ -174,6 +174,65 @@ def quotes(db,uid,material=None):
     return sorted(result,key=lambda q:(not q['craftable'],not q['recommended'],q['recipe']['name']))
 
 
+GOALS = {'craft': 'Craft for profit', 'earn': 'Earn XC', 'war': 'Prepare War support'}
+
+
+def selected_goal(db, uid):
+    row = db.execute("SELECT detail FROM economy_logs WHERE user_id=? AND action='journey_goal' ORDER BY id DESC LIMIT 1", (uid,)).fetchone()
+    return row[0] if row and row[0] in GOALS else 'craft'
+
+
+@atomic_action
+def set_goal(db, uid, value):
+    if value not in GOALS:
+        raise ValueError('Choose an available goal.')
+    audit(db, uid, 'journey_goal', value)
+
+
+def capacity(q):
+    """Batches affordable now; Max is a quote, never an automatic purchase."""
+    if not q['available']:
+        return 0
+    limits = [1000, *(max(0, i['owned']) // i['quantity'] for i in q['ingredients'])]
+    if q['cost']:
+        limits.append(max(0, q['wallet']) // q['cost'])
+    return min(limits)
+
+
+def activity(db, uid):
+    now = int(time.time())
+    queue = db.execute("SELECT COUNT(*) active, COALESCE(SUM(ready_at<=?),0) ready FROM tier6_production_queue WHERE user_id=? AND status='working'", (now, uid)).fetchone()
+    products = db.execute('''SELECT COALESCE(SUM(v.quantity),0) FROM inventories v JOIN items i ON i.id=v.item_id
+        WHERE v.user_id=? AND v.quantity>0 AND i.enabled=1 AND i.sellable=1 AND i.sell_price>0
+        AND EXISTS(SELECT 1 FROM recipes r WHERE r.output_item_id=i.id)''', (uid,)).fetchone()[0]
+    return dict(active=queue['active'], ready=queue['ready'], products=products)
+
+
+def next_step(db, uid):
+    mode = selected_goal(db, uid)
+    state = activity(db, uid)
+    if state['ready']:
+        return 'Collect finished production, then review your products.', dict(page='activity'), None
+    if mode == 'earn':
+        if state['products']:
+            return 'Sell a finished product for income.', dict(page='products'), None
+        materials = db.execute("SELECT 1 FROM inventories v JOIN items i ON i.id=v.item_id WHERE v.user_id=? AND v.quantity>0 AND i.enabled=1 AND i.effect='crafting_material' AND i.sellable=1 AND i.sell_price>0 LIMIT 1", (uid,)).fetchone()
+        return ('Review material sales. Crafting may earn more.', dict(page='materials'), None) if materials else ('Mine materials to earn XC. No War required.', dict(page='activity'), None)
+    if mode == 'war':
+        qs = [q for q in quotes(db, uid) if q['available'] and q['recipe']['effect'] in {'war_credits', 'capital_repair'}]
+        for q in qs:
+            iid = q['recipe']['output_item_id']
+            if use_reason(db, uid, iid) is None:
+                return 'Review your support item before using it. War is optional.', dict(page='product', rid=q['recipe']['id'], iid=iid), q
+        if qs:
+            q = qs[0]
+            return 'Prepare a support item. War Credits are not combat Supply.', dict(page='detail', rid=q['recipe']['id']), q
+        return 'No War-support recipe is available. You can change your goal.', dict(page='activity'), None
+    text, rid, page = goal(db, uid)
+    q = quote(db, uid, rid) if rid else None
+    return text, dict(page=page, rid=rid, iid=q['recipe']['output_item_id'] if q else None), q
+
+
 def goal(db,uid):
     qs=quotes(db,uid)
     r=next((q for q in qs if q['recipe']['name']=='Resource Pack' and q['recommended']),next((q for q in qs if q['recommended']),None))
@@ -223,7 +282,7 @@ class JourneyView(discord.ui.LayoutView):
         self.token=secrets.token_hex(16); self.used=False; self.expected=None
         self.box=discord.ui.Container(accent_colour=0x36CFC9)
         self.add_item(self.box)
-        self.text('-# ✦ X SYSTEM · ECONOMY\n# '+{'recipes':'WORKSHOP','detail':'CRAFT & EARN','product':'YOUR PRODUCT','materials':'SELL MATERIALS','areas':'FIND MATERIALS','confirm':'REVIEW','result':'COMPLETED'}.get(page,'ECONOMY'))
+        self.text('-# ✦ X SYSTEM · ECONOMY\n# '+{'activity':'MY ECONOMY','batch':'BATCH PRODUCTION','products':'YOUR PRODUCTS','recipes':'WORKSHOP','detail':'CRAFT & EARN','product':'YOUR PRODUCT','materials':'SELL MATERIALS','areas':'FIND MATERIALS','confirm':'REVIEW','result':'COMPLETED'}.get(page,'ECONOMY'))
         if notice: self.text(notice)
         try: self.build()
         except ValueError as e: self.text(str(e))
@@ -241,7 +300,19 @@ class JourneyView(discord.ui.LayoutView):
 
     def build(self):
         db,uid=self.db,self.uid
-        if self.page=='recipes':
+        if self.page=='activity':
+            state=activity(db,uid); mode=selected_goal(db,uid)
+            self.text(f"### Your goal · {GOALS[mode]}\nChoose your focus. No extra reward or automatic spending.")
+            self.box.add_item(discord.ui.ActionRow(GoalSelect(self)))
+            text,route,q=next_step(db,uid)
+            self.text('### Next step\n'+text)
+            if route['page']!='activity':self.box.add_item(discord.ui.ActionRow(Entry(self.bot,db,uid,'Continue',back=self,**route)))
+            ready=capacity(q) if q else 0
+            self.text(f"### Ready now\n**{state['ready']}** jobs to collect · **{state['active']}** jobs in queue\n**{state['products']}** sellable products · **{ready}** batches of the target recipe affordable")
+            if state['ready']:self.row(('Collect ready',('collect',)))
+            self.row(('Products',('products',)),('Production queue',('nav','production')))
+            self.row(('Workshop',('all',)),('Mines',('nav','mining')),('Refresh',('activity',)))
+        elif self.page=='recipes':
             qs=quotes(db,uid,self.material)
             self.text('Choose a recipe. Ready-to-craft options appear first. War support is optional.')
             options=[discord.SelectOption(label=q['recipe']['name'][:100],value=str(q['recipe']['id']),description=('Ready · ' if q['craftable'] else 'Needs materials / XC · ')+('Profit route' if q['recommended'] else 'Optional recipe'),default=q['recipe']['id']==self.rid) for q in qs[self.offset:self.offset+25]]
@@ -253,18 +324,30 @@ class JourneyView(discord.ui.LayoutView):
             q=quote(db,uid,self.rid);r=q['recipe'];self.iid=r['output_item_id']
             self.text(f"## {r['name']} → {r['output_quantity']}× {r['output_name']}\n"+'\n'.join(f"{i['name']}: **{i['owned']} / {i['quantity']}**" for i in q['ingredients']))
             self.text(f"Fee **{q['cost']} XC** · Wallet **{q['wallet']} XC**\nRaw material sale: **{q['materials'] if q['materials'] is not None else 'Not comparable'} XC**\nProduct sale: **{q['proceeds'] if q['proceeds'] is not None else 'Unavailable'} XC**\nExtra after fee: **{str(q['gain']) if q['gain'] is not None else 'Not comparable'} XC**\n"+('Profitable beginner route.' if q['recommended'] else 'Not recommended as a beginner profit route.'))
-            self.text(effect_text(r))
+            self.text(effect_text(r)+f"\n**Can make now: {capacity(q)} batches** (materials + XC).")
             if q['available']:
                 self.row(('Craft 1',('confirm','craft')),('Batch production',('batch',)),('Advanced craft',('nav','craft_advanced')))
             if q['missing']:self.row(('Find missing materials',('areas',)))
             if q['wallet']<q['cost']:self.row(('Sell Materials',('materials',)))
             if owned(db,uid,self.iid)['quantity']>0:self.row(('View product',('product',self.iid)))
+        elif self.page=='batch':
+            q=quote(db,uid,self.rid);maximum=capacity(q)
+            import tier6
+            state=activity(db,uid)
+            self.text(f"## {q['recipe']['name']}\nCan queue **{maximum} batches** from your materials and XC.\nQueue **{state['active']} / {tier6.setting(db,'tier6_production_queue_limit')}** · Ready **{state['ready']}**\nOne queue slot per order. Review total fees and resale before confirming.")
+            open_now=enabled(db,'tier6_production_enabled') and q['available'] and state['active']<tier6.setting(db,'tier6_production_queue_limit')
+            if open_now and maximum:
+                self.row(*[(str(n),('preset','queue',n)) for n in (1,5,10) if n<=maximum],('Max',('max','queue')))
+                self.row(('Choose quantity',('quantity','queue')))
+            else:self.text('Production is closed, the queue is full, or materials / XC are insufficient.')
+            self.row(('Production queue',('nav','production')),('Recipe details',('recipe',self.rid)))
         elif self.page in {'product','result'}:
             if self.iid:
                 i=owned(db,uid,self.iid)
                 self.text(f"## {i['name']} · Owned {i['quantity']}\n{effect_text(i)}")
                 buttons=[]
-                if i['enabled'] and i['quantity']>0 and i['sellable'] and i['sell_price']>0:buttons.append(('Sell Product',('confirm','sell')))
+                if i['enabled'] and i['quantity']>0 and i['sellable'] and i['sell_price']>0:
+                    buttons.extend((('Sell Product',('confirm','sell')),('Sell Max',('max','sell'))))
                 if i['enabled'] and i['effect'] in {'war_credits','capital_repair','xc_reward'}:
                     reason=use_reason(db,uid,self.iid)
                     if reason:self.text(reason)
@@ -297,6 +380,7 @@ class JourneyView(discord.ui.LayoutView):
             if self.operation in {'craft','queue'}:
                 q=quote(db,uid,self.rid,self.amount);self.expected=q['fingerprint']
                 self.text(f"{self.amount}× {q['recipe']['name']} · Fee {q['cost']} XC\n"+'\n'.join(f"{i['name']}: {i['quantity']*self.amount} needed / {i['owned']} owned" for i in q['ingredients']))
+                self.text(f"Output: **{q['recipe']['output_quantity']*self.amount}× {q['recipe']['output_name']}**\nEstimated resale: **{q['proceeds'] if q['proceeds'] is not None else 'Unavailable'} XC**\nAfter fee: **{q['proceeds']-q['cost'] if q['proceeds'] is not None else 'Unavailable'} XC**\nExtra vs raw sale: **{q['gain'] if q['gain'] is not None else 'Not comparable'} XC**")
                 if self.operation=='queue':self.text('Uses the existing production queue. Collect when ready.')
             else:
                 i=owned(db,uid,self.iid)
@@ -315,8 +399,14 @@ class JourneyView(discord.ui.LayoutView):
 
     async def act(self,i,action):
         key=action[0]
-        if key in {'batch','quantity'}:
-            await i.response.send_modal(Quantity(self,'queue' if key=='batch' else action[1]));return
+        if key=='quantity':
+            await i.response.send_modal(Quantity(self,action[1]));return
+        if key=='collect':
+            await i.response.defer()
+            import tier6
+            try:message=tier6.claim_production(self.db,self.uid)
+            except sqlite3.Error:message='Database busy or unavailable. Refresh to check production before retrying.'
+            await i.edit_original_response(view=self.next(page='activity',notice=message));return
         if key=='execute':
             if self.used:
                 await i.response.send_message('Already processed. Check your latest result.',ephemeral=True);return
@@ -339,7 +429,16 @@ class JourneyView(discord.ui.LayoutView):
             builder=getattr(self.bot,'xbot_player_panel_builders',{}).get(action[1])
             if builder is None:await i.response.send_message('This panel is unavailable.',ephemeral=True);return
             await i.response.edit_message(view=builder(self.uid));return
-        if key=='back':target=self.back or self.next(page='recipes',back=None)
+        if key in {'max','preset'}:
+            operation=action[1]
+            try:
+                maximum=min(1000,owned(self.db,self.uid,self.iid)['quantity']) if operation=='sell' else capacity(quote(self.db,self.uid,self.rid))
+                amount=maximum if key=='max' else action[2]
+                if not 1<=amount<=maximum:raise ValueError('No available quantity. Refresh your inventory and quote.')
+                target=self.next(page='confirm',operation=operation,amount=amount)
+            except ValueError as error:
+                await i.response.send_message(str(error),ephemeral=True);return
+        elif key=='back':target=self.back or self.next(page='recipes',back=None)
         elif key=='recipe':target=self.next(page='detail',rid=action[1],offset=0)
         elif key=='product':
             r=self.db.execute('SELECT id FROM recipes WHERE output_item_id=? ORDER BY enabled DESC,id LIMIT 1',(action[1],)).fetchone()
@@ -347,7 +446,7 @@ class JourneyView(discord.ui.LayoutView):
         elif key=='all':target=self.next(page='recipes',material=None,offset=0)
         elif key=='offset':target=self.next(offset=action[1],back=self.back)
         elif key=='confirm':target=self.next(page='confirm',operation=action[1],amount=1)
-        elif key in {'areas','materials'}:target=self.next(page=key,offset=0)
+        elif key in {'areas','materials','products','activity','batch'}:target=self.next(page=key,offset=0)
         elif key=='area':
             a=self.db.execute('SELECT * FROM mining_areas WHERE id=? AND enabled=1',(action[1],)).fetchone()
             p=self.db.execute('SELECT mining_level FROM players WHERE user_id=?',(self.uid,)).fetchone()
@@ -393,6 +492,18 @@ class Quantity(discord.ui.Modal):
         await i.response.edit_message(view=self.v.next(page='confirm',operation=self.operation,amount=n))
 
 
+class GoalSelect(discord.ui.Select):
+    def __init__(self,v):
+        self.v=v
+        super().__init__(placeholder='Choose your economy goal',options=[discord.SelectOption(label=label,value=key,default=selected_goal(v.db,v.uid)==key) for key,label in GOALS.items()])
+    async def callback(self,i):
+        if not await self.v.interaction_check(i):return
+        try:set_goal(self.v.db,self.v.uid,self.values[0])
+        except (ValueError,sqlite3.Error):
+            await i.response.send_message('Goal could not be saved. Please refresh and try again.',ephemeral=True);return
+        await i.response.edit_message(view=self.v.next(page='activity',back=self.v.back,notice='Goal saved. No assets were spent.'))
+
+
 class Entry(discord.ui.Button):
     def __init__(self,bot,db,uid,label='Craft',page='recipes',material=None,back=None,rid=None,iid=None):
         super().__init__(label=label,style=discord.ButtonStyle.primary)
@@ -403,6 +514,6 @@ class Entry(discord.ui.Button):
 
 
 def goal_block(bot,db,uid):
-    text,rid,page=goal(db,uid)
-    iid=quote(db,uid,rid)['recipe']['output_item_id'] if rid else None
-    return discord.ui.TextDisplay('### Your next step\n'+text), discord.ui.ActionRow(Entry(bot,db,uid,'Continue',page=page,rid=rid,iid=iid))
+    text,route,q=next_step(db,uid);state=activity(db,uid)
+    status=f"\n**{capacity(q) if q else 0}** target batches ready · **{state['ready']}** jobs to collect · **{state['products']}** sellable products"
+    return discord.ui.TextDisplay('### Your next step · '+GOALS[selected_goal(db,uid)]+'\n'+text+status), discord.ui.ActionRow(Entry(bot,db,uid,'Continue',**route),Entry(bot,db,uid,'Goals & Activity',page='activity'))

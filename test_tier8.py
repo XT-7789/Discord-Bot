@@ -196,6 +196,21 @@ class ResearchTests(unittest.TestCase):
                     all_view=i.edit_original_response.call_args.kwargs['view']
                     self.assertIn('Finance',str(all_view.to_components()))
                     self.assertIn('Casino',str(all_view.to_components()))
+                    # Follow the actual registered overview entry, including UI wrappers.
+                    import economy_journey
+                    journey_i=SimpleNamespace(user=SimpleNamespace(id=self.uid),message=None,
+                        response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock(),defer=AsyncMock()),
+                        edit_original_response=AsyncMock())
+                    await next(x for x in all_view.walk_children() if getattr(x,'label',None)=='Goals & Activity').callback(journey_i)
+                    activity=journey_i.response.edit_message.call_args.kwargs['view']
+                    activity.to_components();self.assertLessEqual(activity.total_children_count,40)
+                    selector=next(x for x in activity.walk_children() if isinstance(x,economy_journey.GoalSelect))
+                    selector._values=['earn'];await selector.callback(journey_i)
+                    self.assertEqual(economy_journey.selected_goal(module.db,self.uid),'earn')
+                    refreshed=bot.xbot_system_page_builder(self.uid,'economy')
+                    self.assertIn('Earn XC',str(refreshed.to_components()))
+                    self.assertLessEqual(refreshed.total_children_count,40)
+                    economy_journey.set_goal(module.db,self.uid,'craft')
                     for destination in ('economy','contracts','market_menu','production','stock'):
                         screen=bot.xbot_system_page_builder(self.uid,destination)
                         box=next(x for x in screen.children if isinstance(x,discord.ui.Container))

@@ -10,6 +10,24 @@ import applications
 import tester_feedback
 
 
+PAGES = {
+    'home': 'Control Centre', 'members': 'Members', 'assets': 'Player Assets',
+    'server': 'Server Tools', 'war_tools': 'Alliance War', 'applications': 'Applications',
+    'tester': 'Tester Reports', 'verification': 'Verification', 'codes': 'Reward Codes',
+    'economy': 'Economy Status', 'maintenance': 'Maintenance',
+}
+TOOL_GROUPS = {'members': 'Members', 'assets': 'Assets', 'server': 'Server', 'war_tools': 'War'}
+
+
+class AdminPageSelect(discord.ui.Select):
+    def __init__(self, page):
+        super().__init__(placeholder='Switch admin section…', row=0, options=[
+            discord.SelectOption(label=label, value=key, default=key == page) for key, label in PAGES.items()])
+
+    async def callback(self, interaction):
+        await self.view.handle_action(interaction, 'page:' + self.values[0])
+
+
 def _setting(db, key, default="0"):
     row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row else default
@@ -207,7 +225,7 @@ class RewardCodeModal(StaffModal, title="Create reward code"):
 
 
 class AdminPanel(discord.ui.LayoutView):
-    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice="", history=(), offsets=None):
+    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice="", history=(), offsets=None, pending_action=None):
         super().__init__(timeout=900)
         self.bot = bot
         self.db = db
@@ -221,10 +239,12 @@ class AdminPanel(discord.ui.LayoutView):
         self.notice = notice
         self.history = history
         self.offsets = dict(offsets or {})
+        self.pending_action = pending_action
+        self.maintenance_used = False
         self._controls = []
         self._build_controls()
         content = self.build_embed()
-        parts = [discord.ui.TextDisplay(f"-# ✦ X SYSTEM · ADMIN\n# {self.page.replace('_', ' ').upper()}\n{content.description or ''}")]
+        parts = [discord.ui.TextDisplay(f"-# ✦ X SYSTEM · ADMIN / {PAGES.get(self.page,self.page)}\n# {PAGES.get(self.page,self.page).upper()}\n{content.description or ''}")]
         for field in content.fields:
             parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f"### {field.name}\n{field.value}")))
         rows = {}
@@ -233,16 +253,20 @@ class AdminPanel(discord.ui.LayoutView):
             control.row = None
             rows.setdefault(row, []).append(control)
         if self.page == "home":
-            parts.extend((discord.ui.Separator(), discord.ui.TextDisplay("### ⚡ Management tools\nMembers · Assets · Announcements · War")))
-            parts.append(discord.ui.ActionRow(*rows.pop(2)))
-            navigation = rows.pop(0)
-            parts.extend((discord.ui.Separator(), discord.ui.TextDisplay("### 📋 Review & access")))
-            for start in (0, 2):
-                parts.append(discord.ui.ActionRow(*navigation[start:start + 2]))
-            parts.extend((discord.ui.Separator(), discord.ui.TextDisplay("### ⚙️ Status & maintenance"), discord.ui.ActionRow(*navigation[4:])))
+            sections = ((0,'📥 Needs attention','Review applications and Tester reports.'),
+                        (1,'🛡️ Manage players','Roles, inventories and account adjustments.'),
+                        (2,'📣 Manage server','Announcements, lottery and alliance wars.'),
+                        (3,'🔑 Access & rewards','Verification and redemption codes.'),
+                        (4,'⚙️ System','Read-only economy status and maintenance.'))
+            for row, title, hint in sections:
+                parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f'### {title}\n{hint}'),discord.ui.ActionRow(*rows.pop(row))))
+        elif 0 in rows:
+            parts.append(discord.ui.ActionRow(*rows.pop(0)))
+        if self.page == 'maintenance' and self.pending_action:
+            parts.append(discord.ui.TextDisplay('### Confirm maintenance\n'+{'backup_now':'Create a database backup. No player assets are changed.', 'tier5_repair':'Repair mission data. This can change stored records.', 'tier6_repair':'Repair economy data. This can change stored records.'}[self.pending_action]))
         for row in sorted(rows):
             controls = rows[row]
-            width = 3 if row == 0 else 2 if self.page == "maintenance" else 5
+            width = 2 if all(isinstance(c,discord.ui.Button) for c in controls) else 1
             for start in range(0, len(controls), width):
                 parts.append(discord.ui.ActionRow(*controls[start:start + width]))
         super().add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
@@ -265,6 +289,7 @@ class AdminPanel(discord.ui.LayoutView):
             "notice": "",
             "history": self.history,
             "offsets": self.offsets,
+            "pending_action": self.pending_action,
         }
         values.update(changes)
         return AdminPanel(self.bot, self.db, self.staff_check, self.owner_id, **values)
@@ -299,16 +324,13 @@ class AdminPanel(discord.ui.LayoutView):
         return rows[offset:offset + 25]
 
     def _build_controls(self):
-        navigation = (
-            ("applications", "Applications", "📋"),
-            ("tester", "Tester Reports", "🐛"),
-            ("verification", "Verification", "✅"),
-            ("codes", "Reward Codes", "🎟️"),
-            ("economy", "Economy Status", "💰"),
-            ("maintenance", "Maintenance", "🛠️"),
-        )
-        for page, label, emoji in navigation:
-            self.add_item(AdminActionButton(f"page:{page}", label, emoji=emoji, style=discord.ButtonStyle.primary if self.page == page else discord.ButtonStyle.secondary, row=0))
+        if self.page != 'home':
+            self.add_item(AdminPageSelect(self.page))
+        if self.page in TOOL_GROUPS:
+            import staff_tools
+            for name,(group,label) in staff_tools.TOOLS.items():
+                if group == TOOL_GROUPS[self.page]:
+                    control=staff_tools.ToolButton(self,name);control.row=1;self.add_item(control)
 
         if self.page == "applications":
             forms = self.application_forms()
@@ -320,14 +342,14 @@ class AdminPanel(discord.ui.LayoutView):
             if pending:
                 self.add_item(PendingApplicationSelect(self._page_rows(pending, "applications"), self.selected_application_id))
             self.add_item(AdminActionButton("post_application", "Post Selected Form Here", emoji="📨", style=discord.ButtonStyle.primary, row=3))
-            self.add_item(AdminActionButton("toggle_applications", "Open / Close", emoji="🔁", row=3))
+            self.add_item(AdminActionButton("toggle_applications", "Close Applications" if _setting(self.db,'applications_enabled','1')=='1' else "Open Applications", emoji="🔁", row=3))
             if self.selected_application():
                 self.add_item(AdminActionButton("review:accepted", "Accept", emoji="✅", style=discord.ButtonStyle.success, row=4))
                 self.add_item(AdminActionButton("review:hold", "Hold", emoji="⏸️", row=4))
                 self.add_item(AdminActionButton("review:denied", "Deny", emoji="❌", style=discord.ButtonStyle.danger, row=4))
         elif self.page == "verification":
             self.add_item(AdminActionButton("post_verification", "Post Verification Here", emoji="✅", style=discord.ButtonStyle.success, row=1))
-            self.add_item(AdminActionButton("toggle_verification", "Open / Close", emoji="🔁", row=1))
+            self.add_item(AdminActionButton("toggle_verification", "Close Verification" if _setting(self.db,'verification_enabled','1')=='1' else "Open Verification", emoji="🔁", row=1))
         elif self.page == "tester":
             reports = self.pending_feedback()
             if reports:
@@ -344,9 +366,17 @@ class AdminPanel(discord.ui.LayoutView):
             if self.selected_code():
                 self.add_item(AdminActionButton("toggle_code", "Enable / Disable", emoji="🔁", row=2))
         elif self.page == "home":
-            import staff_tools
-            self.add_item(staff_tools.ToolSelect(self))
+            pending=len(self.pending_applications());reports=len(self.pending_feedback())
+            for row,pages in ((0,('applications','tester')),(1,('members','assets')),(2,('server','war_tools')),(3,('verification','codes')),(4,('economy','maintenance'))):
+                for page in pages:
+                    count={'applications':pending,'tester':reports}.get(page)
+                    label=PAGES[page]+(f' · {count}' if count is not None else '')
+                    self.add_item(AdminActionButton('page:'+page,label,style=discord.ButtonStyle.primary if count else discord.ButtonStyle.secondary,row=row))
         elif self.page == "maintenance":
+            if self.pending_action:
+                self.add_item(AdminActionButton('confirm_maintenance:'+self.pending_action,'Confirm action',style=discord.ButtonStyle.danger if 'repair' in self.pending_action else discord.ButtonStyle.primary,row=1))
+                self.add_item(AdminActionButton('cancel_maintenance','Cancel',row=1))
+                return
             self.add_item(AdminActionButton("system_status", "System Status", emoji="📡", style=discord.ButtonStyle.primary, row=1))
             self.add_item(AdminActionButton("backup_now", "Create Backup", emoji="💾", style=discord.ButtonStyle.secondary, row=1))
             self.add_item(AdminActionButton("tier5_repair", "Repair Missions", emoji="🛠️", style=discord.ButtonStyle.secondary, row=1))
@@ -412,6 +442,13 @@ class AdminPanel(discord.ui.LayoutView):
             embed.description = f"**{pending}** applications · **{reports}** reports\n**{active_codes}** active codes · Verification **{verification}**"
         elif self.page == "maintenance":
             embed.description = "Check system health or create a backup.\nRepair buttons change stored data — use only when needed."
+        elif self.page in TOOL_GROUPS:
+            embed.description = {
+                'members':'Inspect a player or manage roles and activity level.',
+                'assets':'Select a player, review the amount, then confirm. No assets change on opening a tool.',
+                'server':'Prepare an announcement or review a lottery draw.',
+                'war_tools':'Review alliance targets before starting or ending a war.',
+            }[self.page] + '\n**1 Choose tool → 2 Fill details → 3 Review & confirm**'
         elif self.page == "applications":
             embed.description = f"Applications are **{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}**. Choose any open form to post, or review a pending submission."
             form = self.selected_form()
@@ -461,6 +498,20 @@ class AdminPanel(discord.ui.LayoutView):
     async def handle_action(self, interaction, action):
         if not await self.interaction_check(interaction):
             return
+        if action in {'backup_now','tier5_repair','tier6_repair'}:
+            await self._edit(interaction,self.clone(page='maintenance',pending_action=action))
+            return
+        if action == 'cancel_maintenance':
+            await self._edit(interaction,self.clone(pending_action=None))
+            return
+        if action.startswith('confirm_maintenance:'):
+            requested=action.split(':',1)[1]
+            if requested != self.pending_action or self.maintenance_used or requested not in {'backup_now','tier5_repair','tier6_repair'}:
+                await interaction.response.send_message('Open a fresh maintenance confirmation.',ephemeral=True)
+                return
+            self.maintenance_used=True
+            self.pending_action=None
+            action=requested
         if action.startswith("list:"):
             _, kind, direction = action.split(":")
             offsets = dict(self.offsets)
@@ -479,12 +530,14 @@ class AdminPanel(discord.ui.LayoutView):
             await self.refresh(interaction)
             return
         if action == "back":
-            replacement = self.clone(page=self.history[-1] if self.history else "home", history=self.history[:-1])
+            replacement = self.clone(page=self.history[-1] if self.history else "home", history=self.history[:-1],pending_action=None)
             await interaction.response.edit_message(embed=None, view=replacement)
             return
         if action.startswith("page:"):
             page = action.split(":", 1)[1]
-            replacement = self.clone(page=page, history=(*self.history, self.page)[-20:] if page != self.page else self.history)
+            if page not in PAGES:
+                await interaction.response.send_message('This admin section is unavailable.',ephemeral=True);return
+            replacement = self.clone(page=page, history=(*self.history, self.page)[-20:] if page != self.page else self.history,pending_action=None)
             await interaction.response.edit_message(embed=None, view=replacement)
             return
         if action == "system_status":

@@ -360,7 +360,9 @@ def register(bot, db, create_player):
                         if isinstance(component,discord.ui.ActionRow):
                             component.add_item(Nav(owner,'Refresh','economy'))
                         view.box.add_item(component)
-                    block('💳 Finance',funds(),[bot.xbot_finance_button_builder(owner,'deposit',key),bot.xbot_finance_button_builder(owner,'withdraw',key),*navs(('Finance','finance'))])
+                    # Keep the overview under Discord's 40-component limit while retaining every shortcut.
+                    view.box.add_item(discord.ui.TextDisplay('### 💳 Finance\n'+funds()))
+                    view.box.add_item(discord.ui.ActionRow(bot.xbot_finance_button_builder(owner,'deposit',key),bot.xbot_finance_button_builder(owner,'withdraw',key),*navs(('Finance','finance'))))
                     earning()
                     block('📊 Market','Items · Player trading · Stocks',navs(('Market','market_menu'),('Shop','shop'),('Stocks','stock')))
                     membership=casino.cooldown_info(db,member,'blackjack')['tier'] if member is not None and hasattr(member,'roles') else 'Check VIP Status'
