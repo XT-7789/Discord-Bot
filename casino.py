@@ -58,11 +58,13 @@ def initialise(db) -> None:
         cooldown_seconds INTEGER NOT NULL DEFAULT -1
     )""")
     for game in ("dice", "coinflip", "blackjack", "slot", "roulette", "scratch", "mines", "crash", "keno", "tower", "highlow", "balloonpop", "lottery", "spin"):
-        db.execute("INSERT OR IGNORE INTO casino_game_settings(game) VALUES(?)", (game,))
+        if game == "crash":
+            # Seed new installs only; existing 0/0 values deliberately inherit
+            # global limits and must survive a Dashboard or Bot restart.
+            db.execute("INSERT OR IGNORE INTO casino_game_settings(game,min_bet,max_bet,cooldown_seconds) VALUES('crash',10,500,30)")
+        else:
+            db.execute("INSERT OR IGNORE INTO casino_game_settings(game) VALUES(?)", (game,))
     db.execute("UPDATE casino_game_settings SET cooldown_seconds=45 WHERE cooldown_seconds<0")
-    # Crash is deliberately smaller and slower than the other entertainment
-    # games, so it cannot become a fast XC farming command.
-    db.execute("UPDATE casino_game_settings SET min_bet=10,max_bet=500,cooldown_seconds=30 WHERE game='crash' AND min_bet=0 AND max_bet=0")
     db.execute("""CREATE TABLE IF NOT EXISTS casino_cooldowns (
         user_id INTEGER NOT NULL, game TEXT NOT NULL, used_at INTEGER NOT NULL,
         PRIMARY KEY(user_id,game)

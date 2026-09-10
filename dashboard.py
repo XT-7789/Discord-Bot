@@ -29,6 +29,8 @@ import tier5
 import tier6
 import tier7
 import tier8
+import economy_settings_admin as settings_admin
+import dashboard_ui
 
 load_dotenv()
 DATABASE_PATH = Path(__file__).resolve().parent / "xwar.db"
@@ -220,7 +222,7 @@ def enforce_dashboard_access():
 def audit_dashboard_change(response):
     if (request.method in {"POST", "PUT", "PATCH", "DELETE"} and session.get("dashboard_role")
             and request.endpoint != "login" and not getattr(g, "skip_dashboard_audit", False)):
-        safe_form = {key: ("[redacted]" if any(word in key.lower() for word in ("password", "secret", "access_code")) else str(value)[:200]) for key, value in request.form.items()}
+        safe_form = {key: ("[redacted]" if any(word in key.lower() for word in ("password", "secret", "access_code", "token", "csrf")) else str(value)[:200]) for key, value in request.form.items()}
         db = None
         try:
             db = get_db()
@@ -237,6 +239,33 @@ def audit_dashboard_change(response):
             if db is not None:
                 db.close()
     return response
+
+
+def save_economy_form(allowed, destination, *, values=None, game=None, technology=None):
+    """Existing role checks run before this handler; never broaden access."""
+    g.skip_dashboard_audit = True
+    db = None
+    try:
+        db = get_db()
+        db.execute('PRAGMA busy_timeout = 3000')
+        actor = (str(session.get("discord_user_id", "local-owner")),
+                 session.get("discord_name", "Local Owner"), session.get("dashboard_role", "unknown"))
+        if technology is not None:
+            settings_admin.save_technology(db, technology, request.form, actor, request.endpoint)
+        elif game is not None:
+            settings_admin.save_game(db, game, request.form, actor, request.endpoint)
+        else:
+            payload = values if values is not None else {k: v for k, v in request.form.items() if k not in {"action", "csrf"}}
+            settings_admin.save(db, payload, allowed, actor, request.endpoint)
+        flash("Saved. See field notes for when changes apply. Existing Discord messages stay unchanged.", "success")
+    except (ValueError, KeyError) as error:
+        flash(str(error), "error")
+    except sqlite3.Error:
+        flash("Not saved. Database unavailable or busy. No settings were changed; please retry.", "error")
+    finally:
+        if db is not None:
+            db.close()
+    return redirect(url_for(destination))
 
 
 def record_dashboard_audit(db, action, detail, status_code=200):
@@ -377,7 +406,7 @@ FOOTER = r"""
   const mobileMenu = document.querySelector('#mobile-menu');
   const dashboardNav = document.querySelector('#dashboard-nav');
   if (mobileMenu && dashboardNav) {
-    const isPhoneMenu = () => window.matchMedia('(max-width:760px)').matches;
+    const isPhoneMenu = () => window.matchMedia('(max-width:1024px)').matches;
     if (!isPhoneMenu() && localStorage.getItem('xbot-dashboard-nav') === 'collapsed') {
       document.body.classList.add('nav-collapsed');
       mobileMenu.textContent = '☰';
@@ -527,7 +556,7 @@ def admin_page(title, body, **context):
                             '<section id="item-editor" class="panel"><h2>{{\'Edit\' if edit else \'Create New\'}} Item</h2>')
         body = body.replace("href=\"{{url_for('items',edit=i['id'])}}\"",
                             "href=\"{{url_for('items',edit=i['id'])}}#item-editor\"")
-    return render_template_string(HEADER + body + FOOTER, title=title, **context)
+    return render_template_string(dashboard_ui.header(HEADER) + body + FOOTER, title=title, setting_metadata={k: settings_admin.metadata(k) for k in settings_admin.KEYS}, **context)
 
 
 LOGIN = """
@@ -988,23 +1017,15 @@ def set_war_units(user_id):
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
 def settings():
-    db = get_db()
     if request.method == "POST":
-        for key in ("starting_xc", "work_cooldown", "collect_cooldown", "land_income_per_land", "work_crystal_chance", "mine_cooldown", "mine_crystal_chance", "exchange_xc_to_war_percent", "exchange_war_to_xc_percent", "daily_reward", "daily_cooldown", "transfer_min", "transfer_max", "transfer_tax_percent", "market_enabled", "market_fee_percent", "market_min_price", "market_max_price", "attack_cooldown", "capital_damage", "capital_reward_percent", "capital_repair_cost_per_hp", "fortified_defense_bonus", "aggressive_attack_bonus", "scout_cost", "scout_cooldown", "demobilize_refund_percent", "fortify_base_cost", "fortify_power_percent", "fortify_max_level", "casino_enabled", "casino_min_bet", "casino_max_bet", "lottery_ticket_price", "lottery_starting_prize", "lottery_prize_ratio"):
-            if key not in request.form:
-                continue
-            value = max(0, int(request.form[key]))
-            if key in ("work_crystal_chance", "mine_crystal_chance", "exchange_xc_to_war_percent", "exchange_war_to_xc_percent", "transfer_tax_percent", "market_fee_percent", "capital_reward_percent", "fortified_defense_bonus", "aggressive_attack_bonus", "demobilize_refund_percent", "fortify_power_percent"):
-                value = min(100, value)
-            db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
-        db.commit(); flash("Economy settings saved.")
+        return save_economy_form(settings_admin.GENERAL_KEYS, "settings")
+    db = get_db()
     values = {row['key']: row['value'] for row in db.execute("SELECT * FROM economy_settings")}
     db.close()
-    body = """<section class="panel"><h2>Economy Settings</h2><form class="fields" method="post"><div class="fields-grid"><label>Starting XC<input type="number" min="0" name="starting_xc" value="{{v['starting_xc']}}"></label><label>Work Cooldown (seconds)<input type="number" min="0" name="work_cooldown" value="{{v['work_cooldown']}}"></label><label>Land Collect Cooldown (seconds)<input type="number" min="0" name="collect_cooldown" value="{{v['collect_cooldown']}}"></label><label>War Credits per Land<input type="number" min="0" name="land_income_per_land" value="{{v['land_income_per_land']}}"></label><label>Work XCrystal Chance (%)<input type="number" min="0" max="100" name="work_crystal_chance" value="{{v['work_crystal_chance']}}"></label><label>Mine Cooldown (seconds)<input type="number" min="0" name="mine_cooldown" value="{{v['mine_cooldown']}}"></label><label>Mine XCrystal Chance (%)<input type="number" min="0" max="100" name="mine_crystal_chance" value="{{v['mine_crystal_chance']}}"></label></div><h2>Currency Exchange</h2><div class="notice">Only XC and War Credits can be exchanged. XCrystals are excluded. Percent means how much is received for every 100 sent.</div><div class="fields-grid"><label>XC → War Credits Rate (%)<input type="number" min="0" max="100" name="exchange_xc_to_war_percent" value="{{v['exchange_xc_to_war_percent']}}"></label><label>War Credits → XC Rate (%)<input type="number" min="0" max="100" name="exchange_war_to_xc_percent" value="{{v['exchange_war_to_xc_percent']}}"></label></div><h2>Casino Settings</h2><div class="fields-grid"><label>Casino Open<select name="casino_enabled"><option value="1" {% if v['casino_enabled']=='1' %}selected{% endif %}>Open</option><option value="0" {% if v['casino_enabled']!='1' %}selected{% endif %}>Closed</option></select></label><label>Minimum Casino Bet (XC)<input type="number" min="1" name="casino_min_bet" value="{{v['casino_min_bet']}}"></label><label>Maximum Casino Bet (XC)<input type="number" min="1" name="casino_max_bet" value="{{v['casino_max_bet']}}"></label><label>Lottery Ticket Price (XC)<input type="number" min="1" name="lottery_ticket_price" value="{{v['lottery_ticket_price']}}"></label><label>Lottery Starting Prize (XC)<input type="number" min="0" name="lottery_starting_prize" value="{{v['lottery_starting_prize']}}"></label><label>Lottery Prize Ratio (%)<input type="number" min="0" max="100" name="lottery_prize_ratio" value="{{v['lottery_prize_ratio']}}"></label></div><div class="actions"><button>Save Settings</button></div></form></section>"""
-    extra = """<h2>Social Economy & Market</h2><div class="fields-grid"><label>Daily Reward (XC)<input type="number" min="0" name="daily_reward" value="{{v['daily_reward']}}"></label><label>Daily Cooldown (seconds)<input type="number" min="0" name="daily_cooldown" value="{{v['daily_cooldown']}}"></label><label>Transfer Min (XC)<input type="number" min="0" name="transfer_min" value="{{v['transfer_min']}}"></label><label>Transfer Max (XC)<input type="number" min="0" name="transfer_max" value="{{v['transfer_max']}}"></label><label>Transfer Tax (%)<input type="number" min="0" max="100" name="transfer_tax_percent" value="{{v['transfer_tax_percent']}}"></label><label>Market Open<select name="market_enabled"><option value="1" {% if v['market_enabled']=='1' %}selected{% endif %}>Open</option><option value="0" {% if v['market_enabled']!='1' %}selected{% endif %}>Closed</option></select></label><label>Market Fee (%)<input type="number" min="0" max="100" name="market_fee_percent" value="{{v['market_fee_percent']}}"></label><label>Market Min Price<input type="number" min="1" name="market_min_price" value="{{v['market_min_price']}}"></label><label>Market Max Price<input type="number" min="1" name="market_max_price" value="{{v['market_max_price']}}"></label></div><h2>War Balance</h2><div class="fields-grid"><label>Attack Cooldown (seconds)<input type="number" min="0" name="attack_cooldown" value="{{v['attack_cooldown']}}"></label><label>Capital Damage per Victory<input type="number" min="1" max="100" name="capital_damage" value="{{v['capital_damage']}}"></label><label>Conquest Reward (%)<input type="number" min="0" max="100" name="capital_reward_percent" value="{{v['capital_reward_percent']}}"></label><label>Repair Cost / HP<input type="number" min="0" name="capital_repair_cost_per_hp" value="{{v['capital_repair_cost_per_hp']}}"></label><label>Fortified Defence Bonus (%)<input type="number" min="0" max="100" name="fortified_defense_bonus" value="{{v['fortified_defense_bonus']}}"></label><label>Aggressive Attack Bonus (%)<input type="number" min="0" max="100" name="aggressive_attack_bonus" value="{{v['aggressive_attack_bonus']}}"></label></div>"""
-    extra = extra.replace('</div>', '<label>Scout Cost (War Credits)<input type="number" min="0" name="scout_cost" value="{{v[\'scout_cost\']}}"></label><label>Scout Cooldown (seconds)<input type="number" min="0" name="scout_cooldown" value="{{v[\'scout_cooldown\']}}"></label><label>Demobilize Refund (%)<input type="number" min="0" max="100" name="demobilize_refund_percent" value="{{v[\'demobilize_refund_percent\']}}"></label><label>Fortification Base Cost<input type="number" min="0" name="fortify_base_cost" value="{{v[\'fortify_base_cost\']}}"></label><label>Defence per Fortification Level (%)<input type="number" min="0" max="100" name="fortify_power_percent" value="{{v[\'fortify_power_percent\']}}"></label><label>Maximum Fortification Level<input type="number" min="1" name="fortify_max_level" value="{{v[\'fortify_max_level\']}}"></label></div>', 1)
-    body = body.replace('<div class="actions"><button>Save Settings</button>', extra + '<div class="actions"><button>Save Settings</button>', 1)
-    return admin_page("Settings", body, v=values)
+    return admin_page("Settings", dashboard_ui.SETTINGS_PANEL, setting_values=values,
+                      setting_groups=dashboard_ui.setting_groups(settings_admin.GENERAL_KEYS),
+                      setting_action=url_for("settings"))
+
 
 
 @app.route("/applications", methods=["GET", "POST"])
@@ -1332,9 +1353,7 @@ def mining_control():
 @app.post("/mining/settings")
 @login_required
 def save_mining_settings():
-    db=get_db(); values={"mining_energy_enabled":int(request.form.get("mining_energy_enabled",1)),"mining_max_energy":max(1,int(request.form["mining_max_energy"])),"mining_energy_regen_amount":max(1,int(request.form["mining_energy_regen_amount"])),"mining_energy_regen_seconds":max(10,int(request.form["mining_energy_regen_seconds"])),"mining_starter_pickaxe_enabled":int(request.form.get("mining_starter_pickaxe_enabled",1)),"mining_collection_xc_reward":max(0,int(request.form.get("mining_collection_xc_reward",500))),"mining_collection_xcrystal_reward":max(0,int(request.form.get("mining_collection_xcrystal_reward",5)))}
-    for k,v in values.items(): db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(k,str(v)))
-    db.commit();db.close();flash("Mining settings saved.");return redirect(url_for("mining_control"))
+    return save_economy_form(settings_admin.MINING_KEYS, 'mining_control')
 
 
 @app.post("/mining/area/save")
@@ -1505,25 +1524,13 @@ def categories():
 @app.route("/casino", methods=["GET", "POST"])
 @login_required
 def casino_control():
-    db = get_db()
     if request.method == "POST":
         action = request.form.get("action", "toggle")
         if action == "save-game":
-            game = request.form.get("game", "")
-            db.execute("""UPDATE casino_game_settings SET enabled=?,min_bet=?,max_bet=?,cooldown_seconds=? WHERE game=?""",
-                (int(request.form.get("enabled", 0)), max(0, int(request.form.get("min_bet", 0))), max(0, int(request.form.get("max_bet", 0))), max(0, int(request.form.get("cooldown_seconds", 0))), game))
-            db.commit(); flash(f"/{game} Casino settings saved.")
-        elif action == "save-vip":
-            for key in ("casino_vip_daily_cost", "casino_vip_duration_seconds", "casino_vip_cooldown_percent", "server_svip_cooldown_percent", "casino_cooldown_seconds", "crash_daily_net_win_limit"):
-                current = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
-                value = max(0, int(request.form.get(key, current['value'] if current else 0)))
-                if key in {"casino_vip_cooldown_percent", "server_svip_cooldown_percent"}: value = min(95, value)
-                db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
-            db.commit(); flash("Casino VIP and standard cooldown settings saved.")
-        else:
-            enabled_value = "1" if request.form.get("casino_enabled") == "1" else "0"
-            db.execute("INSERT INTO economy_settings(key,value) VALUES('casino_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (enabled_value,))
-            db.commit(); flash("Casino is now open." if enabled_value == "1" else "Casino is now closed.")
+            return save_economy_form((), "casino_control", game=request.form.get("game", ""))
+        allowed = settings_admin.VIP_KEYS if action == "save-vip" else ("casino_enabled",)
+        return save_economy_form(allowed, "casino_control")
+    db = get_db()
     totals = db.execute("""SELECT COALESCE(SUM(games_played),0) games,COALESCE(SUM(total_wagered),0) wagered,
         COALESCE(SUM(total_won),0) paid,COUNT(*) players FROM casino_stats""").fetchone()
     leaders = db.execute("""SELECT s.*,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(s.user_id AS TEXT)) display_name FROM casino_stats s LEFT JOIN players p ON p.user_id=s.user_id ORDER BY s.total_won-s.total_wagered DESC,s.biggest_payout DESC LIMIT 10""").fetchall()
@@ -1534,7 +1541,7 @@ def casino_control():
     game_rows = db.execute("SELECT * FROM casino_game_settings ORDER BY game").fetchall()
     casino_values = {row['key']: row['value'] for row in db.execute("SELECT key,value FROM economy_settings WHERE key IN ('casino_cooldown_seconds','casino_vip_daily_cost','casino_vip_duration_seconds','casino_vip_cooldown_percent','server_svip_cooldown_percent','crash_daily_net_win_limit')")}
     db.close()
-    body = """<div class="grid"><div class="card"><small>Casino Games</small><strong>{{totals['games']}}</strong></div><div class="card"><small>XC Wagered</small><strong>{{totals['wagered']}}</strong></div><div class="card"><small>XC Paid Out</small><strong>{{totals['paid']}}</strong></div><div class="card"><small>Casino Players</small><strong>{{totals['players']}}</strong></div></div><section class="panel"><h2>💎 Casino VIP & Cooldowns</h2><div class="notice">Casino VIP costs XC for a temporary Discord Role and shorter Casino command cooldowns. It does not change game odds.</div><form class="fields" method="post"><input type="hidden" name="action" value="save-vip"><div class="fields-grid"><label>Standard Game Cooldown (seconds)<input type="number" min="0" name="casino_cooldown_seconds" value="{{casino_values.get('casino_cooldown_seconds','45')}}"></label><label>Casino VIP Price (XC)<input type="number" min="0" name="casino_vip_daily_cost" value="{{casino_values.get('casino_vip_daily_cost','100')}}"></label><label>VIP Duration (seconds)<input type="number" min="60" name="casino_vip_duration_seconds" value="{{casino_values.get('casino_vip_duration_seconds','86400')}}"></label><label>VIP Cooldown Reduction %<input type="number" min="0" max="95" name="casino_vip_cooldown_percent" value="{{casino_values.get('casino_vip_cooldown_percent','50')}}"></label></div><button>Save Casino VIP</button></form></section><section class="panel"><h2>🎰 Individual Game Control</h2><div class="notice">Set 0 for a game minimum or maximum bet to inherit the global Casino limit. Set a game's cooldown to 0 for no cooldown; otherwise it uses that game's own number of seconds.</div><div class="library">{% for game in games %}<article class="library-card"><h3>🎲 /{{game['game']}}</h3><form class="fields" method="post"><input type="hidden" name="action" value="save-game"><input type="hidden" name="game" value="{{game['game']}}"><label>Status<select name="enabled"><option value="1" {% if game['enabled'] %}selected{% endif %}>Open</option><option value="0" {% if not game['enabled'] %}selected{% endif %}>Closed</option></select></label><div class="fields-grid"><label>Min Bet (0 = global)<input type="number" min="0" name="min_bet" value="{{game['min_bet']}}"></label><label>Max Bet (0 = global)<input type="number" min="0" name="max_bet" value="{{game['max_bet']}}"></label><label>Cooldown Seconds (0 = none)<input type="number" min="0" name="cooldown_seconds" value="{{game['cooldown_seconds']}}"></label></div><button>Save /{{game['game']}}</button></form></article>{% endfor %}</div></section><section class="panel"><h2>Active Lottery</h2><div class="pad">{% if round %}<b>Round #{{round['id']}}</b><br>Prize pool: <b>{{round['prize_pool']}} XC</b><br>Tickets entered: <b>{{tickets}}</b><p class="muted">Use <code>/lottery_draw</code> in Discord as a server administrator to draw this round.</p>{% else %}<span class="muted">The first /lottery command creates a round.</span>{% endif %}</div></section><section class="panel"><h2>Casino Leaderboard</h2><table><tr><th>Player</th><th>Games</th><th>Wagered</th><th>Paid Out</th><th>Net</th><th>Biggest Payout</th></tr>{% for r in leaders %}<tr><td><b>{{r['display_name']}}</b><br><span class="muted">{{r['user_id']}}</span></td><td>{{r['games_played']}}</td><td>{{r['total_won']}} XC</td><td>{{r['total_won']}} XC</td><td>{{r['total_won']-r['total_wagered']}} XC</td><td>{{r['biggest_payout']}} XC</td></tr>{% else %}<tr><td colspan="6">No casino activity yet.</td></tr>{% endfor %}</table></section><section class="panel"><h2>Recent Casino Activity</h2><table><tr><th>User</th><th>Game</th><th>Detail</th></tr>{% for r in activity %}<tr><td>{{r['display_name']}}</td><td>{{r['action']}}</td><td>{{r['detail']}}</td></tr>{% else %}<tr><td colspan="3">No activity yet.</td></tr>{% endfor %}</table></section>"""
+    body = """<div class="grid"><div class="card"><small>Casino Games</small><strong>{{totals['games']}}</strong></div><div class="card"><small>XC Wagered</small><strong>{{totals['wagered']}}</strong></div><div class="card"><small>XC Paid Out</small><strong>{{totals['paid']}}</strong></div><div class="card"><small>Casino Players</small><strong>{{totals['players']}}</strong></div></div><section class="panel"><h2>💎 Casino VIP & Cooldowns</h2><div class="notice">Casino VIP costs XC for a temporary Discord Role and shorter Casino command cooldowns. It does not change game odds.</div><form class="fields" method="post"><input type="hidden" name="action" value="save-vip"><div class="fields-grid"><label>Standard Game Cooldown (seconds)<input type="number" min="0" name="casino_cooldown_seconds" value="{{casino_values.get('casino_cooldown_seconds','45')}}"></label><label>Casino VIP Price (XC)<input type="number" min="0" name="casino_vip_daily_cost" value="{{casino_values.get('casino_vip_daily_cost','100')}}"></label><label>VIP Duration (seconds)<input type="number" min="60" name="casino_vip_duration_seconds" value="{{casino_values.get('casino_vip_duration_seconds','86400')}}"></label><label>VIP Cooldown Reduction %<input type="number" min="0" max="95" name="casino_vip_cooldown_percent" value="{{casino_values.get('casino_vip_cooldown_percent','50')}}"></label></div><button>Save Casino VIP</button></form></section><section class="panel"><h2>🎰 Individual Game Control</h2><div class="notice">Set 0 for a game minimum or maximum bet to inherit the global Casino limit. Set a game's cooldown to 0 for no cooldown; otherwise it uses that game's own number of seconds.</div><div class="library">{% for game in games %}<article class="library-card"><h3>🎲 /{{game['game']}}</h3><form class="fields" method="post"><input type="hidden" name="action" value="save-game"><input type="hidden" name="game" value="{{game['game']}}"><label>Status<select name="enabled"><option value="1" {% if game['enabled'] %}selected{% endif %}>Open</option><option value="0" {% if not game['enabled'] %}selected{% endif %}>Closed</option></select></label><div class="fields-grid"><label>Min Bet (0 = global)<input type="number" min="0" name="min_bet" value="{{game['min_bet']}}"></label><label>Max Bet (0 = global)<input type="number" min="0" name="max_bet" value="{{game['max_bet']}}"></label><label>Cooldown Seconds (0 = none)<input type="number" min="0" name="cooldown_seconds" value="{{game['cooldown_seconds']}}"><small>Seconds · 0 or more. This game only; 0 = no cooldown.</small></label></div><button>Save /{{game['game']}}</button></form></article>{% endfor %}</div></section><section class="panel"><h2>Active Lottery</h2><div class="pad">{% if round %}<b>Round #{{round['id']}}</b><br>Prize pool: <b>{{round['prize_pool']}} XC</b><br>Tickets entered: <b>{{tickets}}</b><p class="muted">Use <code>/lottery_draw</code> in Discord as a server administrator to draw this round.</p>{% else %}<span class="muted">The first /lottery command creates a round.</span>{% endif %}</div></section><section class="panel"><h2>Casino Leaderboard</h2><table><tr><th>Player</th><th>Games</th><th>Wagered</th><th>Paid Out</th><th>Net</th><th>Biggest Payout</th></tr>{% for r in leaders %}<tr><td><b>{{r['display_name']}}</b><br><span class="muted">{{r['user_id']}}</span></td><td>{{r['games_played']}}</td><td>{{r['total_won']}} XC</td><td>{{r['total_won']}} XC</td><td>{{r['total_won']-r['total_wagered']}} XC</td><td>{{r['biggest_payout']}} XC</td></tr>{% else %}<tr><td colspan="6">No casino activity yet.</td></tr>{% endfor %}</table></section><section class="panel"><h2>Recent Casino Activity</h2><table><tr><th>User</th><th>Game</th><th>Detail</th></tr>{% for r in activity %}<tr><td>{{r['display_name']}}</td><td>{{r['action']}}</td><td>{{r['detail']}}</td></tr>{% else %}<tr><td colspan="3">No activity yet.</td></tr>{% endfor %}</table></section>"""
     control = """<section class="panel"><h2>Casino Master Control</h2><form class="fields" method="post"><input type="hidden" name="casino_enabled" value="{{0 if enabled=='1' else 1}}"><p class="{{'ok' if enabled=='1' else 'bad'}}">Casino is currently {{'OPEN' if enabled=='1' else 'CLOSED'}}.</p><div class="actions"><button class="{{'danger' if enabled=='1' else 'teal'}}">{{'Close Casino' if enabled=='1' else 'Open Casino'}}</button></div></form></section>"""
     svip = """<section class="panel"><h2>🪙 Server Very Important Person (SVIP)</h2><div class="notice">SVIP uses the permanent Discord role <code>Server Very Important Person (SVIP)</code>. It is the top Casino VIP and replaces the paid Casino VIP benefit; the two reductions never stack.</div><form class="fields" method="post"><input type="hidden" name="action" value="save-vip"><div class="fields-grid"><label>SVIP Casino Cooldown Reduction %<input type="number" min="0" max="95" name="server_svip_cooldown_percent" value="{{casino_values.get('server_svip_cooldown_percent','75')}}"></label></div><button>Save SVIP Benefit</button></form></section>"""
     body = control + svip + body
@@ -1547,11 +1554,9 @@ def casino_control():
 @app.route("/market", methods=["GET", "POST"])
 @login_required
 def market_control():
-    db = get_db()
     if request.method == "POST":
-        enabled_value = "1" if request.form.get("market_enabled") == "1" else "0"
-        db.execute("INSERT INTO economy_settings(key,value) VALUES('market_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (enabled_value,))
-        db.commit(); flash("Market is now open." if enabled_value == "1" else "Market is now closed.")
+        return save_economy_form(("market_enabled",), "market_control")
+    db = get_db()
     rows = db.execute("""SELECT l.*,i.name item_name,i.emoji,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(l.seller_id AS TEXT)) seller_name
         FROM market_listings l JOIN items i ON i.id=l.item_id LEFT JOIN players p ON p.user_id=l.seller_id
         ORDER BY l.active DESC,l.id DESC LIMIT 200""").fetchall()
@@ -1631,30 +1636,7 @@ def tier6_economy_control():
       </div>
     </div></section>
 
-    <section class="panel"><h2>⚙️ Master Settings</h2><form class="fields" method="post" action="{{url_for('tier6_save_settings')}}"><div class="fields-grid">
-      <label>Tier 6 Economy<select name="tier6_economy_enabled"><option value="1" {% if settings.get('tier6_economy_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_economy_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
-      <label>Daily Reward (XC)<input type="number" min="0" name="daily_reward" value="{{settings.get('daily_reward','50')}}"></label>
-      <label>Daily Cooldown Seconds<input type="number" min="60" name="daily_cooldown" value="{{settings.get('daily_cooldown','86400')}}"></label>
-      <label>Transfer Tax %<input type="number" min="0" max="100" name="transfer_tax_percent" value="{{settings.get('transfer_tax_percent','0')}}"></label>
-      <label>Contracts<select name="tier6_contracts_enabled"><option value="1" {% if settings.get('tier6_contracts_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_contracts_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
-      <label>Production Queue<select name="tier6_production_enabled"><option value="1" {% if settings.get('tier6_production_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_production_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
-      <label>Seconds per Production Batch<input type="number" min="30" name="tier6_production_seconds_per_item" value="{{settings.get('tier6_production_seconds_per_item','300')}}"></label>
-      <label>Queue Slots per Player<input type="number" min="1" max="25" name="tier6_production_queue_limit" value="{{settings.get('tier6_production_queue_limit','5')}}"></label>
-      <label>Industrial Speed per Level %<input type="number" min="0" max="100" name="tier6_industrial_speed_percent" value="{{settings.get('tier6_industrial_speed_percent','5')}}"></label>
-      <label>Industrial Speed Cap %<input type="number" min="0" max="95" name="tier6_industrial_speed_cap_percent" value="{{settings.get('tier6_industrial_speed_cap_percent','50')}}"></label>
-      <label>Player Market<select name="market_enabled"><option value="1" {% if settings.get('market_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('market_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
-      <label>Market Fee %<input type="number" min="0" max="100" name="market_fee_percent" value="{{settings.get('market_fee_percent','5')}}"></label>
-      <label>Market Minimum Price<input type="number" min="1" name="market_min_price" value="{{settings.get('market_min_price','1')}}"></label>
-      <label>Market Maximum Price<input type="number" min="1" name="market_max_price" value="{{settings.get('market_max_price','1000000')}}"></label>
-      <label>Listing Expiry Days<input type="number" min="1" max="365" name="tier6_market_expiry_days" value="{{settings.get('tier6_market_expiry_days','7')}}"></label>
-      <label>Max Listings per Player<input type="number" min="1" max="100" name="tier6_market_max_listings" value="{{settings.get('tier6_market_max_listings','20')}}"></label>
-      <label>Stock Market<select name="tier6_stock_enabled"><option value="1" {% if settings.get('tier6_stock_enabled')=='1' %}selected{% endif %}>Open</option><option value="0" {% if settings.get('tier6_stock_enabled')=='0' %}selected{% endif %}>Closed</option></select></label>
-      <label>Stock Trading Fee %<input type="number" min="0" max="100" name="tier6_stock_fee_percent" value="{{settings.get('tier6_stock_fee_percent','2')}}"></label>
-      <label>Price Update Seconds<input type="number" min="60" name="tier6_stock_update_seconds" value="{{settings.get('tier6_stock_update_seconds','3600')}}"></label>
-      <label>Maximum Price Change %<input type="number" min="1" max="50" name="tier6_stock_max_change_percent" value="{{settings.get('tier6_stock_max_change_percent','12')}}"></label>
-      <label>Holding Limit per Company<input type="number" min="1" name="tier6_stock_holding_limit" value="{{settings.get('tier6_stock_holding_limit','100000')}}"></label>
-      <label>Player Trade Price Impact<input type="number" min="0" max="100" name="tier6_stock_price_impact" value="{{settings.get('tier6_stock_price_impact','20')}}"></label>
-    </div><div class="actions"><button>Save All Economy Settings</button></div></form></section>
+    """ + dashboard_ui.SETTINGS_PANEL + """
 
     <section class="panel"><h2>🔗 Detailed Economy Editors</h2><div class="library">
       <a class="library-card" href="{{url_for('mining_control')}}"><h3>⛏️ Mining</h3><p>Areas, energy, drops, tools, probabilities and yield.</p></a>
@@ -1712,25 +1694,15 @@ def tier6_economy_control():
     """
     return admin_page("Tier 6 Economy", body, settings=settings, totals=totals, stock_value=stock_value,
                       companies=companies, contracts=contracts, items=items, recent_trades=recent_trades,
-                      market_trades=market_trades, production=production, activity=activity, health=health)
+                      market_trades=market_trades, production=production, activity=activity, health=health,
+                      setting_values=settings, setting_groups=dashboard_ui.setting_groups(settings_admin.TIER6_KEYS),
+                      setting_action=url_for("tier6_save_settings"))
 
 
 @app.post("/tier6-economy/settings")
 @login_required
 def tier6_save_settings():
-    allowed = set(tier6.DEFAULTS) | {"daily_reward", "daily_cooldown", "transfer_tax_percent", "market_enabled", "market_fee_percent", "market_min_price", "market_max_price"}
-    db = get_db()
-    for key in allowed:
-        if key not in request.form:
-            continue
-        value = int(request.form[key])
-        if "percent" in key or key == "tier6_stock_price_impact":
-            value = max(0, min(100, value))
-        else:
-            value = max(0, value)
-        db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
-    db.commit(); db.close(); flash("Tier 6 Economy settings saved.")
-    return redirect(url_for("tier6_economy_control"))
+    return save_economy_form(settings_admin.TIER6_KEYS, "tier6_economy_control")
 
 
 @app.post("/tier6-economy/company/save")
@@ -2992,10 +2964,12 @@ def save_role_offer():
 @app.post("/system/<key>/toggle")
 @login_required
 def toggle_system(key):
-    allowed={"casino_enabled","market_enabled","auction_enabled","recipes_enabled","bills_enabled","income_enabled","role_shop_enabled","economy_shop_enabled"}
+    allowed=set(settings_admin.TOGGLE_KEYS)
     if key not in allowed: return "Invalid system",400
-    value="1" if request.form.get("enabled")=="1" else "0"; db=get_db(); db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(key,value)); db.commit(); db.close(); flash(f"{key.replace('_enabled','').replace('_',' ').title()} {'opened' if value=='1' else 'closed'}.")
-    return redirect(url_for(request.form.get("return_to","home")))
+    destination = request.form.get('return_to', 'home')
+    if destination not in {'home','settings','casino_control','market_control','auction_control','recipes_control','finance_control','role_shop_control','item_shop_control'}:
+        destination = 'home'
+    return save_economy_form((key,), destination, values={key: request.form.get('enabled', '')})
 
 
 @app.route("/command-access", methods=["GET","POST"])
@@ -3106,36 +3080,15 @@ HEADER = HEADER.replace('Tier 7 ·', 'Tier 8 ·').replace('</nav>', '<a href="{{
 def research_control():
     if session.get('dashboard_role') not in {'owner','admin','council'}:
         abort(403)
+    if request.method == 'POST':
+        if not hmac.compare_digest(str(session.get('research_csrf','')), request.form.get('csrf','')) or not session.get('research_csrf'):
+            abort(403)
+        if request.form.get('action') == 'settings':
+            return save_economy_form(settings_admin.RESEARCH_KEYS, "research_control",
+                values={"tier8_enabled": request.form.get("enabled", ""), "tier8_queue_limit": request.form.get("queue_limit", "")})
+        return save_economy_form((), "research_control", technology=request.form.get("code", ""))
     db = get_db()
     try:
-        if request.method == 'POST':
-            if not hmac.compare_digest(str(session.get('research_csrf','')), request.form.get('csrf','')) or not session.get('research_csrf'):
-                abort(403)
-            try:
-                if request.form.get('action') == 'settings':
-                    switch = int(request.form['enabled'])
-                    limit = int(request.form['queue_limit'])
-                    if switch not in (0,1) or not 1 <= limit <= 6:
-                        raise ValueError('Invalid research settings.')
-                    db.executemany('UPDATE economy_settings SET value=? WHERE key=?',[(str(switch),'tier8_enabled'),(str(limit),'tier8_queue_limit')])
-                else:
-                    code = request.form['code']
-                    spec = next((t for t in tier8.TECHS if t[0] == code), None)
-                    if spec is None:
-                        raise ValueError('Unknown research project.')
-                    values = {key:int(request.form[key]) for key in ('max_level','base_cost','seconds','bonus_per_level','bonus_cap','enabled')}
-                    limits = {'max_level':(1,10),'base_cost':(0,1000000),'seconds':(0,86400),
-                              'bonus_per_level':(0,spec[5]),'bonus_cap':(0,spec[5]),'enabled':(0,1)}
-                    if any(not limits[k][0] <= v <= limits[k][1] for k,v in values.items()):
-                        raise ValueError('A value is outside the allowed range.')
-                    db.execute('''UPDATE tier8_technologies SET max_level=?,base_cost=?,seconds=?,
-                        bonus_per_level=?,bonus_cap=?,enabled=? WHERE code=?''', (*values.values(),code))
-                db.commit()
-                flash('Research settings saved. Existing queue costs and finish times are preserved.')
-            except (ValueError,KeyError) as e:
-                db.rollback()
-                flash(str(e))
-            return redirect(url_for('research_control'))
         session.setdefault('research_csrf', secrets.token_urlsafe(24))
         rows = db.execute('SELECT * FROM tier8_technologies ORDER BY branch,code').fetchall()
         jobs = db.execute('''SELECT j.*,p.nation_name,t.name FROM tier8_research_jobs j
@@ -3149,10 +3102,10 @@ def research_control():
         <section class="panel"><h2>Technology balance</h2><div class="library">{% for r in rows %}<article class="library-card"><h3>{{r.name}}</h3><p>{{r.description}}</p>
         <form method="post" class="fields"><input type="hidden" name="csrf" value="{{session.research_csrf}}"><input type="hidden" name="code" value="{{r.code}}">
         {% for key,label in [('max_level','Maximum level'),('base_cost','Base XC cost'),('seconds','Base duration (seconds)'),('bonus_per_level','Bonus per level (%)'),('bonus_cap','Maximum benefit (%)'),('enabled','Enabled (0/1)')] %}
-        <label>{{label}}<input type="number" name="{{key}}" min="0" value="{{r[key]}}" required></label>{% endfor %}<button>Save technology</button></form></article>{% endfor %}</div></section>
+        <label>{{label}}<input type="number" name="{{key}}" min="{{technology_limits(r.code)[key][0]}}" max="{{technology_limits(r.code)[key][1]}}" value="{{r[key]}}" required><small class="setting-hint">{{technology_limits(r.code)[key][0]}}–{{technology_limits(r.code)[key][1]}} · {{r.name}}. Existing order costs and times stay unchanged.</small></label>{% endfor %}<button>Save technology</button></form></article>{% endfor %}</div></section>
         <section class="panel"><h2>Recent research orders</h2><table><tr><th>Nation</th><th>Research</th><th>Paid XC</th><th>Status</th><th>Ready</th></tr>
         {% for j in jobs %}<tr><td>{{j.nation_name}}</td><td>{{j.name}} · Lv {{j.level}}</td><td>{{j.paid}}</td><td>{{'active benefit' if j.status == 'queued' and j.ready_at <= now else j.status}}</td><td>{{j.ready_at|timestamp}}</td></tr>{% endfor %}</table></section>'''
-        return admin_page('Tier 8 Research', body, rows=rows, jobs=jobs, settings=settings, now=int(time.time()))
+        return admin_page('Tier 8 Research', body, rows=rows, jobs=jobs, settings=settings, now=int(time.time()), technology_limits=settings_admin.technology_limits)
     finally:
         db.close()
 

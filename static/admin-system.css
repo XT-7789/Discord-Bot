@@ -1,0 +1,34 @@
+:root{color-scheme:dark;--accent:#36cfc9}
+.panel h2::before{background:var(--accent)}
+body{background:#10151c;color:#e8eef4;font-size:1rem;line-height:1.55}
+header{background:#151d26;border-bottom:1px solid #31434c}
+header h1{font-size:1.35rem;letter-spacing:.12em;color:#65e0d8}
+.page-heading{margin:0 0 1.5rem;border-left:4px solid var(--accent);padding:.35rem 1.15rem}
+.page-heading span{color:#9aaeba;font-size:.875rem;letter-spacing:.14em}
+.page-heading h1{font-size:2rem;margin:.1rem 0;font-weight:750}
+nav .nav-group{border-bottom:1px solid #30404b;padding:.65rem 0}
+nav .nav-group h2{font-size:.875rem;text-transform:uppercase;letter-spacing:.1em;color:#9cb4c0;margin:.25rem .75rem}
+nav .nav-group a{display:block;font-size:1rem;line-height:1.5;padding:.65rem .8rem}
+nav a.active{border-left:3px solid var(--accent);background:#193b40;color:#9af8ed}
+.panel,.card,.library-card{background:#19222b;border-color:#354650;border-radius:12px}
+.panel h2{font-size:1.35rem;color:#eef6f8}.fields label{font-size:1rem;line-height:1.5}
+input,select,textarea,button,.btn{font-size:1rem!important;min-height:44px;max-width:100%;box-sizing:border-box}
+input,select,textarea{background:#101820;border:1px solid #4a616e;color:#f1f6fa}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #67e8dd;outline-offset:3px}
+.setting-group{border:1px solid #3a515e;border-radius:10px;padding:1rem;margin:1rem 0;min-width:0}
+.setting-group legend{padding:0 .6rem;color:#79e4d7;font-size:1.2rem;font-weight:700}
+.setting-hint{display:block;font-size:.875rem;color:#a9c0cb;line-height:1.5;margin-top:.35rem}
+.form-state{font-size:.95rem;padding:.6rem .8rem;border-left:3px solid #5a7180;margin-bottom:.75rem;color:#b7cbd4}
+.form-state.dirty{border-color:#f4c774;color:#f4c774}
+.flash.success{border-left:4px solid #46d6ac;background:#153a32}
+.flash.error{border-left:4px solid #ff8b99;background:#40232c}
+.flash{position:sticky;top:100px;z-index:110;box-shadow:0 6px 18px #0005}
+.role-multi-control{border:1px solid #4a616e;box-shadow:none;background:#101820}
+.role-chip{background:#214d50;border:1px solid #4b8c89;box-shadow:none}
+.role-choice.selected{background:#214d50;color:#a0f0e5}
+.role-multi-menu{border:1px solid #4a616e;box-shadow:0 8px 24px #0006}
+@media(max-width:1024px){.flash{top:78px}}
+.fields-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:1.15rem}
+button.mobile-menu{width:auto;min-width:48px;font-size:.9rem!important;white-space:nowrap}
+main{min-width:0}.panel{overflow-x:auto}label{min-width:0}small{font-size:.875rem}
+@media(max-width:700px){main{padding:1rem!important}.page-heading h1{font-size:1.6rem}.fields-grid{grid-template-columns:1fr}.setting-group{padding:.75rem}.panel{padding:.8rem}.version{font-size:.875rem}header h1{font-size:1.1rem}nav.mobile-open{max-height:80vh;overflow-y:auto}}

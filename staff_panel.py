@@ -47,6 +47,8 @@ class PendingApplicationSelect(discord.ui.Select):
         super().__init__(placeholder="Choose a pending application…", options=options, row=2)
 
     async def callback(self, interaction: discord.Interaction):
+        if not await self.view.interaction_check(interaction):
+            return
         self.view.selected_application_id = int(self.values[0])
         await self.view.refresh(interaction)
 
@@ -65,6 +67,8 @@ class ApplicationFormSelect(discord.ui.Select):
         super().__init__(placeholder="Choose an application form to post…", options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction):
+        if not await self.view.interaction_check(interaction):
+            return
         self.view.selected_form_id = int(self.values[0])
         await self.view.refresh(interaction)
 
@@ -83,6 +87,8 @@ class RewardCodeSelect(discord.ui.Select):
         super().__init__(placeholder="Choose a reward code…", options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction):
+        if not await self.view.interaction_check(interaction):
+            return
         self.view.selected_code_id = int(self.values[0])
         await self.view.refresh(interaction)
 
@@ -95,11 +101,19 @@ class TesterFeedbackSelect(discord.ui.Select):
         super().__init__(placeholder="Choose a Tester report…", options=options, row=1)
 
     async def callback(self, interaction):
+        if not await self.view.interaction_check(interaction):
+            return
         self.view.selected_feedback_id = int(self.values[0])
         await self.view.refresh(interaction)
 
 
-class FeedbackRewardModal(discord.ui.Modal, title="Accept Tester report and reward"):
+class StaffModal(discord.ui.Modal):
+    async def on_error(self, interaction, error):
+        self.panel.db.rollback()
+        await self.panel.on_error(interaction, error, self)
+
+
+class FeedbackRewardModal(StaffModal, title="Accept Tester report and reward"):
     xc = discord.ui.TextInput(label="XC reward", default="0", max_length=10)
     war_credits = discord.ui.TextInput(label="War Credits reward", default="0", max_length=10)
     note = discord.ui.TextInput(label="Staff note", placeholder="Optional thank-you note", required=False, max_length=300)
@@ -109,6 +123,8 @@ class FeedbackRewardModal(discord.ui.Modal, title="Accept Tester report and rewa
         self.panel = panel
 
     async def on_submit(self, interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
         try:
             xc, credits = max(0, int(str(self.xc))), max(0, int(str(self.war_credits)))
         except ValueError:
@@ -117,10 +133,10 @@ class FeedbackRewardModal(discord.ui.Modal, title="Accept Tester report and rewa
         await interaction.response.defer()
         notice = self.panel.review_feedback(interaction, "accepted", str(self.note).strip(), xc, credits)
         replacement = self.panel.clone(notice=notice, selected_feedback_id=None)
-        await interaction.edit_original_response(embed=replacement.build_embed(), view=replacement)
+        await interaction.edit_original_response(embed=None, view=replacement)
 
 
-class ApplicationDecisionModal(discord.ui.Modal):
+class ApplicationDecisionModal(StaffModal):
     reason = discord.ui.TextInput(
         label="Reason / staff note",
         placeholder="Optional reason shown in the result",
@@ -136,13 +152,15 @@ class ApplicationDecisionModal(discord.ui.Modal):
         self.decision = decision
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
         await interaction.response.defer()
         notice = await self.panel.review_application(interaction, self.decision, str(self.reason).strip())
         replacement = self.panel.clone(notice=notice, selected_application_id=None)
-        await interaction.edit_original_response(embed=replacement.build_embed(), view=replacement)
+        await interaction.edit_original_response(embed=None, view=replacement)
 
 
-class RewardCodeModal(discord.ui.Modal, title="Create reward code"):
+class RewardCodeModal(StaffModal, title="Create reward code"):
     code = discord.ui.TextInput(label="Code", placeholder="Example: SEASON100", max_length=40)
     xc = discord.ui.TextInput(label="XC", placeholder="0", default="0", max_length=10)
     war_credits = discord.ui.TextInput(label="War Credits", placeholder="0", default="0", max_length=10)
@@ -154,21 +172,23 @@ class RewardCodeModal(discord.ui.Modal, title="Create reward code"):
         self.panel = panel
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
         clean_code = str(self.code).strip().upper()
         try:
             values = [max(0, int(str(field).strip() or "0")) for field in (self.xc, self.war_credits, self.xcrystals, self.max_uses)]
         except ValueError:
             replacement = self.panel.clone(notice="❌ XC, War Credits, XCrystals and uses must be whole numbers.")
-            await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+            await interaction.response.edit_message(embed=None, view=replacement)
             return
         if not clean_code or not all(character.isalnum() or character in "_-" for character in clean_code):
             replacement = self.panel.clone(notice="❌ Code may only use letters, numbers, `_` and `-`.")
-            await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+            await interaction.response.edit_message(embed=None, view=replacement)
             return
         xc, war_credits, xcrystals, max_uses = values
         if not any((xc, war_credits, xcrystals)):
             replacement = self.panel.clone(notice="❌ Add at least one currency reward.")
-            await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+            await interaction.response.edit_message(embed=None, view=replacement)
             return
         try:
             cursor = self.panel.db.execute(
@@ -178,15 +198,16 @@ class RewardCodeModal(discord.ui.Modal, title="Create reward code"):
             )
             self.panel.db.commit()
         except sqlite3.IntegrityError:
+            self.panel.db.rollback()
             replacement = self.panel.clone(notice=f"❌ `{clean_code}` already exists.")
-            await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+            await interaction.response.edit_message(embed=None, view=replacement)
             return
         replacement = self.panel.clone(notice=f"✅ Created `{clean_code}`.", selected_code_id=cursor.lastrowid)
-        await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+        await interaction.response.edit_message(embed=None, view=replacement)
 
 
-class AdminPanel(discord.ui.View):
-    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice=""):
+class AdminPanel(discord.ui.LayoutView):
+    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice="", history=(), offsets=None):
         super().__init__(timeout=900)
         self.bot = bot
         self.db = db
@@ -198,7 +219,33 @@ class AdminPanel(discord.ui.View):
         self.selected_code_id = selected_code_id
         self.selected_feedback_id = selected_feedback_id
         self.notice = notice
+        self.history = history
+        self.offsets = dict(offsets or {})
+        self._controls = []
         self._build_controls()
+        content = self.build_embed()
+        parts = [discord.ui.TextDisplay(f"-# ✦ X SYSTEM · ADMIN\n# {self.page.replace('_', ' ').upper()}\n{content.description or ''}")]
+        for field in content.fields:
+            parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f"### {field.name}\n{field.value}")))
+        rows = {}
+        for control in self._controls:
+            row = control.row or 0
+            control.row = None
+            rows.setdefault(row, []).append(control)
+        for row in sorted(rows):
+            controls = rows[row]
+            width = 3 if row == 0 else 5
+            for start in range(0, len(controls), width):
+                parts.append(discord.ui.ActionRow(*controls[start:start + width]))
+        super().add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
+        super().add_item(discord.ui.ActionRow(
+            AdminActionButton("back", "‹ Back"), AdminActionButton("page:home", "⌂ Home"),
+            AdminActionButton("refresh", "Refresh"), AdminActionButton("close", "× Close")))
+
+    def add_item(self, item):
+        # Existing controls keep their logical rows; LayoutView owns every item.
+        self._controls.append(item)
+        return self
 
     def clone(self, **changes):
         values = {
@@ -208,6 +255,8 @@ class AdminPanel(discord.ui.View):
             "selected_code_id": self.selected_code_id,
             "selected_feedback_id": self.selected_feedback_id,
             "notice": "",
+            "history": self.history,
+            "offsets": self.offsets,
         }
         values.update(changes)
         return AdminPanel(self.bot, self.db, self.staff_check, self.owner_id, **values)
@@ -215,8 +264,31 @@ class AdminPanel(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction):
         if interaction.user.id == self.owner_id and self.staff_check(interaction):
             return True
-        await interaction.response.send_message("This Staff panel belongs to another Administrator or Moderator.", ephemeral=True)
+        sender = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+        await sender("This panel requires its original user and current staff permission. Reopen /admin if your access has changed.", ephemeral=True)
         return False
+
+    async def on_error(self, interaction, error, item):
+        import logging
+        logging.getLogger(__name__).exception("Admin panel action failed", exc_info=error)
+        sender = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+        await sender("Action could not finish. Refresh this panel to check its current status before retrying.", ephemeral=True)
+
+    async def _edit(self, interaction, replacement):
+        if interaction.response.is_done():
+            await interaction.edit_original_response(embed=None, view=replacement)
+        else:
+            await interaction.response.edit_message(embed=None, view=replacement)
+
+    def _page_rows(self, rows, kind):
+        offset = min(max(0, self.offsets.get(kind, 0)), max(0, (len(rows) - 1) // 25 * 25))
+        self.offsets[kind] = offset
+        if len(rows) > 25:
+            for direction, target, label in ((-1, offset - 25, f"‹ {kind.title()}"), (1, offset + 25, f"{kind.title()} ›")):
+                button = AdminActionButton(f"list:{kind}:{direction}", label, row=3)
+                button.disabled = target < 0 or target >= len(rows)
+                self.add_item(button)
+        return rows[offset:offset + 25]
 
     def _build_controls(self):
         navigation = (
@@ -225,6 +297,7 @@ class AdminPanel(discord.ui.View):
             ("tester", "Tester Reports", "🐛"),
             ("verification", "Verification", "✅"),
             ("codes", "Reward Codes", "🎟️"),
+            ("economy", "Economy", "💰"),
         )
         for page, label, emoji in navigation:
             self.add_item(AdminActionButton(f"page:{page}", label, emoji=emoji, style=discord.ButtonStyle.primary if self.page == page else discord.ButtonStyle.secondary, row=0))
@@ -232,10 +305,12 @@ class AdminPanel(discord.ui.View):
         if self.page == "applications":
             forms = self.application_forms()
             if forms:
-                self.add_item(ApplicationFormSelect(forms, self.selected_form_id))
+                if self.selected_form_id is None:
+                    self.selected_form_id = forms[0]['id']
+                self.add_item(ApplicationFormSelect(self._page_rows(forms, "forms"), self.selected_form_id))
             pending = self.pending_applications()
             if pending:
-                self.add_item(PendingApplicationSelect(pending, self.selected_application_id))
+                self.add_item(PendingApplicationSelect(self._page_rows(pending, "applications"), self.selected_application_id))
             self.add_item(AdminActionButton("post_application", "Post Selected Form Here", emoji="📨", style=discord.ButtonStyle.primary, row=3))
             self.add_item(AdminActionButton("toggle_applications", "Open / Close", emoji="🔁", row=3))
             if self.selected_application():
@@ -248,7 +323,7 @@ class AdminPanel(discord.ui.View):
         elif self.page == "tester":
             reports = self.pending_feedback()
             if reports:
-                self.add_item(TesterFeedbackSelect(reports, self.selected_feedback_id))
+                self.add_item(TesterFeedbackSelect(self._page_rows(reports, "reports"), self.selected_feedback_id))
             self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel Here", emoji="📨", style=discord.ButtonStyle.primary, row=2))
             if self.selected_feedback():
                 self.add_item(AdminActionButton("accept_feedback", "Accept + Reward", emoji="🎁", style=discord.ButtonStyle.success, row=2))
@@ -256,11 +331,13 @@ class AdminPanel(discord.ui.View):
         elif self.page == "codes":
             codes = self.reward_codes()
             if codes:
-                self.add_item(RewardCodeSelect(codes, self.selected_code_id))
+                self.add_item(RewardCodeSelect(self._page_rows(codes, "codes"), self.selected_code_id))
             self.add_item(AdminActionButton("create_code", "Create Code", emoji="➕", style=discord.ButtonStyle.success, row=2))
             if self.selected_code():
                 self.add_item(AdminActionButton("toggle_code", "Enable / Disable", emoji="🔁", row=2))
         elif self.page == "home":
+            import staff_tools
+            self.add_item(staff_tools.ToolSelect(self))
             self.add_item(AdminActionButton("system_status", "System Status", emoji="📡", style=discord.ButtonStyle.primary, row=1))
             self.add_item(AdminActionButton("backup_now", "Backup Now", emoji="💾", style=discord.ButtonStyle.success, row=1))
             self.add_item(AdminActionButton("tier5_repair", "Repair Missions", emoji="🛠️", style=discord.ButtonStyle.secondary, row=1))
@@ -270,11 +347,11 @@ class AdminPanel(discord.ui.View):
         return self.db.execute(
             """SELECT s.id,s.user_name,s.status,f.name form_name FROM application_submissions s
                JOIN application_forms f ON f.id=s.form_id WHERE s.status IN ('pending','hold')
-               ORDER BY s.created_at LIMIT 25"""
+               ORDER BY s.created_at,s.id"""
         ).fetchall()
 
     def application_forms(self):
-        return self.db.execute("SELECT * FROM application_forms WHERE enabled=1 ORDER BY name LIMIT 25").fetchall()
+        return self.db.execute("SELECT * FROM application_forms WHERE enabled=1 ORDER BY name,id").fetchall()
 
     def selected_form(self):
         forms = self.application_forms()
@@ -294,7 +371,7 @@ class AdminPanel(discord.ui.View):
         ).fetchone()
 
     def reward_codes(self):
-        return self.db.execute("SELECT * FROM reward_codes ORDER BY enabled DESC,id DESC LIMIT 25").fetchall()
+        return self.db.execute("SELECT * FROM reward_codes ORDER BY enabled DESC,id DESC").fetchall()
 
     def selected_code(self):
         if not self.selected_code_id:
@@ -302,7 +379,7 @@ class AdminPanel(discord.ui.View):
         return self.db.execute("SELECT * FROM reward_codes WHERE id=?", (self.selected_code_id,)).fetchone()
 
     def pending_feedback(self):
-        return self.db.execute("SELECT * FROM tester_feedback WHERE status='pending' ORDER BY created_at LIMIT 25").fetchall()
+        return self.db.execute("SELECT * FROM tester_feedback WHERE status='pending' ORDER BY created_at,id").fetchall()
 
     def selected_feedback(self):
         if not self.selected_feedback_id:
@@ -313,10 +390,15 @@ class AdminPanel(discord.ui.View):
         embed = discord.Embed(title="🛡️ X BOT Staff Control Centre", colour=discord.Color.blurple())
         if self.notice:
             embed.add_field(name="Latest action", value=self.notice[:1024], inline=False)
-        if self.page == "home":
+        if self.page == "economy":
+            import economy_settings_admin
+            embed.description = "Read only · Edit values in Dashboard. Refresh to read committed settings."
+            for title, body in economy_settings_admin.status_sections(self.db):
+                embed.add_field(name=title, value=body, inline=False)
+        elif self.page == "home":
             pending = self.db.execute("SELECT COUNT(*) FROM application_submissions WHERE status IN ('pending','hold')").fetchone()[0]
             active_codes = self.db.execute("SELECT COUNT(*) FROM reward_codes WHERE enabled=1").fetchone()[0]
-            embed.description = "Use the tabs below. Staff actions stay inside this private panel."
+            embed.description = "Choose a management tool below — no command typing. Select targets, fill in details, then confirm.\nMember tools · Assets · Announcements · Alliance War\nEconomy rules remain editable in Dashboard only."
             embed.add_field(name="📋 Pending applications", value=str(pending), inline=True)
             embed.add_field(name="🎟️ Active reward codes", value=str(active_codes), inline=True)
             embed.add_field(name="✅ Verification", value="Open" if _setting(self.db, "verification_enabled", "1") == "1" else "Closed", inline=True)
@@ -363,13 +445,39 @@ class AdminPanel(discord.ui.View):
         return embed
 
     async def refresh(self, interaction, *, notice=""):
+        if not await self.interaction_check(interaction):
+            return
         replacement = self.clone(notice=notice)
-        await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+        await self._edit(interaction, replacement)
 
     async def handle_action(self, interaction, action):
+        if not await self.interaction_check(interaction):
+            return
+        if action.startswith("list:"):
+            _, kind, direction = action.split(":")
+            offsets = dict(self.offsets)
+            offsets[kind] = max(0, offsets.get(kind, 0) + int(direction) * 25)
+            await self._edit(interaction, self.clone(offsets=offsets))
+            return
+        if action in {"system_status", "tier5_repair", "tier6_repair", "backup_now", "post_application", "post_verification", "post_tester_feedback"}:
+            await interaction.response.defer()
+        if action == "close":
+            closed = discord.ui.LayoutView()
+            closed.add_item(discord.ui.TextDisplay("Admin panel closed. Use /admin to reopen."))
+            await interaction.response.edit_message(embed=None, view=closed)
+            self.stop()
+            return
+        if action == "refresh":
+            await self.refresh(interaction)
+            return
+        if action == "back":
+            replacement = self.clone(page=self.history[-1] if self.history else "home", history=self.history[:-1])
+            await interaction.response.edit_message(embed=None, view=replacement)
+            return
         if action.startswith("page:"):
-            replacement = self.clone(page=action.split(":", 1)[1], selected_application_id=None, selected_code_id=None, selected_feedback_id=None)
-            await interaction.response.edit_message(embed=replacement.build_embed(), view=replacement)
+            page = action.split(":", 1)[1]
+            replacement = self.clone(page=page, history=(*self.history, self.page)[-20:] if page != self.page else self.history)
+            await interaction.response.edit_message(embed=None, view=replacement)
             return
         if action == "system_status":
             health = getattr(self.bot, "xbot_tier4_health", None)
@@ -510,4 +618,4 @@ def register_commands(bot, db, staff_check, command_kwargs):
             await interaction.response.send_message("Only Administrators and Moderators can open this panel.", ephemeral=True)
             return
         panel = AdminPanel(bot, db, staff_check, interaction.user.id)
-        await interaction.response.send_message(embed=panel.build_embed(), view=panel, ephemeral=True)
+        await interaction.response.send_message(view=panel, ephemeral=True)
