@@ -10,6 +10,9 @@ Implemented and covered by offline regressions:
 - Matching-mine page repeats missing quantities and offers a recipe return route.
 - Empty material/product lists offer Mines and recipe selection.
 - Overview image has a no-FreeType bitmap fallback, explicit failure notice, and real numbered shortcuts.
+- Missing/locked Pickaxe states provide Backpack, Tool Shop and Mining Hub actions instead of requiring /equip typing.
+- Energy-shortage state updates the current panel with configured recovery information and crafting/selling alternatives; results use shorter button rows.
+- Journey navigation retains a fresh source return; craft-result sale confirmation and duplicate settlement were exercised in temporary-database UI tests.
 
 Still to verify before declaring the broad goal achieved:
 - Actual phone image legibility and Termux performance after the FreeType fix.

@@ -399,6 +399,13 @@ class ResearchTests(unittest.TestCase):
                     for label in ('Craft','Sell Materials','Mining Hub'):
                         self.assertIn(label,[getattr(x,'label',None) for x in exhausted.walk_children()])
                     self.assertEqual(mined,module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
+                    module.db.execute('UPDATE players SET equipped_pickaxe_id=NULL WHERE user_id=?',(self.uid,));module.db.commit()
+                    await mine_button.callback(i)
+                    setup=i.response.edit_message.call_args.kwargs['view']
+                    self.assertIn('Equip a Pickaxe to start',str(setup.to_components()))
+                    for label in ('Open Backpack','Tool Shop','Mining Hub'):
+                        self.assertIn(label,[getattr(x,'label',None) for x in setup.walk_children()])
+                    self.assertEqual(mined,module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
                     # Casino modal uses per-game limits, settles in-place and retains navigation.
                     import casino
                     module.db.execute("UPDATE casino_game_settings SET min_bet=25,max_bet=100,cooldown_seconds=45 WHERE game='dice'")

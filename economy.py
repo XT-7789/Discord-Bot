@@ -1267,9 +1267,17 @@ def register_commands(bot, db, create_player) -> None:
         pickaxe = db.execute("""SELECT items.*,inventories.quantity FROM items INNER JOIN inventories ON inventories.item_id=items.id
             WHERE inventories.user_id=? AND items.id=?""", (interaction.user.id, player['equipped_pickaxe_id'] or -1)).fetchone()
         if pickaxe is None or pickaxe['quantity'] <= 0 or pickaxe['effect'] != 'mine_tool':
-            await interaction.response.send_message("❌ Equip a Pickaxe first with `/equip`.", ephemeral=True); return
+            view=MiningSetupView(interaction.user.id,'Equip a Pickaxe to start',
+                'Open Backpack, select a Pickaxe, then press Equip. If you do not own one, open Tool Shop and review its price and required level before buying.')
+            if interaction.message is not None:await interaction.response.edit_message(view=view)
+            else:await interaction.response.send_message(view=view)
+            return
         if player["mining_level"] < pickaxe["pickaxe_required_level"]:
-            await interaction.response.send_message(f"🔒 This Pickaxe requires Mining Level **{pickaxe['pickaxe_required_level']}**.", ephemeral=True); return
+            view=MiningSetupView(interaction.user.id,'This Pickaxe is locked',
+                f"Your Mining Level: **{player['mining_level']}** · Required: **{pickaxe['pickaxe_required_level']}**.\nOpen Backpack and equip a lower-level Pickaxe. Mining with a usable tool earns EXP.")
+            if interaction.message is not None:await interaction.response.edit_message(view=view)
+            else:await interaction.response.send_message(view=view)
+            return
         area = db.execute("SELECT * FROM mining_areas WHERE id=? AND enabled=1", (player["mining_area_id"],)).fetchone()
         if area is None or player["mining_level"] < area["required_level"]:
             area = db.execute("SELECT * FROM mining_areas WHERE enabled=1 AND required_level<=? ORDER BY required_level,position LIMIT 1", (player["mining_level"],)).fetchone()
@@ -1417,6 +1425,21 @@ def register_commands(bot, db, create_player) -> None:
                 await interaction.response.send_message("Lobby is loading. Please try again.", ephemeral=True)
                 return
             await interaction.response.edit_message(view=builder(interaction.user.id))
+
+    class MiningSetupView(discord.ui.LayoutView):
+        """Actionable setup without requiring players to type equip commands."""
+        def __init__(self,owner_id,title,body):
+            super().__init__(timeout=300);self.owner_id=owner_id
+            box=discord.ui.Container(accent_color=discord.Color.gold())
+            box.add_item(discord.ui.TextDisplay(f'## {title}\n{body}'))
+            box.add_item(discord.ui.ActionRow(
+                MiningHubButton('inventory','Open Backpack','🎒',discord.ButtonStyle.success),
+                MiningHubButton('shop','Tool Shop','🏪',discord.ButtonStyle.secondary),
+                MiningHubButton('hub','Mining Hub','⛏️',discord.ButtonStyle.secondary)))
+            self.add_item(box)
+        async def interaction_check(self,interaction):
+            if interaction.user.id==self.owner_id:return True
+            await interaction.response.send_message('Open /menu for your own panel.',ephemeral=True);return False
 
     class MiningActionResultView(discord.ui.LayoutView):
         """Keep a Mining result useful instead of leaving an orphan message."""
