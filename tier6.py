@@ -472,7 +472,7 @@ def start_production(db, user_id: int, recipe_id: int, quantity: int, expected=N
 
 
 @economy_journey.atomic_action
-def claim_production(db, user_id: int):
+def claim_production(db, user_id: int, *, return_items=False):
     now = int(time.time())
     rows = db.execute(
         """SELECT q.*,COALESCE(r.name,'Archived Recipe') name,COALESCE(r.emoji,'🏭') emoji,
@@ -485,7 +485,8 @@ def claim_production(db, user_id: int):
         (user_id, now),
     ).fetchall()
     if not rows:
-        return "No finished Production is ready to collect."
+        notice="No finished Production is ready to collect."
+        return (notice,()) if return_items else notice
     totals = {}
     for row in rows:
         amount = int(row["quantity"]) * int(row["resolved_output_quantity"])
@@ -500,7 +501,8 @@ def claim_production(db, user_id: int):
             (user_id, item_id, amount),
         )
     db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (user_id, "production_claim", f"Claimed {len(rows)} production jobs", now))
-    return f"✅ Collected **{len(rows)}** completed Production job(s)."
+    notice=f"✅ Collected **{len(rows)}** completed Production job(s)."
+    return (notice,tuple(totals)) if return_items else notice
 
 
 def production_cancel_quote(db, user_id: int, job_id: int):
@@ -915,8 +917,12 @@ def register_commands(bot, db, create_player):
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message('Open your own Production panel.',ephemeral=True);return
-            notice = claim_production(db, self.owner_id)
-            await interaction.response.edit_message(view=ProductionView(self.owner_id, notice, self.view.page, self.view.recipe_page, self.view.selected))
+            await interaction.response.defer()
+            page,recipe_page,selected=self.view.page,self.view.recipe_page,self.view.selected
+            notice,items = claim_production(db, self.owner_id,return_items=True)
+            back=lambda:ProductionView(self.owner_id,page=page,recipe_page=recipe_page,selected=selected)
+            result=economy_journey.JourneyView(bot,db,self.owner_id,page='products',product_ids=items,notice=notice,back=back) if items else ProductionView(self.owner_id,notice,page,recipe_page,selected)
+            await interaction.edit_original_response(view=result)
 
     class ProductionCancelSelect(discord.ui.Select):
         def __init__(self, owner_id: int, jobs):

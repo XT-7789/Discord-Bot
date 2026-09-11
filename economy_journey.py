@@ -274,11 +274,12 @@ class Select(discord.ui.Select):
 
 
 class JourneyView(discord.ui.LayoutView):
-    def __init__(self,bot,db,uid,page='recipes',rid=None,iid=None,material=None,offset=0,back=None,notice='',operation=None,amount=1):
+    def __init__(self,bot,db,uid,page='recipes',rid=None,iid=None,material=None,offset=0,back=None,notice='',operation=None,amount=1,product_ids=None):
         super().__init__(timeout=600)
         self.bot,self.db,self.uid=bot,db,uid
         self.page,self.rid,self.iid,self.material,self.offset=page,rid,iid,material,offset
         self.back,self.operation,self.amount=back,operation,amount
+        self.product_ids=product_ids
         self.token=secrets.token_hex(16); self.used=False; self.expected=None
         self.box=discord.ui.Container(accent_colour=0x36CFC9)
         self.add_item(self.box)
@@ -291,7 +292,7 @@ class JourneyView(discord.ui.LayoutView):
     def text(self,text): self.box.add_item(discord.ui.TextDisplay(text[:3900]))
     def row(self,*items): self.box.add_item(discord.ui.ActionRow(*[Button(self,label,action,discord.ButtonStyle.primary if n==0 else discord.ButtonStyle.secondary) for n,(label,action) in enumerate(items)]))
     def next(self,**kwargs):
-        data=dict(page=self.page,rid=self.rid,iid=self.iid,material=self.material,offset=self.offset,back=self)
+        data=dict(page=self.page,rid=self.rid,iid=self.iid,material=self.material,offset=self.offset,back=self,product_ids=self.product_ids)
         data.update(kwargs); return JourneyView(self.bot,self.db,self.uid,**data)
 
     def fresh(self):
@@ -361,8 +362,11 @@ class JourneyView(discord.ui.LayoutView):
             else:self.row(('Craft',('all',)))
         elif self.page in {'materials','products'}:
             condition = "i.sellable=1 AND i.sell_price>0 AND i.effect='crafting_material'" if self.page=='materials' else 'EXISTS (SELECT 1 FROM recipes r WHERE r.output_item_id=i.id)'
+            if self.page=='products' and self.product_ids is not None:condition='1=1'
             rows=db.execute(f'''SELECT i.*,v.quantity FROM inventories v JOIN items i ON i.id=v.item_id
                 WHERE v.user_id=? AND v.quantity>0 AND i.enabled=1 AND {condition} ORDER BY i.name''',(uid,)).fetchall()
+            if self.page=='products' and self.product_ids is not None:rows=[row for row in rows if row['id'] in self.product_ids]
+            self.offset=min(max(0,self.offset),max(0,((len(rows)-1)//25)*25))
             self.text('Choose an item to review. Nothing is sold or used automatically.')
             options=[discord.SelectOption(label=f"{i['name']} ×{i['quantity']}"[:100],value=str(i['id']),default=i['id']==self.iid) for i in rows[self.offset:self.offset+25]]
             if options:self.box.add_item(discord.ui.ActionRow(Select(self,options,'product','Choose item…')))
@@ -419,9 +423,10 @@ class JourneyView(discord.ui.LayoutView):
         if key=='collect':
             await i.response.defer()
             import tier6
-            try:message=tier6.claim_production(self.db,self.uid)
-            except sqlite3.Error:message='Database busy or unavailable. Refresh to check production before retrying.'
-            await i.edit_original_response(view=self.next(page='activity',notice=message));return
+            try:message,items=tier6.claim_production(self.db,self.uid,return_items=True)
+            except sqlite3.Error:message,items='Database busy or unavailable. Refresh to check production before retrying.',()
+            target=self.next(page='products',product_ids=items,offset=0,notice=message,back=self.fresh) if items else self.next(page='activity',notice=message)
+            await i.edit_original_response(view=target);return
         if key=='execute':
             if self.used:
                 await i.response.send_message('Already processed. Check your latest result.',ephemeral=True);return

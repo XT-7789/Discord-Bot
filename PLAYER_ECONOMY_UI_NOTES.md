@@ -1,5 +1,16 @@
 # Player Economy quantity-preview update
 
+## Follow-up: clearer results and next steps
+
+- Result pages show the completed action, current wallet and order quantity without a second prospective price quote.
+- Quantity presets highlight the selected amount. Successful orders hide quantity controls until the player chooses to prepare another order.
+- Craft results lead to supported product actions; purchases lead to use/equip when supported; sales lead back to earning activities. These links do not automatically buy, sell or consume items.
+- Returning from a product preview restores the completed result and selected quantity with current balances. Shortcut return buttons preserve the exact source.
+- Production collection opens a selector limited to the items just collected, including outputs whose recipe was subsequently removed. Collection still settles only once.
+- Removed the unused legacy advanced-craft confirmation implementation.
+- SVIP convenience enhancements are proposed in `SVIP_PROPOSAL.md`, not enabled.
+- Phone screenshots and visual acceptance remain pending; no remote phone update or production restart was performed.
+
 ## Included
 
 - Shared item/order preview for Shop, Backpack sales and item use, player listings, market purchases/cancellations, crafting, production orders/cancellations and stock trades.
@@ -12,7 +23,7 @@
 
 ## Verification
 
-87 tests passed on 2026-09-11:
+91 tests passed on 2026-09-11 (including the result-page follow-up):
 
 ```text
 python -m unittest test_admin_dashboard test_staff_tools test_tier6 test_tier7 test_tier8 test_economy_journey test_economy_transactions -q

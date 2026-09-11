@@ -292,12 +292,6 @@ def register_commands(bot, db, create_player):
             limits.append((player["xc"] if player else 0) // recipe["xc_cost"])
         return min(limits) if limits else 100
 
-    def perform_craft(user_id, recipe, amount):
-        try:
-            return True, economy_journey.craft(db,user_id,recipe['id'],amount)
-        except ValueError as error:
-            return False,str(error)
-
     class CraftNavigationButton(discord.ui.Button):
         def __init__(self, owner_id, destination, label, emoji):
             super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.secondary)
@@ -344,49 +338,6 @@ def register_commands(bot, db, create_player):
             from economy_trade_ui import TradeView
             await interaction.response.edit_message(view=TradeView(bot,db,self.owner_id,'craft',recipe['id'],max(1,min(amount,100)),advanced=True,back=lambda:CraftingCentreView(self.owner_id,recipe['id'])))
 
-    class CraftConfirmButton(discord.ui.Button):
-        def __init__(self, owner_id, recipe_id, amount):
-            super().__init__(label="Confirm Craft", emoji="✅", style=discord.ButtonStyle.success)
-            self.owner_id = owner_id; self.recipe_id = recipe_id; self.amount = amount
-            self.used = False
-
-        async def callback(self, interaction):
-            if interaction.user.id != self.owner_id or self.used:
-                await interaction.response.send_message('Open your own fresh crafting confirmation.',ephemeral=True);return
-            self.used = True
-            recipe = db.execute("""SELECT r.*,o.name output_name,o.emoji output_emoji FROM recipes r
-                JOIN items o ON o.id=r.output_item_id WHERE r.id=? AND r.enabled=1""", (self.recipe_id,)).fetchone()
-            if recipe is None:
-                await interaction.response.edit_message(view=CraftingCentreView(self.owner_id, notice="❌ This recipe is no longer available.")); return
-            ok, message = perform_craft(self.owner_id, recipe, self.amount)
-            previous = CraftingCentreView(self.owner_id, recipe["id"], ("✅ " if ok else "❌ ") + message)
-            result = economy_journey.JourneyView(bot, db, self.owner_id, page='product', rid=recipe['id'], iid=recipe['output_item_id'], back=previous, notice=message) if ok else previous
-            await interaction.response.edit_message(view=result)
-
-    class CraftBackButton(discord.ui.Button):
-        def __init__(self, owner_id, recipe_id):
-            super().__init__(label="Back to Recipes", emoji="⬅️", style=discord.ButtonStyle.secondary)
-            self.owner_id = owner_id; self.recipe_id = recipe_id
-        async def callback(self, interaction):
-            await interaction.response.edit_message(view=CraftingCentreView(self.owner_id, self.recipe_id))
-
-    class CraftConfirmView(discord.ui.LayoutView):
-        def __init__(self, owner_id, recipe_id, amount):
-            super().__init__(timeout=300); self.owner_id = owner_id
-            recipe = db.execute("""SELECT r.*,o.name output_name,o.emoji output_emoji FROM recipes r
-                JOIN items o ON o.id=r.output_item_id WHERE r.id=?""", (recipe_id,)).fetchone()
-            ingredients = recipe_ingredients(recipe_id)
-            material_lines = "\n".join(
-                f"{i['emoji']} {i['name']}: **{i['quantity'] * amount} needed** · {_inventory_quantity(db, owner_id, i['item_id'])} owned"
-                for i in ingredients) or "No materials required."
-            container = discord.ui.Container(accent_color=discord.Color.orange())
-            container.add_item(discord.ui.TextDisplay(
-                f"## 🧪 Confirm Craft\n{recipe['emoji']} **{recipe['name']} ×{amount}**\n"
-                f"Creates: **{recipe['output_quantity'] * amount}× {recipe['output_emoji']} {recipe['output_name']}**\n\n"
-                f"### Materials\n{material_lines}\n🪙 XC cost: **{recipe['xc_cost'] * amount:,} XC**\n\n-# Nothing is spent until you press Confirm Craft."
-            ))
-            container.add_item(discord.ui.ActionRow(CraftConfirmButton(owner_id, recipe_id, amount), CraftBackButton(owner_id, recipe_id)))
-            self.add_item(container)
 
     class CraftingCentreView(discord.ui.LayoutView):
         def __init__(self, owner_id, selected_id=None, notice=None):

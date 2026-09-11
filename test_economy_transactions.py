@@ -310,8 +310,82 @@ class TransactionTests(unittest.TestCase):
                 detail=i.response.edit_message.call_args.kwargs['view'];self.assertEqual('queue',detail.kind)
                 await next(x for x in detail.walk_children() if isinstance(x,TradeNav) and x.key=='back').callback(i)
                 back=i.response.edit_message.call_args.kwargs['view'];self.assertEqual((1,self.rid),(back.page,back.selected))
+                self.db.execute('UPDATE tier6_production_queue SET ready_at=0 WHERE user_id=?',(self.uid,));self.db.commit()
+                production=bot.xbot_player_panel_builders['production'](self.uid)
+                await next(x for x in production.walk_children() if getattr(x,'label',None)=='Collect All Ready').callback(i)
+                collected=i.edit_original_response.call_args.kwargs['view']
+                self.assertEqual('products',collected.page)
+                self.assertEqual((self.iid,),collected.product_ids)
+                self.assertEqual([str(self.iid)],[o.value for x in collected.walk_children() if isinstance(x,discord.ui.Select) for o in x.options])
+                await collected.act(i,('back',))
+                self.assertEqual('ProductionView',i.response.edit_message.call_args.kwargs['view'].__class__.__name__)
             finally:await bot.close()
         asyncio.run(run())
+
+    def test_result_next_steps_preserve_result_and_do_not_trade(self):
+        async def run():
+            self.fund(3);bot=SimpleNamespace(xbot_player_panel_builders={})
+            v=TradeView(bot,self.db,self.uid,'craft',self.rid)
+            i=interaction(self.uid);await v.act(i,('execute',))
+            result=i.edit_original_response.call_args.kwargs['view']
+            self.assertNotIn('Next order reference',str(result.to_components()))
+            self.assertFalse(any(isinstance(x,TradeButton) and x.action[0] in {'quantity','custom','execute'} for x in result.walk_children()))
+            sell=next(x for x in result.walk_children() if getattr(x,'label',None)=='Sell Product')
+            self.assertEqual(discord.ButtonStyle.success,sell.style)
+            before=self.cash();await sell.callback(i)
+            preview=i.response.edit_message.call_args.kwargs['view'];self.assertEqual('sell',preview.kind)
+            self.assertEqual(before,self.cash())
+            await next(x for x in preview.walk_children() if isinstance(x,TradeNav) and x.key=='back').callback(i)
+            restored=i.response.edit_message.call_args.kwargs['view']
+            self.assertTrue(restored.complete);self.assertTrue(restored.used)
+            self.assertEqual(result.notice,restored.notice)
+            await restored.act(i,('refresh',))
+            again=i.response.edit_message.call_args.kwargs['view']
+            self.assertFalse(again.complete);self.assertEqual(before,self.cash())
+        asyncio.run(run())
+
+    def test_selected_quantity_and_purchase_use_preview(self):
+        async def run():
+            bot=SimpleNamespace(xbot_player_panel_builders={})
+            v=TradeView(bot,self.db,self.uid,'shop',self.stone,5)
+            highlighted=[x for x in v.walk_children() if isinstance(x,TradeButton) and x.action[0]=='quantity' and x.style==discord.ButtonStyle.primary]
+            self.assertEqual(['5'],[x.label for x in highlighted])
+            self.db.execute("UPDATE items SET effect='xc_reward',effect_value=1 WHERE id=?",(self.stone,));self.db.commit()
+            i=interaction(self.uid);await v.act(i,('execute',))
+            result=i.edit_original_response.call_args.kwargs['view'];before=self.cash()
+            use=next(x for x in result.walk_children() if getattr(x,'label',None)=='Use Product')
+            await use.callback(i)
+            self.assertEqual('use',i.response.edit_message.call_args.kwargs['view'].kind)
+            self.assertEqual(before,self.cash())
+        asyncio.run(run())
+
+    def test_shortcut_back_returns_exact_quantity_and_owner(self):
+        async def run():
+            def page(uid):
+                v=discord.ui.LayoutView();v.add_item(discord.ui.TextDisplay('Backpack'));return v
+            bot=SimpleNamespace(xbot_player_panel_builders={'inventory':page})
+            v=TradeView(bot,self.db,self.uid,'sell',self.stone,10)
+            i=interaction(self.uid);await v.act(i,('nav','inventory'))
+            child=i.response.edit_message.call_args.kwargs['view']
+            back=next(x for x in child.walk_children() if isinstance(x,TradeNav))
+            denied=interaction(self.seller);await back.callback(denied);denied.response.edit_message.assert_not_called()
+            await back.callback(i)
+            returned=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(('sell',self.stone,10),(returned.kind,returned.target,returned.quantity))
+            self.assertEqual(1000,self.cash())
+        asyncio.run(run())
+
+    def test_claimed_products_survive_recipe_removal_and_filter_old_items(self):
+        self.fund(2);tier6.start_production(self.db,self.uid,self.rid,1)
+        self.db.execute('UPDATE tier6_production_queue SET ready_at=0 WHERE user_id=?',(self.uid,))
+        self.db.execute('DELETE FROM recipes WHERE id=?',(self.rid,));self.db.commit()
+        notice,items=tier6.claim_production(self.db,self.uid,return_items=True)
+        self.assertEqual((self.iid,),items)
+        async def run():
+            view=journey.JourneyView(SimpleNamespace(),self.db,self.uid,page='products',product_ids=items,notice=notice)
+            self.assertEqual([str(self.iid)],[o.value for x in view.walk_children() if isinstance(x,discord.ui.Select) for o in x.options])
+        asyncio.run(run())
+        self.assertEqual((),tier6.claim_production(self.db,self.uid,return_items=True)[1])
 
 
 if __name__=='__main__':unittest.main()
