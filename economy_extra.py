@@ -6,6 +6,7 @@ from discord import app_commands
 
 import xbot_ui
 import tier5
+import economy_journey
 
 
 DEFAULTS = {
@@ -57,6 +58,11 @@ def tier6_setting(db, key, fallback):
 
 def expire_market_listings(db, now=None):
     """Close old listings once and return every unsold item to its seller."""
+    return _expire_market_listings(db,0,now)
+
+
+@economy_journey.atomic_action
+def _expire_market_listings(db, _actor, now=None):
     now = int(now or time.time())
     cutoff = now - max(1, tier6_setting(db, "tier6_market_expiry_days", 7)) * 86400
     rows = db.execute(
@@ -76,8 +82,6 @@ def expire_market_listings(db, now=None):
             (row["seller_id"], row["item_id"], row["quantity"]),
         )
         log(db, row["seller_id"], "market_expired", f"listing {row['id']}: returned {row['quantity']} item(s)")
-    if rows:
-        db.commit()
     return len(rows)
 
 
@@ -455,88 +459,52 @@ def register_commands(bot, db, create_player, find_item):
         db.commit()
         await interaction.response.send_message(view=xbot_ui.success("💸 Transfer Complete", f"Sent **{amount:,} XC** to {player.mention}.\nThey received **{received:,} XC**."))
 
-    class MarketBuyModal(discord.ui.Modal):
-        def __init__(self, listing_id, item_name):
-            super().__init__(title=f"Buy {item_name}"[:45]); self.listing_id = listing_id
-            self.amount = discord.ui.TextInput(label="Quantity", default="1", min_length=1, max_length=7)
-            self.add_item(self.amount)
 
-        async def on_submit(self, interaction):
-            try:
-                quantity = int(self.amount.value)
-                if quantity <= 0: raise ValueError
-            except ValueError:
-                await interaction.response.send_message(view=xbot_ui.danger("Invalid Quantity", "Enter a whole number greater than 0."), ephemeral=True); return
-            if not setting(db, "market_enabled"):
-                await interaction.response.send_message(view=xbot_ui.warning("🛒 Market Closed", "The player market is currently closed."), ephemeral=True); return
-            expire_market_listings(db)
-            listing = db.execute("""SELECT l.*,i.name,i.emoji FROM market_listings l JOIN items i ON i.id=l.item_id
-                WHERE l.id=? AND l.active=1""", (self.listing_id,)).fetchone()
-            if listing is None or listing["quantity"] < quantity:
-                await interaction.response.send_message(view=xbot_ui.danger("Listing Unavailable", "That quantity is no longer available."), ephemeral=True); return
-            if listing["seller_id"] == interaction.user.id:
-                await interaction.response.send_message(view=xbot_ui.danger("Purchase Rejected", "You cannot buy your own listing."), ephemeral=True); return
-            buyer = create_player(interaction.user); total = listing["price_each"] * quantity
-            if buyer["xc"] < total:
-                await interaction.response.send_message(view=xbot_ui.danger("Not Enough XC", f"You need **{total:,} XC**."), ephemeral=True); return
-            fee = total * setting(db, "market_fee_percent") // 100; seller_payment = total - fee
-            db.execute("UPDATE players SET xc=xc-? WHERE user_id=?", (total, interaction.user.id))
-            db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (seller_payment, listing["seller_id"]))
-            db.execute("""INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
-                ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""", (interaction.user.id, listing["item_id"], quantity))
-            db.execute("UPDATE market_listings SET quantity=quantity-?,active=CASE WHEN quantity-?<=0 THEN 0 ELSE 1 END WHERE id=?", (quantity, quantity, listing["id"]))
-            log(db, interaction.user.id, "market_buy", f"listing {listing['id']}: {quantity}x {listing['name']} for {total} XC")
-            log(db, listing["seller_id"], "market_sale", f"listing {listing['id']}: sold {quantity}x {listing['name']} for {seller_payment} XC")
-            db.execute(
-                """INSERT INTO tier6_market_trades
-                   (listing_id,buyer_id,seller_id,item_id,quantity,price_each,fee,total,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?)""",
-                (listing["id"], interaction.user.id, listing["seller_id"], listing["item_id"], quantity, listing["price_each"], fee, total, int(time.time())),
-            )
-            db.commit()
-            await interaction.response.send_message(view=xbot_ui.success("🛒 Market Purchase", f"Bought **{quantity}x {listing['emoji']} {listing['name']}** for **{total:,} XC**."), ephemeral=True)
 
     class MarketBuyButton(discord.ui.Button):
         def __init__(self, listing):
-            super().__init__(label=f"Buy ({listing['price_each']:,} XC each)", emoji="🛒", style=discord.ButtonStyle.success)
-            self.listing_id, self.item_name = listing["id"], listing["name"]
+            super().__init__(label="View Listing",style=discord.ButtonStyle.primary)
+            self.listing_id=listing['id']
         async def callback(self, interaction):
-            await interaction.response.send_modal(MarketBuyModal(self.listing_id, self.item_name))
+            owner=self.view.owner_id;page=self.view.page
+            if interaction.user.id!=owner:
+                await interaction.response.send_message('Open your own Market.',ephemeral=True);return
+            from economy_trade_ui import TradeView
+            await interaction.response.edit_message(view=TradeView(bot,db,owner,'market_buy',self.listing_id,back=lambda:MarketView(owner,page)))
 
     class MyListingCancelButton(discord.ui.Button):
         def __init__(self, listing):
-            super().__init__(label="Cancel & Return", emoji="↩️", style=discord.ButtonStyle.danger)
-            self.listing_id, self.item_name = listing["id"], listing["name"]
-
+            super().__init__(label="Review / Cancel",style=discord.ButtonStyle.secondary)
+            self.listing_id=listing['id']
         async def callback(self, interaction):
-            row = db.execute("SELECT * FROM market_listings WHERE id=? AND seller_id=? AND active=1", (self.listing_id, interaction.user.id)).fetchone()
-            if row is None:
-                await interaction.response.send_message(view=xbot_ui.warning("Listing Unavailable", "This listing is already sold or cancelled."), ephemeral=True)
-                return
-            db.execute("UPDATE market_listings SET active=0 WHERE id=?", (self.listing_id,))
-            db.execute("""INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
-                ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""", (interaction.user.id, row["item_id"], row["quantity"]))
-            log(db, interaction.user.id, "market_cancel", f"listing {self.listing_id}: returned {row['quantity']}x {self.item_name}")
-            db.commit()
-            await interaction.response.send_message(view=xbot_ui.warning("↩️ Listing Cancelled", f"Returned **{row['quantity']}x {self.item_name}** to your Backpack."), ephemeral=True)
+            owner=self.view.owner_id;page=self.view.page
+            if interaction.user.id!=owner:
+                await interaction.response.send_message('Open your own listings.',ephemeral=True);return
+            from economy_trade_ui import TradeView
+            await interaction.response.edit_message(view=TradeView(bot,db,owner,'market_cancel',self.listing_id,back=lambda:MyListingsView(owner,page)))
 
     class MyListingsView(discord.ui.LayoutView):
-        def __init__(self, owner_id: int):
+        def __init__(self, owner_id: int, page=0):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             expire_market_listings(db)
+            count=db.execute('SELECT COUNT(*) FROM market_listings WHERE seller_id=? AND active=1 AND quantity>0',(owner_id,)).fetchone()[0]
+            pages=max(1,(count+4)//5);self.page=min(max(0,page),pages-1)
             rows = db.execute("""SELECT l.*,i.name,i.emoji FROM market_listings l JOIN items i ON i.id=l.item_id
-                WHERE l.seller_id=? AND l.active=1 AND l.quantity>0 ORDER BY l.id DESC LIMIT 10""", (owner_id,)).fetchall()
+                WHERE l.seller_id=? AND l.active=1 AND l.quantity>0 ORDER BY l.id DESC LIMIT 5 OFFSET ?""", (owner_id,self.page*5)).fetchall()
             container = discord.ui.Container(accent_color=discord.Color.orange())
             container.add_item(discord.ui.TextDisplay("## 🏷️ My Market Listings\nCancel a listing to return its unsold items to your Backpack."))
             for row in rows:
                 container.add_item(discord.ui.Separator())
                 text = f"### #{row['id']} · {row['emoji']} {row['name']}\n📦 **{row['quantity']} remaining** · 💰 **{row['price_each']:,} XC each**"
+                gross=row['quantity']*row['price_each'];fee=gross*setting(db,'market_fee_percent')//100
+                text+=f"\nIf sold together: **{gross-fee} XC** after **{fee} XC** seller fee."
                 container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=MyListingCancelButton(row)))
             if not rows:
-                container.add_item(discord.ui.TextDisplay("You have no active listings. Use `/market_sell` to list a tradeable Backpack item."))
-            container.add_item(discord.ui.ActionRow(MarketLobbyButton(owner_id)))
-            container.add_item(discord.ui.TextDisplay("-# Your latest 10 active listings."))
+                container.add_item(discord.ui.TextDisplay("No active listings. Select a tradeable Backpack item, then List for Players."))
+            container.add_item(discord.ui.ActionRow(MarketHubLink(owner_id,'market','Player Market'),MarketHubLink(owner_id,'inventory','Backpack'),MarketLobbyButton(owner_id)))
+            container.add_item(discord.ui.ActionRow(ListingPageButton(owner_id,self.page-1,'Previous',self.page==0),ListingPageButton(owner_id,self.page+1,'Next',self.page==pages-1)))
+            container.add_item(discord.ui.TextDisplay(f"Page {self.page+1}/{pages} · {count} active listings"))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -555,6 +523,22 @@ def register_commands(bot, db, create_player, find_item):
                 await interaction.response.send_message("This market panel belongs to another player.", ephemeral=True)
                 return
             await interaction.response.edit_message(view=economy_home_view(self.owner_id))
+
+    class MarketHubLink(discord.ui.Button):
+        def __init__(self,owner,key,label):
+            super().__init__(label=label);self.owner,self.key=owner,key
+        async def callback(self,i):
+            if i.user.id!=self.owner:
+                await i.response.send_message('Open your own Market.',ephemeral=True);return
+            await i.response.edit_message(view=bot.xbot_player_panel_builders[self.key](self.owner))
+
+    class ListingPageButton(discord.ui.Button):
+        def __init__(self,owner,page,label,disabled=False):
+            super().__init__(label=label,disabled=disabled);self.owner,self.page=owner,page
+        async def callback(self,i):
+            if i.user.id!=self.owner:
+                await i.response.send_message('Open your own listings.',ephemeral=True);return
+            await i.response.edit_message(view=MyListingsView(self.owner,self.page))
 
     class MarketPageButton(discord.ui.Button):
         def __init__(self,owner_id,page,label,disabled=False):
@@ -575,6 +559,7 @@ def register_commands(bot, db, create_player, find_item):
             count=db.execute('SELECT COUNT(*) FROM market_listings l JOIN items i ON i.id=l.item_id WHERE l.active=1 AND l.quantity>0').fetchone()[0]
             pages=max(1,(count+3)//4)
             page=max(0,min(int(page),pages-1))
+            self.page=page
             rows = db.execute("""SELECT l.*,i.name,i.emoji,i.description,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(l.seller_id AS TEXT)) seller_name
                 FROM market_listings l JOIN items i ON i.id=l.item_id LEFT JOIN players p ON p.user_id=l.seller_id
                 WHERE l.active=1 AND l.quantity>0 ORDER BY l.id DESC LIMIT 4 OFFSET ?""",(page*4,)).fetchall()
@@ -588,6 +573,7 @@ def register_commands(bot, db, create_player, find_item):
             if not rows:
                 container.add_item(discord.ui.TextDisplay("No active listings. Open your Backpack from the Economy Centre to create one."))
             container.add_item(discord.ui.ActionRow(MarketPageButton(owner_id,page-1,'Previous',page==0),MarketPageButton(owner_id,page+1,'Next',page==pages-1),MarketPageButton(owner_id,page,'Refresh')))
+            container.add_item(discord.ui.ActionRow(MarketHubLink(owner_id,'market_mine','My Listings'),MarketHubLink(owner_id,'inventory','List from Backpack')))
             self.add_item(container)
 
         async def interaction_check(self,i):
@@ -601,6 +587,7 @@ def register_commands(bot, db, create_player, find_item):
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
     bot.xbot_player_panel_builders["economy"] = lambda owner_id: EconomyCentreView(owner_id)
     bot.xbot_player_panel_builders["market"] = lambda owner_id: MarketView(owner_id)
+    bot.xbot_player_panel_builders['market_mine'] = lambda owner_id: MyListingsView(owner_id)
     bot.xbot_player_panel_builders['bank'] = lambda owner_id: EconomyBankView(owner_id)
     bot.xbot_player_panel_builders['wallet'] = lambda owner_id: EconomyBalanceView(owner_id)
     bot.xbot_player_lobby_builder = lambda owner_id: XBotLobbyView(owner_id)
@@ -630,38 +617,18 @@ def register_commands(bot, db, create_player, find_item):
     async def market_sell(interaction: discord.Interaction, item: str, quantity: int, price_each: int):
         create_player(interaction.user)
         expire_market_listings(db)
-        active_listings = int(db.execute(
-            "SELECT COUNT(*) FROM market_listings WHERE seller_id=? AND active=1",
-            (interaction.user.id,),
-        ).fetchone()[0])
-        listing_limit = max(1, tier6_setting(db, "tier6_market_max_listings", 20))
-        if active_listings >= listing_limit:
-            await interaction.response.send_message(
-                view=xbot_ui.warning("Listing Limit Reached", f"You may have up to **{listing_limit} active listings**. Cancel or sell one first."),
-                ephemeral=True,
-            )
-            return
-        found = find_item(db, item, interaction.user.id)
-        if found is None or found["quantity"] < quantity or quantity <= 0:
-            await interaction.response.send_message(view=xbot_ui.danger("Listing Rejected", "You do not own that quantity."), ephemeral=True); return
-        if not found["tradeable"]:
-            await interaction.response.send_message(view=xbot_ui.danger("Listing Rejected", "This item is not tradeable."), ephemeral=True); return
-        if not setting(db, "market_enabled") or not setting(db, "market_min_price") <= price_each <= setting(db, "market_max_price"):
-            await interaction.response.send_message(view=xbot_ui.danger("Invalid Price", f"Price must be **{setting(db,'market_min_price'):,}–{setting(db,'market_max_price'):,} XC**."), ephemeral=True); return
-        db.execute("UPDATE inventories SET quantity=quantity-? WHERE user_id=? AND item_id=?", (quantity, interaction.user.id, found["id"]))
-        cursor = db.execute("INSERT INTO market_listings(seller_id,item_id,quantity,price_each,created_at) VALUES(?,?,?,?,?)", (interaction.user.id, found["id"], quantity, price_each, int(time.time())))
-        log(db, interaction.user.id, "market_sell", f"listing {cursor.lastrowid}: {quantity}x {found['name']} at {price_each}")
-        db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("🏷️ Market Listing Created", f"Listing **#{cursor.lastrowid}**: {quantity}x **{found['emoji']} {found['name']}** at **{price_each:,} XC each**."))
+        found=find_item(db,item,interaction.user.id)
+        if found is None:
+            await interaction.response.send_message('Item unavailable.',ephemeral=True);return
+        import economy_transactions
+        try:notice=economy_transactions.settle(db,interaction.user.id,'list',found['id'],quantity,price_each)
+        except ValueError as error:notice=str(error)
+        await interaction.response.send_message(view=xbot_ui.panel('Player Market',notice),ephemeral=True)
 
     @bot.tree.command(name="market_cancel", description="Cancel your market listing")
     async def market_cancel(interaction: discord.Interaction, listing_id: int):
-        row = db.execute("SELECT * FROM market_listings WHERE id=? AND seller_id=? AND active=1", (listing_id, interaction.user.id)).fetchone()
-        if row is None:
-            await interaction.response.send_message(view=xbot_ui.danger("Listing Not Found", "That is not one of your active listings."), ephemeral=True); return
-        db.execute("UPDATE market_listings SET active=0 WHERE id=?", (listing_id,))
-        db.execute("""INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
-            ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""", (interaction.user.id, row["item_id"], row["quantity"]))
-        log(db, interaction.user.id, "market_cancel", f"listing {listing_id}")
-        db.commit()
-        await interaction.response.send_message(view=xbot_ui.warning("↩️ Listing Cancelled", f"Listing **#{listing_id}** was cancelled and its items returned."), ephemeral=True)
+        import economy_transactions
+        expire_market_listings(db)
+        try:notice=economy_transactions.settle(db,interaction.user.id,'market_cancel',listing_id)
+        except ValueError as error:notice=str(error)
+        await interaction.response.send_message(view=xbot_ui.panel('My Listing',notice),ephemeral=True)

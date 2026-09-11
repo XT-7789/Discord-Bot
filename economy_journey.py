@@ -294,6 +294,9 @@ class JourneyView(discord.ui.LayoutView):
         data=dict(page=self.page,rid=self.rid,iid=self.iid,material=self.material,offset=self.offset,back=self)
         data.update(kwargs); return JourneyView(self.bot,self.db,self.uid,**data)
 
+    def fresh(self):
+        return self.next(back=self.back,operation=self.operation,amount=self.amount)
+
     async def interaction_check(self,i):
         if i.user.id==self.uid: return True
         await i.response.send_message('Open your own Economy panel.',ephemeral=True); return False
@@ -361,7 +364,7 @@ class JourneyView(discord.ui.LayoutView):
             rows=db.execute(f'''SELECT i.*,v.quantity FROM inventories v JOIN items i ON i.id=v.item_id
                 WHERE v.user_id=? AND v.quantity>0 AND i.enabled=1 AND {condition} ORDER BY i.name''',(uid,)).fetchall()
             self.text('Choose an item to review. Nothing is sold or used automatically.')
-            options=[discord.SelectOption(label=f"{i['name']} ×{i['quantity']}"[:100],value=str(i['id'])) for i in rows[self.offset:self.offset+25]]
+            options=[discord.SelectOption(label=f"{i['name']} ×{i['quantity']}"[:100],value=str(i['id']),default=i['id']==self.iid) for i in rows[self.offset:self.offset+25]]
             if options:self.box.add_item(discord.ui.ActionRow(Select(self,options,'product','Choose item…')))
             else:self.text('No crafted products in your Backpack.' if self.page == 'products' else 'No sellable materials in your Backpack.')
             self.pager(len(rows))
@@ -399,6 +402,18 @@ class JourneyView(discord.ui.LayoutView):
 
     async def act(self,i,action):
         key=action[0]
+        if key in {'recipe','batch','confirm','max','preset'}:
+            from economy_trade_ui import TradeView
+            import economy_transactions
+            kind='craft' if key=='recipe' else 'queue' if key=='batch' else action[1]
+            target=action[1] if key=='recipe' else self.iid if kind in {'sell','use'} else self.rid
+            quantity=action[2] if key=='preset' else 1
+            if key=='max':
+                try:quantity=economy_transactions.quote(self.db,self.uid,kind,target)['maximum'] or 1
+                except ValueError as error:
+                    await i.response.send_message(str(error),ephemeral=True);return
+            back=(lambda:self.next(rid=target,back=self.back,operation=self.operation,amount=self.amount)) if key=='recipe' else self.fresh
+            await i.response.edit_message(view=TradeView(self.bot,self.db,self.uid,kind,target,quantity,back=back));return
         if key=='quantity':
             await i.response.send_modal(Quantity(self,action[1]));return
         if key=='collect':
@@ -438,11 +453,11 @@ class JourneyView(discord.ui.LayoutView):
                 target=self.next(page='confirm',operation=operation,amount=amount)
             except ValueError as error:
                 await i.response.send_message(str(error),ephemeral=True);return
-        elif key=='back':target=self.back or self.next(page='recipes',back=None)
+        elif key=='back':target=self.back() if callable(self.back) else self.back.fresh() if isinstance(self.back,JourneyView) else self.back or self.next(page='recipes',back=None)
         elif key=='recipe':target=self.next(page='detail',rid=action[1],offset=0)
         elif key=='product':
             r=self.db.execute('SELECT id FROM recipes WHERE output_item_id=? ORDER BY enabled DESC,id LIMIT 1',(action[1],)).fetchone()
-            target=self.next(page='product',iid=action[1],rid=r[0] if r else self.rid,offset=0)
+            target=self.next(page='product',iid=action[1],rid=r[0] if r else self.rid,offset=0,back=lambda:self.next(iid=action[1],back=self.back))
         elif key=='all':target=self.next(page='recipes',material=None,offset=0)
         elif key=='offset':target=self.next(offset=action[1],back=self.back)
         elif key=='confirm':target=self.next(page='confirm',operation=action[1],amount=1)
@@ -489,7 +504,9 @@ class Quantity(discord.ui.Modal):
             n=int(self.value.value)
             if not 1<=n<=1000:raise ValueError()
         except ValueError:await i.response.send_message('Choose 1 to 1,000.',ephemeral=True);return
-        await i.response.edit_message(view=self.v.next(page='confirm',operation=self.operation,amount=n))
+        from economy_trade_ui import TradeView
+        target=self.v.iid if self.operation in {'sell','use'} else self.v.rid
+        await i.response.edit_message(view=TradeView(self.v.bot,self.v.db,self.v.uid,self.operation,target,n,back=self.v.fresh))
 
 
 class GoalSelect(discord.ui.Select):
@@ -510,6 +527,10 @@ class Entry(discord.ui.Button):
         self.args=(bot,db,uid);self.kwargs=dict(page=page,material=material,back=back,rid=rid,iid=iid)
     async def callback(self,i):
         if i.user.id!=self.args[2]:await i.response.send_message('Open your own Economy panel.',ephemeral=True);return
+        if self.kwargs['page']=='detail' and self.kwargs['rid']:
+            from economy_trade_ui import TradeView
+            view=JourneyView(*self.args,**{**self.kwargs,'page':'recipes'})
+            await i.response.edit_message(view=TradeView(*self.args,'craft',self.kwargs['rid'],back=view.fresh));return
         await i.response.edit_message(view=JourneyView(*self.args,**self.kwargs))
 
 

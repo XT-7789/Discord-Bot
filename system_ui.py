@@ -533,7 +533,7 @@ def register(bot, db, create_player):
                 return False
             return await check(i)
         view.interaction_check=owner_check
-        can_footer=view.total_children_count<=34 and getattr(view,'finished',None) is not False
+        can_footer=view.total_children_count<=34 and getattr(view,'finished',None) is not False and not getattr(view,'xbot_managed_navigation',False)
         if can_footer:
             for child in list(view.walk_children()):
                 if isinstance(child,discord.ui.Button) and not isinstance(child,Nav) and (child.label or '').strip() in {'Lobby','✨ Lobby','Menu'}:

@@ -164,11 +164,13 @@ class JourneyTests(unittest.TestCase):
                 v.to_components();self.assertLessEqual(v.total_children_count,40)
             v=j.JourneyView(bot,self.db,self.uid,rid=self.rid)
             i=interaction();await v.act(i,('recipe',self.rid));detail=i.response.edit_message.call_args.kwargs['view']
-            i=interaction();await detail.act(i,('back',));self.assertIs(i.response.edit_message.call_args.kwargs['view'],v)
-            i=interaction();await detail.act(i,('confirm','craft'));confirm=i.response.edit_message.call_args.kwargs['view']
+            from economy_trade_ui import TradeNav,TradeButton
+            i=interaction();await next(x for x in detail.walk_children() if isinstance(x,TradeNav) and x.key=='back').callback(i)
+            self.assertEqual(i.response.edit_message.call_args.kwargs['view'].page,v.page)
+            confirm=detail
             i=interaction();await confirm.act(i,('execute',));self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],1)
             await confirm.act(interaction(),('execute',));self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],1)
-            button=next(x for x in detail.walk_children() if isinstance(x,j.Button));await button.callback(interaction(self.uid+1))
+            button=next(x for x in detail.walk_children() if isinstance(x,TradeButton));await button.callback(interaction(self.uid+1))
             self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],1)
         asyncio.run(run())
 
@@ -212,9 +214,9 @@ class JourneyTests(unittest.TestCase):
             await selector.callback(interaction());self.assertEqual(j.selected_goal(self.db,self.uid),'war')
             v=j.JourneyView(bot,self.db,self.uid,page='detail',rid=self.rid,iid=self.iid)
             i=interaction();await v.act(i,('batch',));batch=i.response.edit_message.call_args.kwargs['view']
-            self.assertEqual(batch.page,'batch')
-            i=interaction();await batch.act(i,('max','queue'));confirm=i.response.edit_message.call_args.kwargs['view']
-            self.assertEqual(confirm.amount,6);self.assertEqual(j.activity(self.db,self.uid)['active'],0)
+            self.assertEqual(batch.kind,'queue')
+            i=interaction();await batch.act(i,('quantity',6));confirm=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual(confirm.quantity,6);self.assertEqual(j.activity(self.db,self.uid)['active'],0)
             self.assertIn('After fee',str(confirm.to_components()))
             self.db.execute('UPDATE players SET xc=0 WHERE user_id=?',(self.uid,));self.db.commit()
             await confirm.act(interaction(),('execute',));self.assertEqual(j.activity(self.db,self.uid)['active'],0)
@@ -222,7 +224,7 @@ class JourneyTests(unittest.TestCase):
             j.craft(self.db,self.uid,self.rid,2)
             v=j.JourneyView(bot,self.db,self.uid,page='product',rid=self.rid,iid=self.iid)
             i=interaction();await v.act(i,('max','sell'));confirm=i.response.edit_message.call_args.kwargs['view']
-            self.assertEqual(confirm.amount,2);self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],2)
+            self.assertEqual(confirm.quantity,2);self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],2)
             await confirm.act(interaction(),('execute',));await confirm.act(interaction(),('execute',))
             self.assertEqual(j.owned(self.db,self.uid,self.iid)['quantity'],0)
         asyncio.run(run())

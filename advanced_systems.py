@@ -334,12 +334,15 @@ def register_commands(bot, db, create_player):
             self.owner_id = owner_id; self.recipe_id = recipe_id; self.amount = amount
 
         async def callback(self, interaction):
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open your own Crafting panel.',ephemeral=True);return
             recipe = db.execute("""SELECT r.*,o.name output_name,o.emoji output_emoji FROM recipes r
                 JOIN items o ON o.id=r.output_item_id WHERE r.id=? AND r.enabled=1""", (self.recipe_id,)).fetchone()
             if recipe is None:
                 await interaction.response.edit_message(view=CraftingCentreView(self.owner_id, notice="❌ This recipe is no longer available.")); return
             amount = max_craftable(self.owner_id, recipe, recipe_ingredients(recipe["id"])) if self.amount == 0 else self.amount
-            await interaction.response.edit_message(view=CraftConfirmView(self.owner_id, recipe["id"], max(1, min(amount, 100))))
+            from economy_trade_ui import TradeView
+            await interaction.response.edit_message(view=TradeView(bot,db,self.owner_id,'craft',recipe['id'],max(1,min(amount,100)),advanced=True,back=lambda:CraftingCentreView(self.owner_id,recipe['id'])))
 
     class CraftConfirmButton(discord.ui.Button):
         def __init__(self, owner_id, recipe_id, amount):

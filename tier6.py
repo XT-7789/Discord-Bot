@@ -221,6 +221,7 @@ def _period(period: str, now: int):
 
 
 def update_stock_prices(db, now: int | None = None):
+    owns_transaction = not db.in_transaction
     now = int(now or time.time())
     interval = max(60, setting(db, "tier6_stock_update_seconds"))
     global_cap = max(1, min(50, setting(db, "tier6_stock_max_change_percent")))
@@ -243,12 +244,24 @@ def update_stock_prices(db, now: int | None = None):
         db.execute("UPDATE tier6_stock_companies SET previous_price=?,price=?,last_update=? WHERE id=?", (previous, price, updated_at, company["id"]))
         db.execute("INSERT INTO tier6_stock_prices(company_id,price,created_at) VALUES(?,?,?)", (company["id"], price, now))
         changed += 1
-    if changed:
+    if changed and owns_transaction:
         db.commit()
     return changed
 
 
-def stock_trade(db, user_id: int, company_id: int, side: str, quantity: int):
+def stock_quote(db, user_id, company_id, side, quantity):
+    if side not in {'buy','sell'} or not isinstance(quantity,int) or quantity<1:
+        raise ValueError('Choose a positive whole number of shares.')
+    company=db.execute('SELECT * FROM tier6_stock_companies WHERE id=?',(company_id,)).fetchone()
+    if not company:raise ValueError('Company unavailable.')
+    gross=int(company['price'])*quantity
+    fee=tier8.discounted(db,user_id,'trade',max(0,math.ceil(gross*setting(db,'tier6_stock_fee_percent')/100)))
+    return dict(company=dict(company),gross=gross,fee=fee,total=gross+fee if side=='buy' else max(0,gross-fee))
+
+
+@economy_journey.atomic_action
+def stock_trade(db, user_id: int, company_id: int, side: str, quantity: int, expected=None):
+    if side not in {'buy','sell'}:return False,'Unknown stock trade type.'
     quantity = int(quantity)
     if not setting(db, "tier6_economy_enabled") or not setting(db, "tier6_stock_enabled"):
         return False, "The Stock Market is currently closed."
@@ -260,9 +273,10 @@ def stock_trade(db, user_id: int, company_id: int, side: str, quantity: int):
     if not company or not player:
         return False, "That company or player is unavailable."
     price = int(company["price"])
-    gross = price * quantity
-    fee = max(0, math.ceil(gross * setting(db, "tier6_stock_fee_percent") / 100))
-    fee = tier8.discounted(db, user_id, 'trade', fee)
+    quoted=stock_quote(db,user_id,company_id,side,quantity)
+    gross,fee=quoted['gross'],quoted['fee']
+    if expected is not None and expected != (price,fee,quoted['total']):
+        return False,'Price or fee changed. Review the updated quote and confirm again.'
     holding = db.execute("SELECT * FROM tier6_stock_holdings WHERE user_id=? AND company_id=?", (user_id, company_id)).fetchone()
     owned = int(holding["quantity"]) if holding else 0
     if side == "buy":
@@ -319,7 +333,6 @@ def stock_trade(db, user_id: int, company_id: int, side: str, quantity: int):
         (user_id, company_id, side, quantity, price, fee, total, now),
     )
     db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (user_id, "stock_trade", message.replace("**", ""), now))
-    db.commit()
     return True, message
 
 
@@ -490,25 +503,21 @@ def claim_production(db, user_id: int):
     return f"✅ Collected **{len(rows)}** completed Production job(s)."
 
 
-def cancel_production(db, user_id: int, job_id: int):
-    """Cancel an unfinished job and safely return its recorded inputs."""
-    now = int(time.time())
+def production_cancel_quote(db, user_id: int, job_id: int):
+    """Use the saved order inputs; only legacy jobs fall back to the recipe."""
     row = db.execute(
         """SELECT q.*,COALESCE(r.name,'Archived Recipe') name,COALESCE(r.xc_cost,0) recipe_xc_cost
            FROM tier6_production_queue q LEFT JOIN recipes r ON r.id=q.recipe_id
-           WHERE q.id=? AND q.user_id=? AND q.status='working'""",
+           WHERE q.id=? AND q.user_id=?""",
         (job_id, user_id),
     ).fetchone()
-    if row is None:
-        return "That Production job is no longer active."
-    if int(row["ready_at"]) <= now:
-        return "This job is already ready. Collect it instead of cancelling it."
+    if row is None:raise ValueError('Production job unavailable.')
     quantity = int(row["quantity"])
     ingredients = db.execute(
         "SELECT item_id,quantity FROM tier6_production_inputs WHERE job_id=?",
         (job_id,),
     ).fetchall()
-    if not ingredients:
+    if not ingredients and row['output_item_id'] is None:
         ingredients = [
             {"item_id": item["item_id"], "quantity": int(item["quantity"]) * quantity}
             for item in db.execute(
@@ -516,20 +525,32 @@ def cancel_production(db, user_id: int, job_id: int):
                 (row["recipe_id"],),
             ).fetchall()
         ]
-    for ingredient in ingredients:
+    refund=int(row['xc_paid'] or 0) if row['output_item_id'] is not None else int(row['xc_paid'] or 0) or int(row['recipe_xc_cost'])*quantity
+    return dict(job=dict(row),inputs=[dict(i) for i in ingredients],refund=refund)
+
+
+@economy_journey.atomic_action
+def cancel_production(db, user_id: int, job_id: int):
+    """Cancel an unfinished job and safely return its recorded inputs."""
+    now=int(time.time())
+    try:q=production_cancel_quote(db,user_id,job_id)
+    except ValueError:return 'That Production job is no longer active.'
+    row=q['job'];quantity=int(row['quantity'])
+    if row['status']!='working':return 'That Production job is no longer active.'
+    if int(row['ready_at'])<=now:return 'This job is already ready. Collect it instead of cancelling it.'
+    for ingredient in q['inputs']:
         db.execute(
             """INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
                ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""",
             (user_id, ingredient["item_id"], int(ingredient["quantity"])),
         )
-    refund = int(row["xc_paid"] or 0) or int(row["recipe_xc_cost"]) * quantity
+    refund=q['refund']
     db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (refund, user_id))
     db.execute("UPDATE tier6_production_queue SET status='cancelled',claimed_at=? WHERE id=?", (now, job_id))
     db.execute(
         "INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
         (user_id, "production_cancel", f"Cancelled {row['name']} x{quantity}; refunded {refund} XC", now),
     )
-    db.commit()
     return f"↩️ Cancelled **{row['name']} ×{quantity:,}** and returned its materials plus **{refund:,} XC**."
 
 
@@ -771,50 +792,36 @@ def register_commands(bot, db, create_player):
             self.owner_id = owner_id
 
         async def callback(self, interaction: discord.Interaction):
-            await interaction.response.edit_message(view=StockCompanyView(self.owner_id, int(self.values[0])))
-
-    class StockTradeModal(discord.ui.Modal):
-        def __init__(self, owner_id: int, company_id: int, side: str, source_message):
-            super().__init__(title=f"{side.title()} Stock")
-            self.owner_id, self.company_id, self.side, self.source_message = owner_id, company_id, side, source_message
-            self.quantity = discord.ui.TextInput(label="Number of shares", default="1", min_length=1, max_length=8)
-            self.add_item(self.quantity)
-
-        async def on_submit(self, interaction: discord.Interaction):
-            try:
-                quantity = int(str(self.quantity.value).replace(",", "").strip())
-            except ValueError:
-                await interaction.response.send_message("Enter a whole number of shares.", ephemeral=True)
-                return
-            await interaction.response.defer()
-            _success, notice = stock_trade(db, self.owner_id, self.company_id, self.side, quantity)
-            await self.source_message.edit(view=StockCompanyView(self.owner_id, self.company_id, notice))
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message('Open your own Stocks panel.', ephemeral=True); return
+            await interaction.response.edit_message(view=StockCompanyView(self.owner_id, int(self.values[0]), market_page=self.view.page))
 
     class StockTradeButton(discord.ui.Button):
-        def __init__(self, owner_id: int, company_id: int, side: str):
-            super().__init__(label=side.title(), emoji="🟢" if side == "buy" else "🔴", style=discord.ButtonStyle.success if side == "buy" else discord.ButtonStyle.danger)
-            self.owner_id, self.company_id, self.side = owner_id, company_id, side
-
-        async def callback(self, interaction: discord.Interaction):
-            await interaction.response.send_modal(StockTradeModal(self.owner_id, self.company_id, self.side, interaction.message))
+        def __init__(self,owner_id,company_id,side):
+            super().__init__(label=side.title(),style=discord.ButtonStyle.primary)
+            self.owner_id,self.company_id,self.side=owner_id,company_id,side
+        async def callback(self,interaction):
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open your own Stocks panel.',ephemeral=True);return
+            from economy_trade_ui import TradeView
+            page=self.view.market_page
+            await interaction.response.edit_message(view=TradeView(bot,db,self.owner_id,'stock_'+self.side,self.company_id,back=lambda:StockCompanyView(self.owner_id,self.company_id,market_page=page)))
 
     class StockSellAllButton(discord.ui.Button):
-        def __init__(self, owner_id: int, company_id: int, quantity: int):
-            super().__init__(
-                label="Sell All",
-                emoji="📤",
-                style=discord.ButtonStyle.danger,
-                disabled=quantity <= 0,
-            )
-            self.owner_id, self.company_id, self.quantity = owner_id, company_id, quantity
-
-        async def callback(self, interaction: discord.Interaction):
-            _success, notice = stock_trade(db, self.owner_id, self.company_id, "sell", self.quantity)
-            await interaction.response.edit_message(view=StockCompanyView(self.owner_id, self.company_id, notice))
+        def __init__(self,owner_id,company_id,quantity):
+            super().__init__(label='Review Sell All',style=discord.ButtonStyle.secondary,disabled=quantity<=0)
+            self.owner_id,self.company_id,self.quantity=owner_id,company_id,quantity
+        async def callback(self,interaction):
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open your own Stocks panel.',ephemeral=True);return
+            from economy_trade_ui import TradeView
+            page=self.view.market_page
+            await interaction.response.edit_message(view=TradeView(bot,db,self.owner_id,'stock_sell',self.company_id,max(1,self.quantity),back=lambda:StockCompanyView(self.owner_id,self.company_id,market_page=page)))
 
     class StockCompanyView(OwnedEconomyView):
-        def __init__(self, owner_id: int, company_id: int, notice: str = ""):
+        def __init__(self, owner_id: int, company_id: int, notice: str = "", market_page=0):
             super().__init__(owner_id)
+            self.market_page=market_page
             update_stock_prices(db)
             company = db.execute("SELECT * FROM tier6_stock_companies WHERE id=?", (company_id,)).fetchone()
             holding = db.execute("SELECT * FROM tier6_stock_holdings WHERE user_id=? AND company_id=?", (owner_id, company_id)).fetchone()
@@ -829,7 +836,7 @@ def register_commands(bot, db, create_player):
                 f"{company['industry']}\n"
                 f"### 💹 Share Price\n## {company['price']:,} XC\nChange **{change:+,} ({percent:+.1f}%)**\n"
                 f"### 💼 Your Holding\nShares **{owned:,}**\nAverage cost **{average:,} XC**\nUnrealised P/L **{profit:+,} XC**\n"
-                f"### 📊 Availability\n**{company['available_shares']:,}** shares available"
+                f"### 📊 Availability\n**{company['available_shares']:,}** shares available\nGame virtual stocks · Fictional XC, not real investments."
             ))
             if notice:
                 container.add_item(discord.ui.TextDisplay(notice))
@@ -837,17 +844,19 @@ def register_commands(bot, db, create_player):
                 StockTradeButton(owner_id, company_id, "buy"),
                 StockTradeButton(owner_id, company_id, "sell"),
                 StockSellAllButton(owner_id, company_id, owned),
-                EconomyNavButton(owner_id, "stock", "All Companies", "📈"),
+                EconomyListPage(owner_id, 'stock', market_page, 'All Companies'),
                 EconomyNavButton(owner_id, "assets", "Portfolio", "💼"),
             ))
             container.add_item(discord.ui.ActionRow(EconomyNavButton(owner_id, "economy_v2", "Economy", "💰")))
             self.add_item(container)
 
     class StockMarketView(OwnedEconomyView):
-        def __init__(self, owner_id: int):
+        def __init__(self, owner_id: int, page=0):
             super().__init__(owner_id)
             update_stock_prices(db)
-            companies = db.execute("SELECT * FROM tier6_stock_companies WHERE enabled=1 ORDER BY symbol LIMIT 25").fetchall()
+            count=db.execute('SELECT COUNT(*) FROM tier6_stock_companies WHERE enabled=1').fetchone()[0]
+            pages=max(1,(count+24)//25);self.page=min(max(0,page),pages-1)
+            companies = db.execute("SELECT * FROM tier6_stock_companies WHERE enabled=1 ORDER BY symbol LIMIT 25 OFFSET ?",(self.page*25,)).fetchall()
             summary=economy_summary(db,owner_id)
             container = discord.ui.Container(accent_color=discord.Color.blue())
             container.add_item(discord.ui.TextDisplay(
@@ -858,50 +867,45 @@ def register_commands(bot, db, create_player):
             ))
             container.add_item(economy_navigation(owner_id, "stock"))
             if setting(db, "tier6_economy_enabled") and setting(db, "tier6_stock_enabled") and companies:
-                container.add_item(discord.ui.TextDisplay(f"### Companies\n{len(companies)} available · Select to inspect price and holdings."))
+                container.add_item(discord.ui.TextDisplay(f"### Companies\n{count} available · Page {self.page+1}/{pages} · Select to inspect."))
                 container.add_item(discord.ui.ActionRow(StockCompanySelect(owner_id, companies)))
+                if pages>1:
+                    container.add_item(discord.ui.ActionRow(EconomyListPage(owner_id,'stock',self.page-1,'Previous',self.page==0),EconomyListPage(owner_id,'stock',self.page+1,'Next',self.page==pages-1)))
                 container.add_item(discord.ui.ActionRow(
                     EconomyNavButton(owner_id, "assets", "My Portfolio", "💼", style=discord.ButtonStyle.success),
                     EconomyNavButton(owner_id, "economy_v2", "Economy", "💰"),
                 ))
             else:
-                container.add_item(discord.ui.TextDisplay("The Stock Market is currently closed."))
+                container.add_item(discord.ui.TextDisplay("No companies available. Return to Economy or try refreshing later." if not companies else "The Stock Market is currently closed. You can still visit your Backpack."))
             self.add_item(container)
 
+    class EconomyListPage(discord.ui.Button):
+        def __init__(self,owner,kind,page,label,disabled=False,recipe_page=0,selected=None):
+            super().__init__(label=label,disabled=disabled)
+            self.owner,self.kind,self.page,self.recipe_page,self.selected=owner,kind,page,recipe_page,selected
+        async def callback(self,i):
+            if i.user.id!=self.owner:
+                await i.response.send_message('Open your own Economy panel.',ephemeral=True);return
+            view=StockMarketView(self.owner,self.page) if self.kind=='stock' else ProductionView(self.owner,page=self.page,recipe_page=self.recipe_page,selected=self.selected)
+            await i.response.edit_message(view=view)
+
     class ProductionRecipeSelect(discord.ui.Select):
-        def __init__(self, owner_id: int, recipes):
+        def __init__(self, owner_id: int, recipes, selected=None):
             options = [discord.SelectOption(
                 label=row["name"][:100], value=str(row["id"]), emoji=row["emoji"],
-                description=f"Output {row['output_quantity']}x {row['output_name']} · {row['xc_cost']} XC each"[:100],
+                description=f"Output {row['output_quantity']}x {row['output_name']} · {row['xc_cost']} XC each"[:100], default=row['id']==selected,
             ) for row in recipes[:25]]
             super().__init__(placeholder="Choose a Recipe to queue", options=options, disabled=not options)
             self.owner_id = owner_id
 
         async def callback(self, interaction: discord.Interaction):
-            await interaction.response.send_modal(ProductionQuantityModal(self.owner_id, int(self.values[0]), interaction.message))
-
-    class ProductionQuantityModal(discord.ui.Modal, title="Start Production"):
-        def __init__(self, owner_id: int, recipe_id: int, source_message):
-            super().__init__()
-            self.owner_id, self.recipe_id, self.source_message = owner_id, recipe_id, source_message
-            self.token = __import__('secrets').token_hex(16)
-            self.quantity = discord.ui.TextInput(label="Number of production batches", default="1", min_length=1, max_length=4)
-            self.add_item(self.quantity)
-
-        async def on_submit(self, interaction: discord.Interaction):
-            if interaction.user.id != self.owner_id:
+            if interaction.user.id!=self.owner_id:
                 await interaction.response.send_message('Open your own Production panel.',ephemeral=True);return
-            try:
-                quantity = int(str(self.quantity.value).strip())
-            except ValueError:
-                await interaction.response.send_message("Enter a whole number.", ephemeral=True)
-                return
-            await interaction.response.defer()
-            try:
-                _success, notice = start_production(db, self.owner_id, self.recipe_id, quantity,token=self.token)
-            except ValueError as error:
-                notice = str(error)
-            await self.source_message.edit(view=ProductionView(self.owner_id, notice))
+            from economy_trade_ui import TradeView
+            rid=int(self.values[0]);page=self.view.page;recipe_page=self.view.recipe_page
+            await interaction.response.edit_message(view=TradeView(bot,db,self.owner_id,'queue',rid,back=lambda:ProductionView(self.owner_id,page=page,recipe_page=recipe_page,selected=rid)))
+
+
 
     class ProductionClaimButton(discord.ui.Button):
         def __init__(self, owner_id: int, ready: bool):
@@ -912,7 +916,7 @@ def register_commands(bot, db, create_player):
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message('Open your own Production panel.',ephemeral=True);return
             notice = claim_production(db, self.owner_id)
-            await interaction.response.edit_message(view=ProductionView(self.owner_id, notice))
+            await interaction.response.edit_message(view=ProductionView(self.owner_id, notice, self.view.page, self.view.recipe_page, self.view.selected))
 
     class ProductionCancelSelect(discord.ui.Select):
         def __init__(self, owner_id: int, jobs):
@@ -920,30 +924,36 @@ def register_commands(bot, db, create_player):
                 label=f"Cancel #{row['id']} · {row['name']} ×{row['quantity']}"[:100],
                 value=str(row["id"]),
                 emoji="↩️",
-                description="Returns current Recipe materials and XC"[:100],
+                description="Preview returned materials and XC before cancelling"[:100],
             ) for row in jobs[:25]]
             super().__init__(placeholder="Cancel an unfinished Production job", options=options)
             self.owner_id = owner_id
 
         async def callback(self, interaction: discord.Interaction):
-            notice = cancel_production(db, self.owner_id, int(self.values[0]))
-            await interaction.response.edit_message(view=ProductionView(self.owner_id, notice))
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open your own Production panel.',ephemeral=True);return
+            from economy_trade_ui import TradeView
+            page=self.view.page;recipe_page=self.view.recipe_page;selected=self.view.selected
+            await interaction.response.edit_message(view=TradeView(bot,db,self.owner_id,'production_cancel',int(self.values[0]),back=lambda:ProductionView(self.owner_id,page=page,recipe_page=recipe_page,selected=selected)))
 
     class ProductionView(OwnedEconomyView):
-        def __init__(self, owner_id: int, notice: str = ""):
+        def __init__(self, owner_id: int, notice: str = "", page=0, recipe_page=0, selected=None):
             super().__init__(owner_id)
+            now = int(time.time())
+            totals=db.execute("SELECT COUNT(*) total,COALESCE(SUM(ready_at<=?),0) ready FROM tier6_production_queue WHERE user_id=? AND status='working'",(now,owner_id)).fetchone()
+            recipe_count=db.execute('SELECT COUNT(*) FROM recipes r JOIN items i ON i.id=r.output_item_id WHERE r.enabled=1').fetchone()[0]
+            pages=max(1,(totals['total']+9)//10);recipe_pages=max(1,(recipe_count+24)//25)
+            self.page=min(max(0,page),pages-1);self.recipe_page=min(max(0,recipe_page),recipe_pages-1);self.selected=selected
             recipes = db.execute(
                 """SELECT r.*,i.name output_name FROM recipes r JOIN items i ON i.id=r.output_item_id
-                   WHERE r.enabled=1 ORDER BY r.name LIMIT 25"""
+                   WHERE r.enabled=1 ORDER BY r.name LIMIT 25 OFFSET ?""",(self.recipe_page*25,)
             ).fetchall()
             queue = db.execute(
                 """SELECT q.*,COALESCE(r.name,'Archived Recipe') name,COALESCE(r.emoji,'🏭') emoji
                    FROM tier6_production_queue q LEFT JOIN recipes r ON r.id=q.recipe_id
-                   WHERE q.user_id=? AND q.status='working' ORDER BY q.ready_at LIMIT 10""", (owner_id,)
+                   WHERE q.user_id=? AND q.status='working' ORDER BY q.ready_at,q.id LIMIT 10 OFFSET ?""", (owner_id,self.page*10)
             ).fetchall()
-            now = int(time.time())
             container = discord.ui.Container(accent_color=discord.Color.orange())
-            totals=db.execute("SELECT COUNT(*) total,COALESCE(SUM(ready_at<=?),0) ready FROM tier6_production_queue WHERE user_id=? AND status='working'",(now,owner_id)).fetchone()
             container.add_item(discord.ui.TextDisplay(f"## 🏭 Production Centre\n### Ready to Collect\n## {totals['ready']} jobs\nActive queue **{totals['total']}** · Collect finished products below."))
             container.add_item(economy_navigation(owner_id, "production"))
             if notice:
@@ -952,16 +962,26 @@ def register_commands(bot, db, create_player):
                 queue_lines = []
                 for row in queue:
                     state = "✅ Ready" if int(row["ready_at"]) <= now else f"<t:{row['ready_at']}:R>"
-                    queue_lines.append(f"{row['emoji']} **{row['name']} ×{row['quantity']}** · {state}")
-                container.add_item(discord.ui.TextDisplay("### Queue · Next 10 Jobs\n" + "\n\n".join(queue_lines)))
+                    queue_lines.append(f"{row['emoji']} **{row['name'][:100]} ×{row['quantity']}** · {state}")
+                container.add_item(discord.ui.TextDisplay(f"### Queue · Page {self.page+1}/{pages}\n" + "\n\n".join(queue_lines)))
             else:
                 container.add_item(discord.ui.TextDisplay("### Queue\nNo active Production jobs."))
             if recipes and setting(db, "tier6_production_enabled"):
-                container.add_item(discord.ui.ActionRow(ProductionRecipeSelect(owner_id, recipes)))
+                container.add_item(discord.ui.ActionRow(ProductionRecipeSelect(owner_id, recipes, selected)))
+            elif not setting(db,'tier6_production_enabled'):
+                container.add_item(discord.ui.TextDisplay('New Production jobs are closed. Existing jobs can still be collected.'))
+            else:
+                container.add_item(discord.ui.TextDisplay('No enabled recipes. Try Mines or return to Economy.'))
+            paging=[]
+            if pages>1:
+                paging.extend([EconomyListPage(owner_id,'production',self.page-1,'Previous Jobs',self.page==0,self.recipe_page,selected),EconomyListPage(owner_id,'production',self.page+1,'Next Jobs',self.page==pages-1,self.recipe_page,selected)])
+            if recipe_pages>1:
+                paging.extend([EconomyListPage(owner_id,'production',self.page,'Previous Recipes',self.recipe_page==0,self.recipe_page-1,selected),EconomyListPage(owner_id,'production',self.page,'Next Recipes',self.recipe_page==recipe_pages-1,self.recipe_page+1,selected)])
+            if paging:container.add_item(discord.ui.ActionRow(*paging))
             cancellable = [row for row in queue if int(row["ready_at"]) > now]
             if cancellable:
                 container.add_item(discord.ui.ActionRow(ProductionCancelSelect(owner_id, cancellable)))
-            ready = any(int(row["ready_at"]) <= now for row in queue)
+            ready = totals['ready']>0
             container.add_item(discord.ui.ActionRow(
                 ProductionClaimButton(owner_id, ready),
                 economy_journey.Entry(bot,db,owner_id,'View Products',page='products'),
