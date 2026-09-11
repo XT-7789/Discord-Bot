@@ -36,7 +36,7 @@ class ImageTests(unittest.TestCase):
         snapshot={'owner':1,'goal':'A'*500,'upgrade':'B'*500,'tiles':[]}
         renderer.render(snapshot)
         with patch.object(renderer.time,'monotonic',return_value=time.monotonic()+61),patch.object(renderer,'FONT',renderer.FONT.with_name('missing.ttf')):
-            with self.assertRaises(OSError):renderer.render(snapshot)
+            self.assertEqual(960,Image.open(io.BytesIO(renderer.render(snapshot))).width)
         for uid in range(34):renderer.render(dict(snapshot,owner=uid))
         self.assertEqual(32,len(renderer.CACHE))
         async def run():
@@ -47,6 +47,20 @@ class ImageTests(unittest.TestCase):
             self.assertIn('Continue',str(view.to_components()))
             self.assertIn('Text mode (OV-IMG-2)',str(view.to_components()))
             self.assertNotIn('attachment://',str(view.to_components()))
+        asyncio.run(run())
+
+    def test_termux_without_freetype_still_sends_image(self):
+        async def run():
+            overview.save_layout(self.db,self.uid,list(overview.BLOCKS))
+            view=overview.OverviewView(None,self.db,self.uid)
+            with patch.object(renderer.ImageFont,'truetype',side_effect=ImportError('cannot import _imagingft')):
+                result=await overview.image_options({'view':view})
+            self.assertEqual(1,len(result['attachments']))
+            data=result['attachments'][0].fp.getvalue()
+            image=Image.open(io.BytesIO(data))
+            self.assertEqual((960,940),image.size)
+            self.assertLess(len(data),500*1024)
+            self.assertIn('attachment://overview.png',str(view.to_components()))
         asyncio.run(run())
 
     def test_refresh_acknowledges_and_replaces_attachment(self):

@@ -13,3 +13,9 @@ Discord controls button sizing and image display scale. Tap the image to read fu
 ## OV-IMG-2 diagnostics
 
 New panels identify this revision as OV-IMG-2. Image failures now show an explicit Text mode notice and log the exception in the host terminal, including renderer import failures. Image shortcuts are numbered to match the cards. A screenshot without the marker cannot establish whether an older process or an older message is being used: check git log -1 --oneline in the phone checkout, restart the existing bot and open a fresh /overview. GitHub push does not restart or pull the phone installation.
+
+## Termux without FreeType
+
+Confirmed reported failure: Pillow cannot import PIL._imagingft. TrueType loading now catches ImportError/OSError and renders using Pillow's embedded bitmap font, scaled to the dashboard sizes. No FreeType installation, network fetch, or system font is required for that fallback. This path has a pixel-font appearance; the standard font remains preferred on supported hosts. Missing font files also use this path. Other rendering failures still fall back to the functional text panel.
+
+Verified the missing-FreeType condition by injecting the same ImportError, checking PNG attachment generation, and inspecting the resulting bitmap-font image. Actual phone screenshot acceptance remains pending.

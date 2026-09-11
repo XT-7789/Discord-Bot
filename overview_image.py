@@ -22,11 +22,27 @@ def render(snapshot):
             CACHE.move_to_end(key);return hit[1]
     tiles=snapshot['tiles'];rows=(len(tiles)+2)//3
     image=Image.new('RGB',(960,400+rows*180),'#101820');draw=ImageDraw.Draw(image)
-    fonts={size:ImageFont.truetype(str(FONT),size) for size in (18,22,26,34,42)}
+    bitmap=None
+    try:
+        fonts={size:ImageFont.truetype(str(FONT),size) for size in (18,22,26,34,42)}
+    except (ImportError,OSError):
+        # Termux may ship Pillow without _imagingft. This embedded bitmap font
+        # uses only _imaging, not FreeType or a phone-installed font.
+        loader=getattr(ImageFont,'load_default_imagefont',ImageFont.load_default)
+        bitmap=loader()
     def text(x,y,value,size=22,color='#e8f2f6',width=860):
         value=plain(value)
-        while value and draw.textlength(value,font=fonts[size])>width:value=value[:-4]+'...' if len(value)>4 else value[:-1]
-        draw.text((x,y),value,font=fonts[size],fill=color)
+        font=bitmap if bitmap is not None else fonts[size]
+        scale=size/11 if bitmap is not None else 1
+        while value and draw.textlength(value,font=font)*scale>width:value=value[:-4]+'...' if len(value)>4 else value[:-1]
+        if bitmap is None:
+            draw.text((x,y),value,font=font,fill=color)
+        elif value:
+            bounds=font.getbbox(value)
+            layer=Image.new('RGBA',(max(1,bounds[2]-bounds[0]),max(1,bounds[3]-bounds[1])),(0,0,0,0))
+            ImageDraw.Draw(layer).text((-bounds[0],-bounds[1]),value,font=font,fill=color)
+            layer=layer.resize((min(width,max(1,round(layer.width*scale))),max(1,round(layer.height*scale))),Image.Resampling.NEAREST)
+            image.paste(layer,(x,y),layer)
     draw.rounded_rectangle((24,24,936,376+rows*180),radius=24,fill='#17232e',outline='#2d4452',width=2)
     text(48,42,'X SYSTEM  /  PERSONAL DASHBOARD  /  OV-IMG-2',18,'#41d9d0')
     text(48,70,'MY OVERVIEW',42)
