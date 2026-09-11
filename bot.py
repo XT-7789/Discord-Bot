@@ -272,7 +272,7 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 # the Lobby panels, without filling Discord's slash-command picker.
 PUBLIC_PLAYER_COMMANDS = {
     # Main panels: short, memorable direct access for ordinary players.
-    "menu", "profile", "economy", "shop", "backpack", "market", "mining", "stock",
+    "menu", "overview", "profile", "economy", "shop", "backpack", "market", "mining", "stock",
     "warfront", "city", "army", "recruit", "diplomacy", "casino", "craft", "research",
     # Fast actions that are still useful without opening a panel first.
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",

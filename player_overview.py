@@ -1,0 +1,152 @@
+"""Personal, persisted overview. Opening/customizing never settles assets."""
+import json
+import sqlite3
+import time
+import discord
+import economy_journey as journey
+import economy_progress
+import svip
+
+BLOCKS={'wallet':'Wallet & Bank','mining':'Mines','production':'Craft & Production','market':'Market & Stocks','nation':'Nation','missions':'Missions','vip':'VIP'}
+DEFAULT=('wallet','production','missions')
+
+def layout(db,uid):
+    row=db.execute("SELECT detail FROM economy_logs WHERE user_id=? AND action='overview_layout' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
+    if row:
+        try:
+            value=json.loads(row[0])
+            if isinstance(value,list) and all(isinstance(k,str) and k in BLOCKS for k in value):return tuple(dict.fromkeys(value))
+        except (ValueError,TypeError):pass
+    return DEFAULT
+
+@journey.atomic_action
+def save_layout(db,uid,keys):
+    if not isinstance(keys,(list,tuple)) or len(keys)>len(BLOCKS) or any(not isinstance(k,str) or k not in BLOCKS for k in keys):raise ValueError('Choose valid overview sections.')
+    if not db.execute('SELECT 1 FROM players WHERE user_id=?',(uid,)).fetchone():raise ValueError('Open /menu first.')
+    chosen=[k for k in BLOCKS if k in keys]
+    journey.audit(db,uid,'overview_layout',json.dumps(chosen))
+
+class OverviewView(discord.ui.LayoutView):
+    xbot_managed_navigation=True
+    def __init__(self,bot,db,owner,page=0,*,editing=False,draft=None,notice=''):
+        super().__init__(timeout=600)
+        self.bot,self.db,self.owner=bot,db,owner;self.editing=editing
+        self.selected=tuple(draft) if draft is not None else layout(db,owner)
+        self.pages=max(1,(len(self.selected)+3)//4);self.page=min(max(0,page),self.pages-1)
+        self.box=discord.ui.Container(accent_colour=0x41D9D0);self.add_item(self.box)
+        self.text('-# ✦ X SYSTEM\n# '+('CUSTOMIZE OVERVIEW' if editing else 'MY OVERVIEW'))
+        if notice:self.text(notice)
+        if editing:
+            self.text('Choose the sections you want. Your current goal always stays on top. Up to four sections per page. Changes apply only after Save.')
+            self.box.add_item(discord.ui.ActionRow(LayoutSelect(self)))
+            self.row(('Save',('save',)),('Use Defaults',('defaults',)),('Cancel',('cancel',)),primary=True)
+        else:
+            text,self.route,_=journey.next_step(db,owner)
+            self.text('## Current goal\n'+text[:850])
+            self.row(('Continue',('continue',)),('Choose Goal',('goal',)),primary=True)
+            growth,self.upgrade=economy_progress.growth(db,owner)
+            self.text('### Next upgrade\n'+growth)
+            self.row(('Review Upgrade' if self.upgrade else 'Explore Research',('upgrade',)))
+            p=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
+            if p:
+                for key in self.selected[self.page*4:self.page*4+4]:
+                    text,links=self.section(key,p)
+                    self.box.add_item(discord.ui.Separator());self.text('### '+BLOCKS[key]+'\n'+text)
+                    self.row(*[(label,('nav',dest)) for label,dest in links])
+            if not self.selected:self.text('Goal-only overview. Use Customize to add sections.')
+            self.row(('Customize',('customize',)),('Refresh',('refresh',)))
+            if self.pages>1:self.row(('Previous',('page',self.page-1)),('Next',('page',self.page+1)))
+            self.text(f'Page {self.page+1}/{self.pages} · Your choices are saved per player')
+        self.add_item(discord.ui.ActionRow(OverviewButton(self,'Menu',('menu',)),OverviewButton(self,'Close',('close',))))
+
+    def text(self,text):
+        remaining=3800-sum(len(x.content) for x in self.walk_children() if isinstance(x,discord.ui.TextDisplay))
+        if remaining>0:self.box.add_item(discord.ui.TextDisplay(text[:min(1200,remaining)]))
+    def row(self,*items,primary=False):
+        self.box.add_item(discord.ui.ActionRow(*[OverviewButton(self,label,action,discord.ButtonStyle.success if primary and n==0 else discord.ButtonStyle.secondary) for n,(label,action) in enumerate(items)]))
+    def fresh(self):return OverviewView(self.bot,self.db,self.owner,self.page)
+    async def interaction_check(self,i):
+        if i.user.id==self.owner:return True
+        await i.response.send_message('Open /overview for your own personal panel.',ephemeral=True);return False
+    async def on_error(self,i,error,item):
+        from system_ui import report_panel_error
+        await report_panel_error(i,error)
+
+    def section(self,key,p):
+        db,uid=self.db,self.owner
+        if key=='wallet':return f"Wallet **{p['xc']:,} XC** · Bank **{p['bank_xc']:,} XC**",[('Finance','finance')]
+        if key=='mining':return f"Level **{p['mining_level']}** · Last recorded energy **{p['mining_energy']}**\nOpen Mines to refresh energy and choose an area.",[('Mines','mining')]
+        if key=='production':
+            state=journey.activity(db,uid)
+            return f"Ready **{state['ready']}** · Queue **{state['active']}/{svip.production_limit(db,uid)}**\nCrafted products **{state['products']}**",[('Craft','craft'),('Production','production')]
+        if key=='market':
+            cutoff=int(time.time())-max(1,svip.setting(db,'tier6_market_expiry_days',7))*86400
+            listings=db.execute('SELECT COUNT(*) FROM market_listings WHERE seller_id=? AND active=1 AND quantity>0 AND created_at>?',(uid,cutoff)).fetchone()[0]
+            shares=db.execute('SELECT COALESCE(SUM(quantity),0) FROM tier6_stock_holdings WHERE user_id=?',(uid,)).fetchone()[0]
+            return f"Listings **{listings}/{svip.market_limit(db,uid)}** · Virtual shares **{shares:,}**",[('My Listings','market_mine'),('Stocks','stock')]
+        if key=='nation':
+            cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(uid,)).fetchone()[0]
+            return f"{discord.utils.escape_markdown(p['nation_name'] or 'No Nation')}\nCities **{cities}** · War Credits **{p['money']:,}**",[('Warfront','war')]
+        if key=='missions':
+            import tier5
+            rows=[m for category in ('starter','daily','weekly') for m in tier5.missions_for(db,uid,category)[1] if not m['claimed']]
+            ready=sum(m['progress']>=m['target'] for m in rows)
+            return f"Ready to claim **{ready}** · Unfinished **{len(rows)-ready}**",[('Missions','missions')]
+        status=svip.summary(db,uid)
+        if not status:
+            vip=db.execute('SELECT expires_at FROM casino_vip_members WHERE user_id=?',(uid,)).fetchone()
+            status=f"Casino VIP until <t:{vip[0]}:R>" if vip and vip[0]>int(time.time()) else 'No verified SVIP in this interaction. Check VIP Status in your server.'
+        return status,[('VIP Status','vip')]
+
+    async def act(self,i,action):
+        key=action[0]
+        if key=='close':
+            self.stop();v=discord.ui.LayoutView();v.add_item(discord.ui.TextDisplay('Overview closed. Open /overview to return.'))
+        elif key=='customize':v=OverviewView(self.bot,self.db,self.owner,self.page,editing=True)
+        elif key=='defaults':v=OverviewView(self.bot,self.db,self.owner,self.page,editing=True,draft=DEFAULT)
+        elif key=='save':
+            try:save_layout(self.db,self.owner,self.selected)
+            except (ValueError,sqlite3.Error):
+                await i.response.send_message('Preferences were not saved. Refresh and try again.',ephemeral=True);return
+            v=OverviewView(self.bot,self.db,self.owner,self.page,notice='Overview saved. No assets changed.')
+        elif key in {'cancel','refresh'}:v=self.fresh()
+        elif key=='page':v=OverviewView(self.bot,self.db,self.owner,action[1])
+        elif key=='upgrade':
+            _,item=economy_progress.growth(self.db,self.owner)
+            if item and not item['owned']:
+                from economy_trade_ui import TradeView
+                v=TradeView(self.bot,self.db,self.owner,'shop',item['id'],back=self.fresh)
+            else:
+                await self.act(i,('nav','inventory' if item else 'research'));return
+        elif key in {'continue','goal'}:
+            route=journey.next_step(self.db,self.owner)[1] if key=='continue' else {'page':'activity'}
+            if key=='continue' and route['page']=='activity' and journey.selected_goal(self.db,self.owner)=='earn' and not journey.activity(self.db,self.owner)['ready']:
+                await self.act(i,('nav','mining'));return
+            v=journey.JourneyView(self.bot,self.db,self.owner,**route,back=self.fresh)
+        elif key in {'nav','menu'}:
+            dest='menu' if key=='menu' else action[1]
+            v=self.bot.xbot_system_page_builder(self.owner,dest,member=i.user)
+            if key=='nav':
+                button=next((x for x in v.walk_children() if getattr(x,'key',None)=='back'),None)
+                if button:button.callback=OverviewButton(self,'Back',('refresh',)).callback
+                elif v.total_children_count<=38:v.add_item(discord.ui.ActionRow(OverviewButton(self,'Back to Overview',('refresh',))))
+        else:return
+        await i.response.edit_message(view=v)
+
+class OverviewButton(discord.ui.Button):
+    def __init__(self,v,label,action,style=discord.ButtonStyle.secondary):
+        super().__init__(label=label,style=style,disabled=action[0]=='page' and not 0<=action[1]<v.pages)
+        self.v,self.action=v,action
+    @svip.interaction_context
+    async def callback(self,i):
+        if await self.v.interaction_check(i):await self.v.act(i,self.action)
+
+class LayoutSelect(discord.ui.Select):
+    def __init__(self,v):
+        self.v=v
+        super().__init__(placeholder='Choose sections to display',min_values=0,max_values=len(BLOCKS),options=[discord.SelectOption(label=label,value=key,default=key in v.selected) for key,label in BLOCKS.items()])
+    @svip.interaction_context
+    async def callback(self,i):
+        if not await self.v.interaction_check(i):return
+        if any(k not in BLOCKS for k in self.values):return
+        await i.response.edit_message(view=OverviewView(self.v.bot,self.v.db,self.v.owner,self.v.page,editing=True,draft=self.values))

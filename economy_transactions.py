@@ -100,6 +100,9 @@ def quote(db,uid,kind,target,quantity=1,price=None):
         q.update(currency='XC' if currency=='xc' else 'XCrystals',wallet=p[currency])
         q['details']=f"Owned **{item['quantity']}**\n{item['description'] or 'No description.'}"
         if kind=='shop':
+            if item['effect']=='mine_tool':
+                from economy_progress import tool_comparison
+                q['details']+='\n'+tool_comparison(db,uid,item)
             limits=[]
             if item['stock']>=0:limits.append(item['stock'])
             if item['price']>0:limits.append(p[currency]//item['price'])

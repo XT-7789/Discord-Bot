@@ -541,6 +541,7 @@ class Entry(discord.ui.Button):
 
 
 def goal_block(bot,db,uid):
+    from economy_progress import growth
     text,route,q=next_step(db,uid);state=activity(db,uid)
     status=f"\n**{capacity(q) if q else 0}** target batches ready · **{state['ready']}** jobs to collect · **{state['products']}** sellable products"
-    return discord.ui.TextDisplay('### Your next step · '+GOALS[selected_goal(db,uid)]+'\n'+text+status), discord.ui.ActionRow(Entry(bot,db,uid,'Continue',**route),Entry(bot,db,uid,'Goals & Activity',page='activity'))
+    return discord.ui.TextDisplay('### Your next step · '+GOALS[selected_goal(db,uid)]+'\n'+text+status+'\n'+growth(db,uid)[0]), discord.ui.ActionRow(Entry(bot,db,uid,'Continue',**route),Entry(bot,db,uid,'Goals & Activity',page='activity'))

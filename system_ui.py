@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 from contextvars import ContextVar
 import svip
+import player_overview
 
 GUIDE_IMAGE=Path(__file__).parent/'assets'/'ui'/'navigation-guide.png'
 HELP_TOPICS={
@@ -229,6 +230,7 @@ def register(bot, db, create_player):
 
     def render_page(owner,key='menu',notice='',member=None):
         player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
+        if key=='overview':return player_overview.OverviewView(bot,db,owner,notice=notice)
         if key=='mission_weekly' and tier5.profile_summary(db,owner)['level']<2:
             return page(owner,'missions','Weekly missions unlock at Nation Level 2.')
         if key=='close':
@@ -315,7 +317,7 @@ def register(bot, db, create_player):
                     view.box.add_item(discord.ui.Separator())
                     view.box.add_item(discord.ui.TextDisplay(text))
                     view.box.add_item(discord.ui.ActionRow(*buttons))
-                block(f"### 👤 Profile\n**{discord.utils.escape_markdown(player['nation_name'])}** · Lv **{profile['level']}**\n{xp_text}",[Nav(owner,'Profile','profile'),Nav(owner,'VIP Status','vip')])
+                block(f"### 👤 Profile\n**{discord.utils.escape_markdown(player['nation_name'])}** · Lv **{profile['level']}**\n{xp_text}",[Nav(owner,'Profile','profile'),Nav(owner,'VIP Status','vip'),Nav(owner,'My Overview','overview')])
                 block(f"### 💰 Economy\nWallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**",[Nav(owner,'Economy','economy'),Nav(owner,'Finance','finance'),Nav(owner,'Casino','casino')])
                 cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(owner,)).fetchone()[0]
                 lands=db.execute('SELECT COUNT(*) FROM map_territories WHERE owner_user_id=?',(owner,)).fetchone()[0]
@@ -628,6 +630,7 @@ def register(bot, db, create_player):
     bot.xbot_player_lobby_builder=lambda owner,notice='':page(owner,'menu',notice)
     bot.xbot_tier6_economy_builder=lambda owner,notice='':page(owner,'economy',notice)
     bot.xbot_system_page_builder=page
+    builders['overview']=lambda owner:page(owner,'overview')
     # Keep the same shortcut catalogue; replace entry presentation only.
     for name,key in [('lobby','menu'),('economy','economy'),('war','war')]:
         commands=list(bot.tree.get_commands())
@@ -652,10 +655,12 @@ def register(bot, db, create_player):
             await i.edit_original_response(view=page(i.user.id,destination),attachments=[])
         kwargs={'guild':discord.Object(id=guild_id)} if guild_id else {}
         bot.tree.remove_command(name,**kwargs)
+        entry.system_ui_wrapped=True
         bot.tree.command(name=name,description=description,**kwargs)(entry)
     add_entry('menu','menu','Open X SYSTEM: Profile, Economy, Warfront and Missions')
     add_entry('warfront','war','Open your Cities, Army, Diplomacy and Battles')
     add_entry('profile','profile','View your profile, progress, Backpack and assets')
+    add_entry('overview','overview','Open your personal overview and choose which sections to display')
     shortcuts={'casino':'casino','city':'city','army':'army','recruit':'recruit','diplomacy':'diplomacy',
                'craft':'craft','stock':'stock','research':'research','missions':'missions','mining':'mining',
                'mine':'mining','sell_item':'economy','shop':'shop','backpack':'inventory','market':'market',

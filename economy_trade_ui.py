@@ -31,6 +31,9 @@ class TradeView(discord.ui.LayoutView):
             label=(f"Receive {q['total']:,}" if q['credit'] else f"Pay {q['total']:,}")+f" {q['currency']}"
             if kind in {'use','market_cancel','list'}:label='Review the effect above'
             if not complete:self.text(f"## Order preview\nQuantity **{quantity:,}** · **{label}**\nNothing is spent until you press the action button.")
+            if complete and kind=='sell':
+                from economy_progress import growth
+                self.text('### Your next upgrade\n'+growth(db,owner)[0])
             if q['reason'] and not complete:self.text('⚠️ '+q['reason'])
             fixed=kind in {'use','market_cancel','production_cancel'}
             if not fixed and not complete:

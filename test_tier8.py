@@ -291,13 +291,24 @@ class ResearchTests(unittest.TestCase):
                         public=bot.tree.get_command(public_name,guild=guild) or bot.tree.get_command(public_name)
                         self.assertIsNotNone(public,public_name)
                         self.assertTrue(getattr(public.callback,'system_ui_wrapped',False),public_name)
-                    for name in ('menu','warfront','profile'):
+                    for name in ('menu','warfront','profile','overview'):
                         command=bot.tree.get_command(name,guild=guild)
                         self.assertIsNotNone(command)
                         self.assertIn(name,module.PUBLIC_PLAYER_COMMANDS)
                         await command.callback(i)
                         self.assertIn('X SYSTEM',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
                     self.assertNotIn('lobby',module.PUBLIC_PLAYER_COMMANDS)
+                    personal=bot.xbot_player_panel_builders['overview'](self.uid)
+                    self.assertIn('MY OVERVIEW',str(personal.to_components()))
+                    self.assertLessEqual(personal.total_children_count,40)
+                    self.assertIn('Customize',[getattr(x,'label',None) for x in personal.walk_children()])
+                    await next(x for x in personal.walk_children() if getattr(x,'label',None)=='Menu').callback(journey_i)
+                    self.assertIn('MAIN MENU',str(journey_i.response.edit_message.call_args.kwargs['view'].to_components()))
+                    await personal.act(journey_i,('nav','vip'))
+                    vip_from_overview=journey_i.response.edit_message.call_args.kwargs['view']
+                    self.assertIn('VIP',str(vip_from_overview.to_components()))
+                    await next(x for x in vip_from_overview.walk_children() if getattr(x,'key',None)=='back').callback(journey_i)
+                    self.assertIn('MY OVERVIEW',str(journey_i.response.edit_message.call_args.kwargs['view'].to_components()))
                     self.assertNotIn('war',module.PUBLIC_PLAYER_COMMANDS)
                     import system_ui
                     help_view=bot.xbot_system_page_builder(self.uid,'help')
