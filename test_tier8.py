@@ -383,6 +383,16 @@ class ResearchTests(unittest.TestCase):
                     await mine_button.callback(i)
                     result=i.response.edit_message.call_args.kwargs['view']
                     self.assertIn('Missions · Claim Rewards',str(result.to_components()))
+                    # Follow the real mining-result Craft entry and return without
+                    # creating assets or losing the result screen.
+                    wallet_before_recipe=self.balance()
+                    await next(x for x in result.walk_children() if getattr(x,'label',None)=='Craft').callback(i)
+                    recipes=i.response.edit_message.call_args.kwargs['view']
+                    self.assertIn('WORKSHOP',str(recipes.to_components()))
+                    self.assertIsNotNone(recipes.material)
+                    await recipes.act(i,('back',))
+                    self.assertIn('Mine Again',str(i.response.edit_message.call_args.kwargs['view'].to_components()))
+                    self.assertEqual(wallet_before_recipe,self.balance())
                     mined=module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0]
                     self.assertEqual(1,mined)
                     await mine_button.callback(i)
