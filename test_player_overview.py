@@ -37,8 +37,16 @@ class OverviewTests(unittest.TestCase):
                     text=[x.content for x in view.walk_children() if isinstance(x,discord.ui.TextDisplay)]
                     self.assertLessEqual(sum(map(len,text)),4000)
                     self.assertIn('Current goal',' '.join(text))
+                    self.assertEqual(1,view.pages)
+                    self.assertEqual(0,view.page)
+                    self.assertNotIn('Previous',[getattr(x,'label',None) for x in view.walk_children()])
+                    rows=[x for x in view.box.children if isinstance(x,discord.ui.ActionRow)]
+                    self.assertTrue(all(len(row.children)<=3 for row in rows))
+                    destinations=[x.action[1] for x in view.walk_children() if isinstance(x,overview.OverviewButton) and x.action[0]=='nav']
+                    if 'market' in keys:self.assertIn('stock',destinations)
+                    if 'vip' in keys:self.assertIn('vip',destinations)
                     self.assertNotIn('Help',[getattr(x,'label',None) for x in view.walk_children()])
-                    self.assertLessEqual(len([x for x in view.walk_children() if isinstance(x,discord.ui.Separator)]),4)
+                    self.assertLessEqual(len([x for x in view.walk_children() if isinstance(x,discord.ui.Separator)]),2)
             self.assertEqual(1000,self.balance())
         asyncio.run(run())
 

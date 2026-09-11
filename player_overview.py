@@ -32,32 +32,35 @@ class OverviewView(discord.ui.LayoutView):
         super().__init__(timeout=600)
         self.bot,self.db,self.owner=bot,db,owner;self.editing=editing
         self.selected=tuple(draft) if draft is not None else layout(db,owner)
-        self.pages=max(1,(len(self.selected)+3)//4);self.page=min(max(0,page),self.pages-1)
+        self.pages=1;self.page=0
         self.box=discord.ui.Container(accent_colour=0x41D9D0);self.add_item(self.box)
         self.text('-# ✦ X SYSTEM\n# '+('CUSTOMIZE OVERVIEW' if editing else 'MY OVERVIEW'))
         if notice:self.text(notice)
         if editing:
-            self.text('Choose the sections you want. Your current goal always stays on top. Up to four sections per page. Changes apply only after Save.')
+            self.text('Choose your stats and shortcuts. All selected sections fit on one overview. Changes apply only after Save.')
             self.box.add_item(discord.ui.ActionRow(LayoutSelect(self)))
             self.row(('Save',('save',)),('Use Defaults',('defaults',)),('Cancel',('cancel',)),primary=True)
         else:
             text,self.route,_=journey.next_step(db,owner)
             self.text('## Current goal\n'+text[:850])
-            self.row(('Continue',('continue',)),('Choose Goal',('goal',)),primary=True)
             growth,self.upgrade=economy_progress.growth(db,owner)
-            self.text('### Next upgrade\n'+growth)
-            self.row(('Review Upgrade' if self.upgrade else 'Explore Research',('upgrade',)))
+            self.text('**Next upgrade** · '+growth.replace('\n',' · '))
+            self.row(('Continue',('continue',)),('Choose Goal',('goal',)),('Review Upgrade' if self.upgrade else 'Research',('upgrade',)),primary=True)
             p=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
             if p:
-                for key in self.selected[self.page*4:self.page*4+4]:
+                summaries=[];shortcuts=[]
+                for key in self.selected:
                     text,links=self.section(key,p)
-                    self.box.add_item(discord.ui.Separator());self.text('### '+BLOCKS[key]+'\n'+text)
-                    self.row(*[(label,('nav',dest)) for label,dest in links])
+                    summaries.append('**'+BLOCKS[key]+'** · '+text.replace('\n',' · '))
+                    shortcuts.extend((label,('nav',dest)) for label,dest in links)
+                if summaries:
+                    self.box.add_item(discord.ui.Separator())
+                    self.text('\n'.join(summaries))
+                    self.box.add_item(discord.ui.Separator())
+                    for start in range(0,len(shortcuts),3):self.row(*shortcuts[start:start+3])
             if not self.selected:self.text('Goal-only overview. Use Customize to add sections.')
-            self.row(('Customize',('customize',)),('Refresh',('refresh',)))
-            if self.pages>1:self.row(('Previous',('page',self.page-1)),('Next',('page',self.page+1)))
-            self.text(f'Page {self.page+1}/{self.pages} · Your choices are saved per player')
-        self.add_item(discord.ui.ActionRow(OverviewButton(self,'Menu',('menu',)),OverviewButton(self,'Close',('close',))))
+        footer=[] if editing else [OverviewButton(self,'Customize',('customize',)),OverviewButton(self,'Refresh',('refresh',))]
+        self.add_item(discord.ui.ActionRow(*footer,OverviewButton(self,'Menu',('menu',)),OverviewButton(self,'Close',('close',))))
 
     def text(self,text):
         remaining=3800-sum(len(x.content) for x in self.walk_children() if isinstance(x,discord.ui.TextDisplay))
@@ -75,7 +78,7 @@ class OverviewView(discord.ui.LayoutView):
     def section(self,key,p):
         db,uid=self.db,self.owner
         if key=='wallet':return f"Wallet **{p['xc']:,} XC** · Bank **{p['bank_xc']:,} XC**",[('Finance','finance')]
-        if key=='mining':return f"Level **{p['mining_level']}** · Last recorded energy **{p['mining_energy']}**\nOpen Mines to refresh energy and choose an area.",[('Mines','mining')]
+        if key=='mining':return f"Lv **{p['mining_level']}** · Energy **{p['mining_energy']}** (last recorded)",[('Mines','mining')]
         if key=='production':
             state=journey.activity(db,uid)
             return f"Ready **{state['ready']}** · Queue **{state['active']}/{svip.production_limit(db,uid)}**\nCrafted products **{state['products']}**",[('Craft','craft'),('Production','production')]
@@ -95,7 +98,7 @@ class OverviewView(discord.ui.LayoutView):
         status=svip.summary(db,uid)
         if not status:
             vip=db.execute('SELECT expires_at FROM casino_vip_members WHERE user_id=?',(uid,)).fetchone()
-            status=f"Casino VIP until <t:{vip[0]}:R>" if vip and vip[0]>int(time.time()) else 'No verified SVIP in this interaction. Check VIP Status in your server.'
+            status=f"Casino VIP until <t:{vip[0]}:R>" if vip and vip[0]>int(time.time()) else 'SVIP unverified · Check in server'
         return status,[('VIP Status','vip')]
 
     async def act(self,i,action):
