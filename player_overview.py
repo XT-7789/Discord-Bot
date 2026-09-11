@@ -10,6 +10,18 @@ import svip
 BLOCKS={'wallet':'Wallet & Bank','mining':'Mines','production':'Craft & Production','market':'Market & Stocks','nation':'Nation','missions':'Missions','vip':'VIP'}
 DEFAULT=('wallet','production','missions')
 
+def compact_number(value):
+    value=int(value)
+    if abs(value)<100000:return f'{value:,}'
+    for scale,suffix in ((10**12,'T'),(10**9,'B'),(10**6,'M'),(1000,'K')):
+        if abs(value)>=scale:return f'{value/scale:.1f}{suffix}'
+    return str(value)
+
+def tile_text(tiles):
+    """Bounded ASCII columns; real action buttons are rendered separately."""
+    lines=['  '.join(str(tile[row])[:12].ljust(12) for tile in tiles).rstrip() for row in range(3)]
+    return '```\n'+'\n'.join(lines)+'\n```'
+
 def layout(db,uid):
     row=db.execute("SELECT detail FROM economy_logs WHERE user_id=? AND action='overview_layout' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
     if row:
@@ -48,16 +60,14 @@ class OverviewView(discord.ui.LayoutView):
             self.row(('Continue',('continue',)),('Choose Goal',('goal',)),('Review Upgrade' if self.upgrade else 'Research',('upgrade',)),primary=True)
             p=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
             if p:
-                summaries=[];shortcuts=[]
-                for key in self.selected:
-                    text,links=self.section(key,p)
-                    summaries.append('**'+BLOCKS[key]+'** · '+text.replace('\n',' · '))
-                    shortcuts.extend((label,('nav',dest)) for label,dest in links)
-                if summaries:
+                tiles=self.tiles(p)
+                if tiles:
                     self.box.add_item(discord.ui.Separator())
-                    self.text('\n'.join(summaries))
-                    self.box.add_item(discord.ui.Separator())
-                    for start in range(0,len(shortcuts),3):self.row(*shortcuts[start:start+3])
+                    for start in range(0,len(tiles),3):
+                        group=tiles[start:start+3]
+                        self.text(tile_text(group))
+                        self.row(*[(tile[3],('nav',tile[4])) for tile in group])
+                    self.text('-# Energy: last recorded · Rounded totals; open a panel for details.')
             if not self.selected:self.text('Goal-only overview. Use Customize to add sections.')
         footer=[] if editing else [OverviewButton(self,'Customize',('customize',)),OverviewButton(self,'Refresh',('refresh',))]
         self.add_item(discord.ui.ActionRow(*footer,OverviewButton(self,'Menu',('menu',)),OverviewButton(self,'Close',('close',))))
@@ -74,6 +84,34 @@ class OverviewView(discord.ui.LayoutView):
     async def on_error(self,i,error,item):
         from system_ui import report_panel_error
         await report_panel_error(i,error)
+
+    def tiles(self,p):
+        db,uid=self.db,self.owner;result=[];extra=[];n=compact_number
+        if 'wallet' in self.selected:result.append(('Wallet',n(p['xc'])+' XC','Bank '+n(p['bank_xc']),'Finance','finance'))
+        if 'mining' in self.selected:result.append(('Mines','Energy '+n(p['mining_energy']),'Level '+n(p['mining_level']),'Mine','mining'))
+        if 'production' in self.selected:
+            state=journey.activity(db,uid)
+            result.append(('Production','Ready '+n(state['ready']),'Queue '+n(state['active'])+'/'+n(svip.production_limit(db,uid)),'Production','production'))
+            extra.append(('Craft','Products '+n(state['products']),'View recipes','Craft','craft'))
+        if 'market' in self.selected:
+            cutoff=int(time.time())-max(1,svip.setting(db,'tier6_market_expiry_days',7))*86400
+            count=db.execute('SELECT COUNT(*) FROM market_listings WHERE seller_id=? AND active=1 AND quantity>0 AND created_at>?',(uid,cutoff)).fetchone()[0]
+            shares=db.execute('SELECT COALESCE(SUM(quantity),0) FROM tier6_stock_holdings WHERE user_id=?',(uid,)).fetchone()[0]
+            result.append(('Market','Listings '+n(count),'Limit '+n(svip.market_limit(db,uid)),'My Listings','market_mine'))
+            extra.append(('Stocks','Shares '+n(shares),'Virtual only','Stocks','stock'))
+        if 'nation' in self.selected:
+            cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(uid,)).fetchone()[0]
+            result.append(('Nation','Cities '+n(cities),n(p['money'])+' WC','Warfront','war'))
+        if 'missions' in self.selected:
+            import tier5
+            rows=[m for category in ('starter','daily','weekly') for m in tier5.missions_for(db,uid,category)[1] if not m['claimed']]
+            ready=sum(m['progress']>=m['target'] for m in rows)
+            result.append(('Missions','Ready '+n(ready),'Pending '+n(len(rows)-ready),'Missions','missions'))
+        if 'vip' in self.selected:
+            paid=db.execute('SELECT expires_at FROM casino_vip_members WHERE user_id=?',(uid,)).fetchone()
+            status='SVIP active' if svip.summary(db,uid) else 'VIP active' if paid and paid[0]>int(time.time()) else 'Check status'
+            extra.append(('VIP',status,'View perks','VIP Status','vip'))
+        return result+extra
 
     def section(self,key,p):
         db,uid=self.db,self.owner

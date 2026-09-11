@@ -45,6 +45,17 @@ class OverviewTests(unittest.TestCase):
                     destinations=[x.action[1] for x in view.walk_children() if isinstance(x,overview.OverviewButton) and x.action[0]=='nav']
                     if 'market' in keys:self.assertIn('stock',destinations)
                     if 'vip' in keys:self.assertIn('vip',destinations)
+                    tiles=view.tiles(self.db.execute('SELECT * FROM players WHERE user_id=?',(self.uid,)).fetchone())
+                    self.assertEqual([tile[4] for tile in tiles],destinations)
+                    children=list(view.box.children)
+                    grids=[x for x in children if isinstance(x,discord.ui.TextDisplay) and x.content.startswith('```')]
+                    self.assertEqual((len(tiles)+2)//3,len(grids))
+                    for grid in grids:
+                        self.assertTrue(all(len(line)<=40 for line in grid.content.splitlines()[1:-1]))
+                        self.assertIsInstance(children[children.index(grid)+1],discord.ui.ActionRow)
+                    if len(keys)==7:
+                        self.assertEqual(9,len(tiles))
+                        self.assertEqual(['Wallet','Mines','Production'],[t[0] for t in tiles[:3]])
                     self.assertNotIn('Help',[getattr(x,'label',None) for x in view.walk_children()])
                     self.assertLessEqual(len([x for x in view.walk_children() if isinstance(x,discord.ui.Separator)]),2)
             self.assertEqual(1000,self.balance())
