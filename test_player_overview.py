@@ -10,6 +10,23 @@ import player_overview as overview
 import test_economy_transactions as fixtures
 
 class OverviewTests(unittest.TestCase):
+    def test_mines_navigation_returns_to_live_recipe_without_spending(self):
+        import economy_journey as journey
+        async def run():
+            bot=SimpleNamespace(xbot_player_panel_builders={'mining':lambda uid:discord.ui.LayoutView()})
+            rid=next(q['recipe']['id'] for q in journey.quotes(self.db,self.uid) if q['recipe']['name']=='Resource Pack')
+            source=journey.JourneyView(bot,self.db,self.uid,page='areas',rid=rid)
+            before=self.balance();i=fixtures.interaction(self.uid)
+            await source.act(i,('nav','mining'))
+            mines=i.response.edit_message.call_args.kwargs['view']
+            back=next(x for x in mines.walk_children() if getattr(x,'label',None)=='Back to Materials')
+            await back.callback(i)
+            restored=i.response.edit_message.call_args.kwargs['view']
+            self.assertEqual((rid,'areas'),(restored.rid,restored.page))
+            self.assertIsNot(source,restored)
+            self.assertEqual(before,self.balance())
+        asyncio.run(run())
+
     def test_beginner_missing_materials_has_actionable_route(self):
         import economy_journey as journey
         async def run():

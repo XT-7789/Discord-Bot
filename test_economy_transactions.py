@@ -342,6 +342,14 @@ class TransactionTests(unittest.TestCase):
             await restored.act(i,('refresh',))
             again=i.response.edit_message.call_args.kwargs['view']
             self.assertFalse(again.complete);self.assertEqual(before,self.cash())
+            proceeds=preview.quote['total']
+            await preview.act(i,('execute',))
+            sold=i.edit_original_response.call_args.kwargs['view']
+            self.assertTrue(sold.complete)
+            self.assertEqual(before+proceeds,self.cash())
+            self.assertIn('Mine Again',str(sold.to_components()))
+            await preview.act(i,('execute',))
+            self.assertEqual(before+proceeds,self.cash())
         asyncio.run(run())
 
     def test_selected_quantity_and_purchase_use_preview(self):

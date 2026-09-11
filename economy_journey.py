@@ -468,7 +468,14 @@ class JourneyView(discord.ui.LayoutView):
         if key=='nav':
             builder=getattr(self.bot,'xbot_player_panel_builders',{}).get(action[1])
             if builder is None:await i.response.send_message('This panel is unavailable.',ephemeral=True);return
-            await i.response.edit_message(view=builder(self.uid));return
+            target=builder(self.uid)
+            back_button=next((x for x in target.walk_children() if getattr(x,'key',None)=='back'),None)
+            return_button=Button(self,'Back to Materials' if self.page=='areas' else 'Back to Recipe' if self.rid else 'Back to Previous',('source',))
+            if back_button is not None:back_button.callback=return_button.callback
+            elif target.total_children_count<=38:target.add_item(discord.ui.ActionRow(return_button))
+            await i.response.edit_message(view=target);return
+        if key=='source':
+            await i.response.edit_message(view=self.fresh());return
         if key in {'max','preset'}:
             operation=action[1]
             try:
