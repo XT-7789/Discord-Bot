@@ -8,7 +8,7 @@
 - Returning from a product preview restores the completed result and selected quantity with current balances. Shortcut return buttons preserve the exact source.
 - Production collection opens a selector limited to the items just collected, including outputs whose recipe was subsequently removed. Collection still settles only once.
 - Removed the unused legacy advanced-craft confirmation implementation.
-- SVIP convenience enhancements are proposed in `SVIP_PROPOSAL.md`, not enabled.
+- SVIP convenience enhancements were subsequently approved and implemented; see `SVIP_PROPOSAL.md` for settings and rollout behavior.
 - Phone screenshots and visual acceptance remain pending; no remote phone update or production restart was performed.
 
 ## Included
@@ -23,10 +23,10 @@
 
 ## Verification
 
-91 tests passed on 2026-09-11 (including the result-page follow-up):
+98 tests passed on 2026-09-11 (including the result-page follow-up and SVIP package):
 
 ```text
-python -m unittest test_admin_dashboard test_staff_tools test_tier6 test_tier7 test_tier8 test_economy_journey test_economy_transactions -q
+python -m unittest test_admin_dashboard test_staff_tools test_tier6 test_tier7 test_tier8 test_economy_journey test_economy_transactions test_svip -q
 ```
 
 Coverage includes temporary-database trades, quantity/Max boundaries, changed prices, feature closure, insufficient assets, competing purchases/sales, duplicate confirmation, expiry/cancellation refunds, failed-write rollback, database contention, owner rejection and selected return paths.

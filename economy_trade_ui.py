@@ -4,6 +4,7 @@ import sqlite3
 
 import discord
 import economy_transactions as transactions
+import svip
 
 
 class TradeView(discord.ui.LayoutView):
@@ -146,6 +147,7 @@ class TradeView(discord.ui.LayoutView):
 class TradeButton(discord.ui.Button):
     def __init__(self,v,label,action,style=discord.ButtonStyle.secondary):
         super().__init__(label=label[:80],style=style);self.v,self.action=v,action
+    @svip.interaction_context
     async def callback(self,i):
         if await self.v.interaction_check(i):await self.v.act(i,self.action)
 
@@ -153,6 +155,7 @@ class TradeButton(discord.ui.Button):
 class TradeNav(discord.ui.Button):
     def __init__(self,v,label,key):
         super().__init__(label=label);self.v,self.key=v,key
+    @svip.interaction_context
     async def callback(self,i):
         v=self.v
         if not await v.interaction_check(i):return
@@ -173,6 +176,7 @@ class AmountModal(discord.ui.Modal):
         self.maximum=9999999999 if field=='price' else 100 if v.advanced and v.kind=='craft' else 1000 if v.kind in {'craft','queue'} else 99999999 if v.kind.startswith('stock_') else 9999999
         self.value=discord.ui.TextInput(label='XC per item' if field=='price' else 'Whole-number quantity',placeholder=f'1–{self.maximum:,}; submit to preview only',default=str(v.price if field=='price' else v.quantity),max_length=len(str(self.maximum)))
         self.add_item(self.value)
+    @svip.interaction_context
     async def on_submit(self,i):
         if not await self.v.interaction_check(i):return
         try:

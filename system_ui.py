@@ -12,6 +12,7 @@ import re
 import logging
 from pathlib import Path
 from contextvars import ContextVar
+import svip
 
 GUIDE_IMAGE=Path(__file__).parent/'assets'/'ui'/'navigation-guide.png'
 HELP_TOPICS={
@@ -82,6 +83,7 @@ def register(bot, db, create_player):
         def __init__(self,owner,label,key):
             super().__init__(label=label,style=discord.ButtonStyle.secondary)
             self.owner,self.key=owner,key
+        @svip.interaction_context
         async def callback(self,i):
             if i.user.id!=self.owner:
                 await i.response.send_message('Open /menu for your own menu.',ephemeral=True)
@@ -242,6 +244,7 @@ def register(bot, db, create_player):
             else:
                 body=f"### {'VIP' if paid_active else 'No active Casino VIP'}\nServer SVIP role cannot be checked here. Open this panel inside your server."
             body+=f'\nCasino VIP expires <t:{expires}:R>.' if paid_active else '\nCasino VIP subscription: inactive.'
+            if svip.summary(db,owner):body+='\n'+svip.summary(db,owner)+'\nNew orders only · Casino odds unchanged.'
             view=Shell(owner,'💎 VIP Status',body+'\n-# Status check only · No XC charged.')
             footer(view,owner,key)
             return view
@@ -294,6 +297,7 @@ def register(bot, db, create_player):
                 body=f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{player['xc']:,} XC"
                 if key=='profile':
                     body+=f" · {player['money']:,} WC\n{profile['rank']} · {profile['xp']:,} XP"
+                    if svip.summary(db,owner):body+='\n'+svip.summary(db,owner)
             if key=='missions':
                 lines=[]
                 for category in ('starter','daily','weekly'):
@@ -371,7 +375,7 @@ def register(bot, db, create_player):
                     span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
                     xp=profile['xp']-profile['current_floor']
                     status=f'{progress_bar(xp,span)} {xp}/{span} XP' if profile['next_threshold'] else 'MAX LEVEL'
-                    block('👤 Player',f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{profile['rank']}\n{status}",navs(('Missions','missions')))
+                    block('👤 Player',f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{profile['rank']}\n{status}"+('\n'+svip.summary(db,owner) if svip.summary(db,owner) else ''),navs(('Missions','missions')))
                     block('💰 Accounts',funds()+f"\nWar Credits **{player['money']:,}** · XCrystals **{player['xcrystals']:,}**",navs(('Finance','finance'),('VIP Status','vip')))
                     count=db.execute('SELECT COALESCE(SUM(quantity),0) FROM inventories WHERE user_id=?',(owner,)).fetchone()[0]
                     block('🎒 Collection',f'Backpack **{count:,} items**',navs(('Backpack','inventory'),('Assets','assets')))
@@ -473,6 +477,7 @@ def register(bot, db, create_player):
             if not getattr(modal,'system_wrapped',False):
                 original=modal.on_submit
                 history=navigation.get()
+                @svip.interaction_context
                 async def submit(i):
                     if i.user.id!=self.owner:
                         await i.response.send_message('Open /menu for your own panel.',ephemeral=True)
@@ -596,6 +601,7 @@ def register(bot, db, create_player):
                 child.accent_colour=discord.Color(0x41D9D0)
             if isinstance(child,(discord.ui.Button,discord.ui.Select)) and not isinstance(child,Nav) and not getattr(child,'system_wrapped',False):
                 original=child.callback
+                @svip.interaction_context
                 async def callback(i,handler=original):
                     token=navigation.set(view.system_history)
                     try:
@@ -630,6 +636,7 @@ def register(bot, db, create_player):
             commands+=list(bot.tree.get_commands(guild=discord.Object(id=guild_id)))
         for command in commands:
             if command.name==name:
+                @svip.interaction_context
                 async def entry(i:discord.Interaction,dest=key):
                     await i.response.defer()
                     create_player(i.user)
@@ -638,6 +645,7 @@ def register(bot, db, create_player):
     # Keep old names internally for existing panel callbacks; startup's public
     # allowlist hides the old names and publishes their replacements.
     def add_entry(name,destination,description):
+        @svip.interaction_context
         async def entry(i:discord.Interaction):
             await i.response.defer()
             create_player(i.user)
@@ -660,6 +668,7 @@ def register(bot, db, create_player):
             key=shortcuts[command.name]
             def wrap(handler,destination):
                 @functools.wraps(handler)
+                @svip.interaction_context
                 async def entry(i,*args,**kwargs):
                     return await handler(Interaction(i,i.user.id,destination),*args,**kwargs)
                 entry.system_ui_wrapped=True

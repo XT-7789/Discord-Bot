@@ -7,6 +7,7 @@ from discord import app_commands
 import xbot_ui
 import tier5
 import economy_journey
+import svip
 
 
 DEFAULTS = {
@@ -614,6 +615,7 @@ def register_commands(bot, db, create_player, find_item):
 
     @bot.tree.command(name="market_sell", description="List a tradeable item on the player market")
     @app_commands.autocomplete(item=tradeable_backpack_autocomplete)
+    @svip.interaction_context
     async def market_sell(interaction: discord.Interaction, item: str, quantity: int, price_each: int):
         create_player(interaction.user)
         expire_market_listings(db)

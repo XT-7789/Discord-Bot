@@ -7,6 +7,7 @@ import random
 import time
 import tier8
 import economy_journey
+import svip
 from datetime import datetime, timezone
 
 import discord
@@ -16,6 +17,7 @@ import xbot_ui
 
 
 DEFAULTS = {
+    **svip.DEFAULTS,
     "tier6_economy_enabled": "1",
     "tier6_contracts_enabled": "1",
     "tier6_production_enabled": "1",
@@ -429,7 +431,7 @@ def start_production(db, user_id: int, recipe_id: int, quantity: int, expected=N
     if expected is not None and expected != quote['fingerprint']:
         return False,'Recipe or prices changed. Review again.'
     active = int(db.execute("SELECT COUNT(*) FROM tier6_production_queue WHERE user_id=? AND status='working'", (user_id,)).fetchone()[0])
-    if active >= setting(db, "tier6_production_queue_limit"):
+    if active >= svip.production_limit(db,user_id):
         return False, "Your Production Queue is full."
     recipe = db.execute("SELECT * FROM recipes WHERE id=? AND enabled=1", (recipe_id,)).fetchone()
     player = db.execute("SELECT xc FROM players WHERE user_id=?", (user_id,)).fetchone()
@@ -455,6 +457,8 @@ def start_production(db, user_id: int, recipe_id: int, quantity: int, expected=N
     speed = min(setting(db, "tier6_industrial_speed_cap_percent"), industrial_levels * setting(db, "tier6_industrial_speed_percent"))
     seconds = max(30, setting(db, "tier6_production_seconds_per_item") * quantity * (100 - speed) // 100)
     seconds = max(30, tier8.discounted(db, user_id, 'production', seconds))
+    # Apply once after existing discounts; never alter a saved job's ready_at.
+    seconds=max(30,(seconds*(100-svip.benefits(db,user_id)['percent'])+99)//100)
     now = int(time.time())
     cursor = db.execute(
         """INSERT INTO tier6_production_queue
@@ -960,7 +964,7 @@ def register_commands(bot, db, create_player):
                    WHERE q.user_id=? AND q.status='working' ORDER BY q.ready_at,q.id LIMIT 10 OFFSET ?""", (owner_id,self.page*10)
             ).fetchall()
             container = discord.ui.Container(accent_color=discord.Color.orange())
-            container.add_item(discord.ui.TextDisplay(f"## 🏭 Production Centre\n### Ready to Collect\n## {totals['ready']} jobs\nActive queue **{totals['total']}** · Collect finished products below."))
+            container.add_item(discord.ui.TextDisplay(f"## 🏭 Production Centre\n### Ready to Collect\n## {totals['ready']} jobs\nActive queue **{totals['total']}/{svip.production_limit(db,owner_id)}** · Collect finished products below.\n"+svip.summary(db,owner_id)))
             container.add_item(economy_navigation(owner_id, "production"))
             if notice:
                 container.add_item(discord.ui.TextDisplay(f"-# {notice}"))

@@ -13,6 +13,7 @@ import casino
 import tier6
 import tier8
 import advanced_systems
+import svip
 
 GENERAL_KEYS = tuple(('starting_xc work_cooldown collect_cooldown land_income_per_land '
     'work_crystal_chance mine_cooldown mine_crystal_chance exchange_xc_to_war_percent '
@@ -25,7 +26,7 @@ GENERAL_KEYS = tuple(('starting_xc work_cooldown collect_cooldown land_income_pe
 TIER6_KEYS = tuple(tier6.DEFAULTS) + ('daily_reward', 'daily_cooldown', 'transfer_tax_percent',
     'market_enabled', 'market_fee_percent', 'market_min_price', 'market_max_price')
 VIP_KEYS = ('casino_vip_daily_cost', 'casino_vip_duration_seconds', 'casino_vip_cooldown_percent',
-    'server_svip_cooldown_percent', 'casino_cooldown_seconds', 'crash_daily_net_win_limit')
+    'server_svip_cooldown_percent', 'casino_cooldown_seconds', 'crash_daily_net_win_limit') + tuple(svip.DEFAULTS)
 RESEARCH_KEYS = ('tier8_enabled', 'tier8_queue_limit')
 MINING_KEYS = ('mining_energy_enabled', 'mining_max_energy', 'mining_energy_regen_amount',
     'mining_energy_regen_seconds', 'mining_starter_pickaxe_enabled', 'mining_collection_xc_reward', 'mining_collection_xcrystal_reward')
@@ -49,7 +50,8 @@ def bounds(key):
         'mining_energy_regen_amount': (1, 9223372036854775807),
         'mining_energy_regen_seconds': (10, 9223372036854775807),
         'tier6_industrial_speed_cap_percent': (0, 95), 'casino_vip_cooldown_percent': (0, 95),
-        'server_svip_cooldown_percent': (0, 95)}
+        'server_svip_cooldown_percent': (0, 95), 'server_svip_production_slots':(0,25),
+        'server_svip_market_listings':(0,100),'server_svip_production_percent':(0,95)}
     if key in special:
         return special[key]
     if 'percent' in key or key.endswith('_chance') or key in {'lottery_prize_ratio', 'tier6_stock_price_impact'}:
@@ -118,6 +120,10 @@ def metadata(key):
         timing = 'Future collection completions only.'
     if key in {'tier6_market_expiry_days', 'tier6_market_max_listings'}:
         reader = 'economy_extra.tier6_setting'
+    if key in svip.DEFAULTS:
+        reader='svip.benefits → tier6.start_production / economy_transactions.quote'
+        timing='Next confirmed order; existing jobs and listings remain unchanged. Verified server SVIP only.'
+        unit='%' if key.endswith('_percent') else 'extra slots' if key.endswith('_slots') else 'extra listings'
     return dict(group=group, reader=reader, unit=unit, minimum=lo, maximum=str(hi),
         range=f'{lo} or more' if hi == 9223372036854775807 else f'{lo}–{hi}',
         impact=key.replace('tier6_', '').replace('tier8_', '').replace('_', ' ').capitalize(),

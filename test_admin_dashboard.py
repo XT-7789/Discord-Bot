@@ -78,6 +78,17 @@ class AdminDashboardTests(unittest.TestCase):
     def values(self):
         return dict(self.db.execute('SELECT key,value FROM economy_settings'))
 
+    def test_svip_settings_fields_atomic_validation_and_permissions(self):
+        self.assertIn(b'SVIP Extra Production Slots',self.client.get('/casino').data)
+        response=self.client.post('/casino',data={'action':'save-vip','server_svip_production_slots':'3','server_svip_market_listings':'6','server_svip_production_percent':'10'})
+        self.assertEqual(302,response.status_code)
+        self.assertEqual('3',self.values()['server_svip_production_slots'])
+        before=self.values()
+        self.client.post('/casino',data={'action':'save-vip','server_svip_production_slots':'4','server_svip_production_percent':'101'})
+        self.assertEqual(before,self.values())
+        self.login('viewer')
+        self.assertEqual(403,self.client.post('/casino',data={'action':'save-vip','server_svip_production_slots':'4'}).status_code)
+
     def flashes(self):
         with self.client.session_transaction() as session:
             return list(session.get('_flashes', []))

@@ -3,6 +3,7 @@ import json
 import time
 
 import economy_journey as journey
+import svip
 
 
 def number(db,key,default):
@@ -39,11 +40,13 @@ def quote(db,uid,kind,target,quantity=1,price=None):
         elif r['missing']:q['reason']='Missing materials. Return to the recipe to find mining areas.'
         elif r['wallet']<r['cost']:q['reason']='Not enough XC for the fee.'
         if kind=='queue':
-            active=journey.activity(db,uid)['active'];limit=tier6.setting(db,'tier6_production_queue_limit')
+            active=journey.activity(db,uid)['active'];limit=svip.production_limit(db,uid)
             q['details']+=f'\nQueue **{active}/{limit}** · One slot per order; collect when ready.'
+            if svip.summary(db,uid):q['details']+='\n'+svip.summary(db,uid)
             if not tier6.setting(db,'tier6_production_enabled'):q['reason']='Production is closed.'
             elif active>=limit:q.update(reason='Production queue is full. Collect ready jobs first.',maximum=0)
         fingerprint=[r['fingerprint']]
+        if kind=='queue':fingerprint.extend([svip.production_limit(db,uid),svip.benefits(db,uid)['percent']])
     elif kind.startswith('stock_'):
         import tier6
         side=kind[6:];s=tier6.stock_quote(db,uid,target,side,quantity);c=s['company']
@@ -129,8 +132,10 @@ def quote(db,uid,kind,target,quantity=1,price=None):
             elif not item['tradeable']:q['reason']='This item cannot be listed on the player market.'
             elif quantity>item['quantity']:q['reason']='Not enough items.'
             elif not minimum<=unit<=maximum:q['reason']=f'Price must be {minimum}–{maximum} XC.'
-            elif active>=max(1,number(db,'tier6_market_max_listings',20)):q['reason']='Listing limit reached. Open My Listings.'
-            fingerprint=[unit,fee,minimum,maximum]
+            elif active>=svip.market_limit(db,uid):q['reason']='Listing limit reached. Open My Listings.'
+            q['details']+=f"\nActive listings **{active}/{svip.market_limit(db,uid)}**"
+            if svip.summary(db,uid):q['details']+='\n'+svip.summary(db,uid)
+            fingerprint=[unit,fee,minimum,maximum,svip.market_limit(db,uid)]
         else:raise ValueError('Unsupported action.')
     q['fingerprint']=json.dumps([kind,target,quantity,fingerprint],sort_keys=True)
     return q

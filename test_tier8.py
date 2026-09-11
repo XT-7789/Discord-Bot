@@ -242,6 +242,12 @@ class ResearchTests(unittest.TestCase):
                         self.assertIn(expected,str(vip_view.to_components()))
                         self.assertIn('No XC charged',str(vip_view.to_components()))
                         self.assertEqual(('menu',),(await navigate(vip_view,'back')).system_history)
+                    import svip
+                    with svip.context(SimpleNamespace(id=self.uid,guild=SimpleNamespace(id=1),roles=[SimpleNamespace(id=casino.setting(module.db,'server_svip_role_id'))])):
+                        svip_profile=bot.xbot_system_page_builder(self.uid,'profile')
+                        self.assertIn('SVIP',str(svip_profile.to_components()))
+                        self.assertIn('Queue +2',str(svip_profile.to_components()))
+                        self.assertLessEqual(svip_profile.total_children_count,40)
                     i.user=saved_user
                     self.assertEqual(vip_balance,self.balance())
                     finance_route=await navigate(all_view,'finance')

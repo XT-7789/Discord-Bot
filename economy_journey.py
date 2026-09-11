@@ -7,6 +7,7 @@ import time
 from decimal import Decimal, ROUND_HALF_UP
 
 import discord
+import svip
 
 
 def initialise(db):
@@ -338,8 +339,8 @@ class JourneyView(discord.ui.LayoutView):
             q=quote(db,uid,self.rid);maximum=capacity(q)
             import tier6
             state=activity(db,uid)
-            self.text(f"## {q['recipe']['name']}\nCan queue **{maximum} batches** from your materials and XC.\nQueue **{state['active']} / {tier6.setting(db,'tier6_production_queue_limit')}** · Ready **{state['ready']}**\nOne queue slot per order. Review total fees and resale before confirming.")
-            open_now=enabled(db,'tier6_production_enabled') and q['available'] and state['active']<tier6.setting(db,'tier6_production_queue_limit')
+            self.text(f"## {q['recipe']['name']}\nCan queue **{maximum} batches** from your materials and XC.\nQueue **{state['active']} / {svip.production_limit(db,uid)}** · Ready **{state['ready']}**\nOne queue slot per order. Review total fees and resale before confirming.")
+            open_now=enabled(db,'tier6_production_enabled') and q['available'] and state['active']<svip.production_limit(db,uid)
             if open_now and maximum:
                 self.row(*[(str(n),('preset','queue',n)) for n in (1,5,10) if n<=maximum],('Max',('max','queue')))
                 self.row(('Choose quantity',('quantity','queue')))
