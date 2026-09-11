@@ -209,6 +209,17 @@ def activity(db, uid):
     return dict(active=queue['active'], ready=queue['ready'], products=products)
 
 
+def next_step_label(route, quote=None):
+    """Name the destination, never imply that opening it settles a trade."""
+    page=route.get('page')
+    if page=='products':return 'Choose Product to Sell'
+    if page=='materials':return 'Review Material Sales'
+    if page=='product':return 'Review Product'
+    if page=='areas':return 'Choose Mine'
+    if page=='detail':return 'Review Craft' if quote and quote.get('craftable') else 'Materials & Recipe'
+    return 'View Tasks & Production'
+
+
 def next_step(db, uid):
     mode = selected_goal(db, uid)
     state = activity(db, uid)
@@ -544,4 +555,4 @@ def goal_block(bot,db,uid):
     from economy_progress import growth
     text,route,q=next_step(db,uid);state=activity(db,uid)
     status=f"\n**{capacity(q) if q else 0}** target batches ready · **{state['ready']}** jobs to collect · **{state['products']}** sellable products"
-    return discord.ui.TextDisplay('### Your next step · '+GOALS[selected_goal(db,uid)]+'\n'+text+status+'\n'+growth(db,uid)[0]), discord.ui.ActionRow(Entry(bot,db,uid,'Continue',**route),Entry(bot,db,uid,'Goals & Activity',page='activity'))
+    return discord.ui.TextDisplay('### Your next step · '+GOALS[selected_goal(db,uid)]+'\n'+text+status+'\n'+growth(db,uid)[0]), discord.ui.ActionRow(Entry(bot,db,uid,next_step_label(route),**route),Entry(bot,db,uid,'Goals & Activity',page='activity'))

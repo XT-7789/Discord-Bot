@@ -10,6 +10,13 @@ import player_overview as overview
 import test_economy_transactions as fixtures
 
 class OverviewTests(unittest.TestCase):
+    def test_action_labels_describe_preview_destinations(self):
+        import economy_journey as journey
+        self.assertEqual('Choose Product to Sell',journey.next_step_label({'page':'products'}))
+        self.assertEqual('Review Material Sales',journey.next_step_label({'page':'materials'}))
+        self.assertEqual('Review Craft',journey.next_step_label({'page':'detail'},{'craftable':True}))
+        self.assertEqual('Materials & Recipe',journey.next_step_label({'page':'detail'},{'craftable':False}))
+
     def setUp(self):fixtures.TransactionTests.setUp(self)
     def balance(self):return self.db.execute('SELECT xc FROM players WHERE user_id=?',(self.uid,)).fetchone()[0]
 

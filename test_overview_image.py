@@ -44,7 +44,7 @@ class ImageTests(unittest.TestCase):
             with patch.object(renderer,'render',side_effect=OSError('font')):
                 result=await overview.image_options({'view':view})
             self.assertEqual([],result['attachments'])
-            self.assertIn('Continue',str(view.to_components()))
+            self.assertTrue(any(getattr(x,'action',None)==('continue',) for x in view.walk_children()))
             self.assertIn('Text mode (OV-IMG-2)',str(view.to_components()))
             self.assertNotIn('attachment://',str(view.to_components()))
         asyncio.run(run())

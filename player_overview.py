@@ -85,7 +85,7 @@ class OverviewView(discord.ui.LayoutView):
             self.box.add_item(discord.ui.ActionRow(LayoutSelect(self)))
             self.row(('Save',('save',)),('Use Defaults',('defaults',)),('Cancel',('cancel',)),primary=True)
         else:
-            text,self.route,_=journey.next_step(db,owner)
+            text,self.route,recipe_quote=journey.next_step(db,owner)
             self.text('### Current goal\n'+text[:850])
             growth,self.upgrade=economy_progress.growth(db,owner)
             p=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
@@ -96,7 +96,9 @@ class OverviewView(discord.ui.LayoutView):
                 if p['mining_level']<item['pickaxe_required_level']:status+=f" · Mining Lv {p['mining_level']}/{item['pickaxe_required_level']}"
                 self.text(f'**Next upgrade · {name}**\n{status}')
             else:self.text('**Next upgrade**\n'+growth)
-            self.row(('Continue',('continue',)),('Choose Goal',('goal',)),('Review Upgrade' if self.upgrade else 'Research',('upgrade',)),primary=True)
+            next_label=journey.next_step_label(self.route,recipe_quote)
+            if self.route['page']=='activity' and journey.selected_goal(db,owner)=='earn' and not journey.activity(db,owner)['ready']:next_label='Go Mining'
+            self.row((next_label,('continue',)),('Choose Goal',('goal',)),('Review Upgrade' if self.upgrade else 'Research',('upgrade',)),primary=True)
             if p:
                 tiles=self.tiles(p)
                 if tiles:
