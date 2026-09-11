@@ -19,7 +19,7 @@ def compact_number(value):
 
 def tile_text(tiles):
     """Bounded ASCII columns; real action buttons are rendered separately."""
-    lines=['  '.join(str(tile[row])[:12].ljust(12) for tile in tiles).rstrip() for row in range(3)]
+    lines=[' |'.join((str(tile[row]).upper() if row==0 else str(tile[row]))[:12].ljust(12) for tile in tiles).rstrip() for row in range(3)]
     return '```\n'+'\n'.join(lines)+'\n```'
 
 def layout(db,uid):
@@ -47,18 +47,24 @@ class OverviewView(discord.ui.LayoutView):
         self.pages=1;self.page=0
         self.box=discord.ui.Container(accent_colour=0x41D9D0);self.add_item(self.box)
         self.text('-# ✦ X SYSTEM\n# '+('CUSTOMIZE OVERVIEW' if editing else 'MY OVERVIEW'))
-        if notice:self.text(notice)
+        if notice:self.text('-# '+notice)
         if editing:
             self.text('Choose your stats and shortcuts. All selected sections fit on one overview. Changes apply only after Save.')
             self.box.add_item(discord.ui.ActionRow(LayoutSelect(self)))
             self.row(('Save',('save',)),('Use Defaults',('defaults',)),('Cancel',('cancel',)),primary=True)
         else:
             text,self.route,_=journey.next_step(db,owner)
-            self.text('## Current goal\n'+text[:850])
+            self.text('### Current goal\n'+text[:850])
             growth,self.upgrade=economy_progress.growth(db,owner)
-            self.text('**Next upgrade** · '+growth.replace('\n',' · '))
-            self.row(('Continue',('continue',)),('Choose Goal',('goal',)),('Review Upgrade' if self.upgrade else 'Research',('upgrade',)),primary=True)
             p=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
+            if self.upgrade and p:
+                item=self.upgrade;name=discord.utils.escape_markdown(item['name'])[:100]
+                gap=max(0,item['price']-p['xc'])
+                status='Owned · Equip in Backpack' if item['owned'] else f"{item['price']:,} XC · "+(f'Need {gap:,} XC' if gap else 'Budget ready')
+                if p['mining_level']<item['pickaxe_required_level']:status+=f" · Mining Lv {p['mining_level']}/{item['pickaxe_required_level']}"
+                self.text(f'**Next upgrade · {name}**\n{status}')
+            else:self.text('**Next upgrade**\n'+growth)
+            self.row(('Continue',('continue',)),('Choose Goal',('goal',)),('Review Upgrade' if self.upgrade else 'Research',('upgrade',)),primary=True)
             if p:
                 tiles=self.tiles(p)
                 if tiles:
@@ -67,7 +73,7 @@ class OverviewView(discord.ui.LayoutView):
                         group=tiles[start:start+3]
                         self.text(tile_text(group))
                         self.row(*[(tile[3],('nav',tile[4])) for tile in group])
-                    self.text('-# Energy: last recorded · Rounded totals; open a panel for details.')
+                    self.text('-# Energy is last recorded. Open a panel for exact totals and details.')
             if not self.selected:self.text('Goal-only overview. Use Customize to add sections.')
         footer=[] if editing else [OverviewButton(self,'Customize',('customize',)),OverviewButton(self,'Refresh',('refresh',))]
         self.add_item(discord.ui.ActionRow(*footer,OverviewButton(self,'Menu',('menu',)),OverviewButton(self,'Close',('close',))))

@@ -52,6 +52,7 @@ class OverviewTests(unittest.TestCase):
                     self.assertEqual((len(tiles)+2)//3,len(grids))
                     for grid in grids:
                         self.assertTrue(all(len(line)<=40 for line in grid.content.splitlines()[1:-1]))
+                        self.assertEqual(grid.content.splitlines()[1],grid.content.splitlines()[1].upper())
                         self.assertIsInstance(children[children.index(grid)+1],discord.ui.ActionRow)
                     if len(keys)==7:
                         self.assertEqual(9,len(tiles))

@@ -18,3 +18,10 @@ This supersedes the earlier four-sections-per-page overview layout.
 - Each column shows a title and two short status lines. Large totals are abbreviated; destination panels retain full details.
 - These are monospace text columns, not native cards. Discord still controls button widths and narrow-screen code-block rendering. Exact button-to-column alignment is not guaranteed.
 - Mobile screenshot acceptance remains pending for this revision.
+
+## Readability polish
+
+- Uppercase tile headings and vertical column separators make each three-column group easier to scan without widening the 40-character grid.
+- Upgrade name and affordability/level status now use two separate lines instead of a long paragraph. Budget readiness does not imply the mining level requirement is met.
+- Saved-layout notice uses subdued text. One primary Continue action remains; shortcuts stay neutral.
+- Real phone visual acceptance is still pending for this polish; button widths are controlled by Discord.
