@@ -17,6 +17,7 @@ import player_overview
 
 GUIDE_IMAGE=Path(__file__).parent/'assets'/'ui'/'navigation-guide.png'
 HELP_TOPICS={
+    'start':('I am new. What should I do first?','Economy > Your next step','Start with mining, gather the materials shown in your recipe, craft one product, then review its sale. Follow the next-step button in Economy. XC is your economy currency; War Credits are separate and used for your nation. War and Casino are optional. Opening a trade preview does not spend anything.','economy'),
     'earn':('How do I earn XC?','Economy > Earn','Collect Daily rewards and complete Contracts. Mining materials can also be sold for XC.','earn_menu'),
     'casino':('Where can I play Casino games?','Economy > Casino','Choose a game, review its bet range, then submit one round. XC is fictional currency; you can lose your stake.','casino'),
     'items':('Where are my items?','Profile > Backpack','Select an item to see its quantity and available Use, Equip or Sell actions.','inventory'),
@@ -312,20 +313,20 @@ def register(bot, db, create_player):
                 xp=profile['xp']-profile['current_floor']
                 span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
                 xp_text=f"{progress_bar(xp,span)} {xp:,} / {span:,} XP" if profile['next_threshold'] else 'MAX LEVEL'
-                view=Shell(owner,'MAIN MENU','OVERVIEW',notice)
+                view=Shell(owner,'MAIN MENU','New here? Open Economy and follow Your next step.\nMine → Craft → Sell · War and Casino are optional.',notice)
                 def block(text,buttons):
                     view.box.add_item(discord.ui.Separator())
                     view.box.add_item(discord.ui.TextDisplay(text))
                     view.box.add_item(discord.ui.ActionRow(*buttons))
-                block(f"### 👤 Profile\n**{discord.utils.escape_markdown(player['nation_name'])}** · Lv **{profile['level']}**\n{xp_text}",[Nav(owner,'Profile','profile'),Nav(owner,'VIP Status','vip'),Nav(owner,'My Overview','overview')])
-                block(f"### 💰 Economy\nWallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**",[Nav(owner,'Economy','economy'),Nav(owner,'Finance','finance'),Nav(owner,'Casino','casino')])
+                block(f"### 👤 Profile\nLevel **{profile['level']}** · Backpack, progress and VIP\n{xp_text}",[Nav(owner,'Profile','profile'),Nav(owner,'My Overview','overview')])
+                block(f"### 💰 Economy\nWallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**\nEarn, craft, trade and play.",[Nav(owner,'Economy','economy')])
                 cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(owner,)).fetchone()[0]
                 lands=db.execute('SELECT COUNT(*) FROM map_territories WHERE owner_user_id=?',(owner,)).fetchone()[0]
                 units=db.execute('SELECT COALESCE(SUM(quantity),0) FROM player_war_units WHERE user_id=?',(owner,)).fetchone()[0]
                 state=db.execute('SELECT last_collect FROM player_city_state WHERE user_id=?',(owner,)).fetchone()
                 ready_at=(int(state['last_collect']) if state else 0)+war_tier.setting(db,'city_collect_cooldown')
                 production='Production ready' if ready_at<=int(time.time()) else f'Production <t:{ready_at}:R>'
-                block(f"### ⚔️ Warfront\nCities **{cities}** · Land **{lands}** · Units **{units}**\nWar Credits **{player['money']:,}** · {production}",[Nav(owner,'Warfront','war'),Nav(owner,'Cities','city'),Nav(owner,'Army','army')])
+                block(f"### ⚔️ Warfront · Optional\nCities **{cities}** · Units **{units}**\nWar Credits **{player['money']:,}** · Separate from XC",[Nav(owner,'Warfront','war')])
                 pending=[(category,m) for category in ('daily','starter') for m in tier5.missions_for(db,owner,category)[1] if not m['claimed']]
                 ready=next(((c,m) for c,m in pending if m['progress']>=m['target']),None)
                 chosen=ready or next(((c,m) for c,m in pending if m['destination'] in ('mining','economy','city')),None)
@@ -333,7 +334,8 @@ def register(bot, db, create_player):
                     category,m=chosen
                     target='mission_'+category if ready else {'economy':'daily'}.get(m['destination'],m['destination'])
                     text=f"### 🎯 Missions\n**{m['title']}** · {m['progress']} / {m['target']}\n{'Reward ready · ' if ready else ''}+{m['xc']} XC · +{m['credits']} WC · +{m['xp']} XP"
-                    actions=[Nav(owner,'Missions','missions'),Nav(owner,'View Rewards' if ready else 'Continue',target)]
+                    actions=[Nav(owner,'Missions','missions')]
+                    if ready:actions.append(Nav(owner,'View Rewards',target))
                 else:
                     text='### 🎯 Missions\nAll featured goals complete. Explore at your own pace.'
                     actions=[Nav(owner,'Missions','missions')]

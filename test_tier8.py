@@ -177,8 +177,16 @@ class ResearchTests(unittest.TestCase):
                         self.assertLessEqual(panel.total_children_count,40)
                         self.assertTrue(panel.to_components())
                     main_buttons=[x for x in panels[0].walk_children() if isinstance(x,discord.ui.Button)]
-                    self.assertTrue({'profile','economy','war','missions','help','close','city','army','casino'} <= {getattr(x,'key',None) for x in main_buttons})
+                    self.assertTrue({'profile','economy','war','missions','help','close','overview'} <= {getattr(x,'key',None) for x in main_buttons})
                     self.assertIn('MAIN MENU',str(panels[0].to_components()))
+                    menu_text=str(panels[0].to_components())
+                    self.assertIn('War and Casino are optional',menu_text)
+                    self.assertIn('Separate from XC',menu_text)
+                    menu_keys=[getattr(x,'key',None) for x in panels[0].walk_children()]
+                    for destination in ('profile','economy','war','missions','overview'):
+                        self.assertIn(destination,menu_keys)
+                    for destination in ('finance','casino','city','army'):
+                        self.assertNotIn(destination,menu_keys)
                     menu_content=str(panels[0].to_components())
                     for heading in ('Profile','Economy','Warfront','Missions'):
                         self.assertIn(heading,menu_content)
@@ -238,10 +246,10 @@ class ResearchTests(unittest.TestCase):
                     saved_user=i.user
                     for roles,expected in (([],'STANDARD'),([SimpleNamespace(id=casino.setting(module.db,'server_svip_role_id'))],'SVIP')):
                         i.user=SimpleNamespace(id=self.uid,roles=roles)
-                        vip_view=await navigate(panels[0],'vip')
+                        vip_view=await navigate(await navigate(panels[0],'profile'),'vip')
                         self.assertIn(expected,str(vip_view.to_components()))
                         self.assertIn('No XC charged',str(vip_view.to_components()))
-                        self.assertEqual(('menu',),(await navigate(vip_view,'back')).system_history)
+                        self.assertEqual(('menu','profile'),(await navigate(vip_view,'back')).system_history)
                     import svip
                     with svip.context(SimpleNamespace(id=self.uid,guild=SimpleNamespace(id=1),roles=[SimpleNamespace(id=casino.setting(module.db,'server_svip_role_id'))])):
                         svip_profile=bot.xbot_system_page_builder(self.uid,'profile')
