@@ -98,7 +98,7 @@ def register(bot, db, create_player):
             token=navigation.set(history)
             try:
                 attachments=[discord.File(GUIDE_IMAGE,filename='navigation-guide.png')] if destination=='help_map' and GUIDE_IMAGE.is_file() else []
-                await i.edit_original_response(view=page(self.owner,destination,member=i.user),attachments=attachments)
+                await i.edit_original_response(**await player_overview.image_options(dict(view=page(self.owner,destination,member=i.user),attachments=attachments)))
             finally:
                 navigation.reset(token)
 
@@ -463,18 +463,25 @@ def register(bot, db, create_player):
         return kwargs
 
     class Output:
-        def __init__(self,target,owner,key):
+        def __init__(self,target,owner,key,parent=None):
             self.target,self.owner,self.key=target,owner,key
+            self.parent=parent
         def __getattr__(self,name):
             return getattr(self.target,name)
         def options(self,kwargs):
+            message=getattr(self.parent,'message',None)
+            if kwargs.get('view') is not None and message is not None and any(getattr(a,'filename','')=='overview.png' for a in (getattr(message,'attachments',[]) or [])):
+                kwargs.setdefault('attachments',[])
             return style_output(kwargs,self.owner,self.key)
         async def send_message(self,*args,**kwargs):
-            return await self.target.send_message(*args,**self.options(kwargs))
+            return await self.target.send_message(*args,**await player_overview.image_options(self.options(kwargs),sending=True))
         async def edit_message(self,*args,**kwargs):
+            if isinstance(kwargs.get('view'),player_overview.OverviewView) and not kwargs['view'].editing:
+                await self.target.defer()
+                return await self.parent.edit_original_response(**await player_overview.image_options(self.options(kwargs)))
             return await self.target.edit_message(*args,**self.options(kwargs))
         async def send(self,*args,**kwargs):
-            return await self.target.send(*args,**self.options(kwargs))
+            return await self.target.send(*args,**await player_overview.image_options(self.options(kwargs),sending=True))
         async def send_modal(self,modal):
             if not getattr(modal,'system_wrapped',False):
                 original=modal.on_submit
@@ -500,12 +507,12 @@ def register(bot, db, create_player):
         def __getattr__(self,name):
             return getattr(self.actual,name)
         async def edit(self,**kwargs):
-            return await self.actual.edit(**style_output(kwargs,self.owner,self.key))
+            return await self.actual.edit(**await player_overview.image_options(style_output(kwargs,self.owner,self.key)))
 
     class Interaction:
         def __init__(self,actual,owner,key):
             self.actual,self.owner,self.key=actual,owner,key
-            self.response=Output(actual.response,owner,key)
+            self.response=Output(actual.response,owner,key,actual)
         @property
         def followup(self):
             return Output(self.actual.followup,self.owner,self.key)
@@ -518,7 +525,7 @@ def register(bot, db, create_player):
         def __getattr__(self,name):
             return getattr(self.actual,name)
         async def edit_original_response(self,**kwargs):
-            return await self.actual.edit_original_response(**style_output(kwargs,self.owner,self.key))
+            return await self.actual.edit_original_response(**await player_overview.image_options(style_output(kwargs,self.owner,self.key)))
 
     def prepare(view,owner,key,force=False):
         if isinstance(view,discord.ui.LayoutView) and not hasattr(view,'system_history'):
@@ -652,7 +659,7 @@ def register(bot, db, create_player):
         async def entry(i:discord.Interaction):
             await i.response.defer()
             create_player(i.user)
-            await i.edit_original_response(view=page(i.user.id,destination),attachments=[])
+            await i.edit_original_response(**await player_overview.image_options(dict(view=page(i.user.id,destination),attachments=[])))
         kwargs={'guild':discord.Object(id=guild_id)} if guild_id else {}
         bot.tree.remove_command(name,**kwargs)
         entry.system_ui_wrapped=True

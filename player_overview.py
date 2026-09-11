@@ -1,5 +1,7 @@
 """Personal, persisted overview. Opening/customizing never settles assets."""
 import json
+import asyncio
+import io
 import sqlite3
 import time
 import discord
@@ -9,6 +11,25 @@ import svip
 
 BLOCKS={'wallet':'Wallet & Bank','mining':'Mines','production':'Craft & Production','market':'Market & Stocks','nation':'Nation','missions':'Missions','vip':'VIP'}
 DEFAULT=('wallet','production','missions')
+
+async def image_options(options, sending=False):
+    view=options.get('view')
+    if not isinstance(view,OverviewView) or view.editing:return options
+    import overview_image
+    try:
+        data=await asyncio.to_thread(overview_image.render,view.snapshot)
+    except Exception:
+        options['attachments' if not sending else 'files']=[]
+        return options
+    if not getattr(view,'image_ready',False):
+        rows=[child for child in view.box.children if isinstance(child,discord.ui.ActionRow)]
+        view.box.clear_items()
+        view.box.add_item(discord.ui.MediaGallery(discord.MediaGalleryItem('attachment://overview.png',description=('X SYSTEM personal overview. '+view.snapshot['goal'])[:1000])))
+        for row in rows:view.box.add_item(row)
+        view.image_ready=True
+    options.pop('attachments',None)
+    options['files' if sending else 'attachments']=[discord.File(io.BytesIO(data),filename='overview.png')]
+    return options
 
 def compact_number(value):
     value=int(value)
@@ -75,6 +96,7 @@ class OverviewView(discord.ui.LayoutView):
                         self.row(*[(tile[3],('nav',tile[4])) for tile in group])
                     self.text('-# Energy is last recorded. Open a panel for exact totals and details.')
             if not self.selected:self.text('Goal-only overview. Use Customize to add sections.')
+            self.snapshot={'owner':owner,'goal':text,'upgrade':(name+' · '+status) if self.upgrade and p else growth,'tiles':self.tiles(p) if p else []}
         footer=[] if editing else [OverviewButton(self,'Customize',('customize',)),OverviewButton(self,'Refresh',('refresh',))]
         self.add_item(discord.ui.ActionRow(*footer,OverviewButton(self,'Menu',('menu',)),OverviewButton(self,'Close',('close',))))
 
@@ -178,7 +200,10 @@ class OverviewView(discord.ui.LayoutView):
                 if button:button.callback=OverviewButton(self,'Back',('refresh',)).callback
                 elif v.total_children_count<=38:v.add_item(discord.ui.ActionRow(OverviewButton(self,'Back to Overview',('refresh',))))
         else:return
-        await i.response.edit_message(view=v)
+        if isinstance(v,OverviewView) and not v.editing:
+            await i.response.defer()
+            await i.edit_original_response(**await image_options({'view':v,'attachments':[]}))
+        else:await i.response.edit_message(view=v,attachments=[])
 
 class OverviewButton(discord.ui.Button):
     def __init__(self,v,label,action,style=discord.ButtonStyle.secondary):

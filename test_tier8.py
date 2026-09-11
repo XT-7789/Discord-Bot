@@ -308,7 +308,7 @@ class ResearchTests(unittest.TestCase):
                     vip_from_overview=journey_i.response.edit_message.call_args.kwargs['view']
                     self.assertIn('VIP',str(vip_from_overview.to_components()))
                     await next(x for x in vip_from_overview.walk_children() if getattr(x,'key',None)=='back').callback(journey_i)
-                    self.assertIn('MY OVERVIEW',str(journey_i.response.edit_message.call_args.kwargs['view'].to_components()))
+                    self.assertIn('attachment://overview.png',str(journey_i.edit_original_response.call_args.kwargs['view'].to_components()))
                     self.assertNotIn('war',module.PUBLIC_PLAYER_COMMANDS)
                     import system_ui
                     help_view=bot.xbot_system_page_builder(self.uid,'help')
