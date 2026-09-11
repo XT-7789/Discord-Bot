@@ -10,6 +10,21 @@ import player_overview as overview
 import test_economy_transactions as fixtures
 
 class OverviewTests(unittest.TestCase):
+    def test_beginner_missing_materials_has_actionable_route(self):
+        import economy_journey as journey
+        async def run():
+            q=next(q for q in journey.quotes(self.db,self.uid) if q['recipe']['name']=='Resource Pack')
+            self.db.execute('DELETE FROM inventories WHERE user_id=?',(self.uid,));self.db.commit()
+            view=journey.JourneyView(SimpleNamespace(),self.db,self.uid,page='detail',rid=q['recipe']['id'])
+            labels=[getattr(x,'label',None) for x in view.walk_children()]
+            self.assertIn('Find missing materials',labels)
+            self.assertNotIn('Craft 1',labels)
+            self.assertIn('What you still need',str(view.to_components()))
+            area=journey.JourneyView(SimpleNamespace(),self.db,self.uid,page='areas',rid=q['recipe']['id'])
+            self.assertIn('Back to Recipe',str(area.to_components()))
+            self.assertLessEqual(area.total_children_count,40)
+        asyncio.run(run())
+
     def test_action_labels_describe_preview_destinations(self):
         import economy_journey as journey
         self.assertEqual('Choose Product to Sell',journey.next_step_label({'page':'products'}))

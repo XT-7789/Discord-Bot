@@ -322,7 +322,7 @@ class JourneyView(discord.ui.LayoutView):
             self.box.add_item(discord.ui.ActionRow(GoalSelect(self)))
             text,route,q=next_step(db,uid)
             self.text('### Next step\n'+text)
-            if route['page']!='activity':self.box.add_item(discord.ui.ActionRow(Entry(self.bot,db,uid,'Continue',back=self,**route)))
+            if route['page']!='activity':self.box.add_item(discord.ui.ActionRow(Entry(self.bot,db,uid,next_step_label(route,q),back=self,**route)))
             ready=capacity(q) if q else 0
             self.text(f"### Ready now\n**{state['ready']}** jobs to collect · **{state['active']}** jobs in queue\n**{state['products']}** sellable products · **{ready}** batches of the target recipe affordable")
             if state['ready']:self.row(('Collect ready',('collect',)))
@@ -341,9 +341,13 @@ class JourneyView(discord.ui.LayoutView):
             self.text(f"## {r['name']} → {r['output_quantity']}× {r['output_name']}\n"+'\n'.join(f"{i['name']}: **{i['owned']} / {i['quantity']}**" for i in q['ingredients']))
             self.text(f"Fee **{q['cost']} XC** · Wallet **{q['wallet']} XC**\nRaw material sale: **{q['materials'] if q['materials'] is not None else 'Not comparable'} XC**\nProduct sale: **{q['proceeds'] if q['proceeds'] is not None else 'Unavailable'} XC**\nExtra after fee: **{str(q['gain']) if q['gain'] is not None else 'Not comparable'} XC**\n"+('Profitable beginner route.' if q['recommended'] else 'Not recommended as a beginner profit route.'))
             self.text(effect_text(r)+f"\n**Can make now: {capacity(q)} batches** (materials + XC).")
-            if q['available']:
-                self.row(('Craft 1',('confirm','craft')),('Batch production',('batch',)),('Advanced craft',('nav','craft_advanced')))
-            if q['missing']:self.row(('Find missing materials',('areas',)))
+            if q['missing']:
+                self.text('### What you still need\n'+' · '.join(f"{i['quantity']-i['owned']} {i['name']}" for i in q['missing']))
+                self.row(('Find missing materials',('areas',)))
+            if q['craftable']:
+                self.row(('Craft 1',('confirm','craft')),('Batch production',('batch',)))
+            elif not q['available']:self.text('Crafting is currently unavailable. You can review your materials or return later.')
+            if q['available']:self.row(('Advanced craft',('nav','craft_advanced')))
             if q['wallet']<q['cost']:self.row(('Sell Materials',('materials',)))
             if owned(db,uid,self.iid)['quantity']>0:self.row(('View product',('product',self.iid)))
         elif self.page=='batch':
@@ -382,7 +386,9 @@ class JourneyView(discord.ui.LayoutView):
             self.text('Choose an item to review. Nothing is sold or used automatically.')
             options=[discord.SelectOption(label=f"{i['name']} ×{i['quantity']}"[:100],value=str(i['id']),default=i['id']==self.iid) for i in rows[self.offset:self.offset+25]]
             if options:self.box.add_item(discord.ui.ActionRow(Select(self,options,'product','Choose item…')))
-            else:self.text('No crafted products in your Backpack.' if self.page == 'products' else 'No sellable materials in your Backpack.')
+            else:
+                self.text('No crafted products yet. Gather materials, then make your first product.' if self.page == 'products' else 'No materials to sell yet. Start by mining.')
+                self.row(('Open Mines',('nav','mining')),('Choose Recipe',('all',)))
             self.pager(len(rows))
         elif self.page=='areas':
             q=quote(db,uid,self.rid); missing=[i['item_id'] for i in q['missing']]
@@ -390,10 +396,12 @@ class JourneyView(discord.ui.LayoutView):
             level=db.execute('SELECT mining_level FROM players WHERE user_id=?',(uid,)).fetchone()[0]
             areas=[a for a in rows if any(db.execute('SELECT 1 FROM mining_area_drops WHERE area_id=? AND item_id=? AND weight>0',(a['id'],iid)).fetchone() for iid in missing)]
             self.text('Select an unlocked area, then press Mine. Drops are random; a run does not guarantee the missing material.')
+            self.text('Still needed: '+(' · '.join(f"{i['quantity']-i['owned']} {i['name']}" for i in q['missing']) or 'None — return to the recipe to review crafting.'))
             self.text('\n'.join(f"{a['name']} · {'Unlocked' if level>=a['required_level'] else 'Requires level '+str(a['required_level'])}" for a in areas[self.offset:self.offset+25]) or 'No matching areas.')
             options=[discord.SelectOption(label=a['name'][:100],value=str(a['id'])) for a in areas[self.offset:self.offset+25] if level>=a['required_level']]
             if options:self.box.add_item(discord.ui.ActionRow(Select(self,options,'area','Choose mining area…')))
             else:self.text('No matching unlocked area. Check Mining progression or ask staff about configured drops.')
+            self.row(('Back to Recipe',('recipe',self.rid)),('Open Mines',('nav','mining')))
             self.pager(len(areas))
         elif self.page=='confirm':
             if self.operation in {'craft','queue'}:
