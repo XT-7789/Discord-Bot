@@ -45,6 +45,7 @@ class ImageTests(unittest.TestCase):
                 result=await overview.image_options({'view':view})
             self.assertEqual([],result['attachments'])
             self.assertIn('Continue',str(view.to_components()))
+            self.assertIn('Text mode (OV-IMG-2)',str(view.to_components()))
             self.assertNotIn('attachment://',str(view.to_components()))
         asyncio.run(run())
 

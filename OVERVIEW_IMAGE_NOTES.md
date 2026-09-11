@@ -9,3 +9,7 @@ Verification: temporary-database regressions plus image/cache/fallback tests; de
 Phone rollout: git pull --ff-only, restart the existing bot, and open a fresh /overview. Do not start a second bot. Confirm all sections, Customize/Save, Refresh, opening a detail and Back, and Close. Check that old images disappear when leaving. Actual Discord mobile screenshots and Termux cold/cache timing remain PENDING acceptance.
 
 Discord controls button sizing and image display scale. Tap the image to read full-size details. Abbreviated totals are explained in the image; full values remain available in detail panels. Existing compact-layout documentation is superseded for the successful image path and remains relevant only to fallback.
+
+## OV-IMG-2 diagnostics
+
+New panels identify this revision as OV-IMG-2. Image failures now show an explicit Text mode notice and log the exception in the host terminal, including renderer import failures. Image shortcuts are numbered to match the cards. A screenshot without the marker cannot establish whether an older process or an older message is being used: check git log -1 --oneline in the phone checkout, restart the existing bot and open a fresh /overview. GitHub push does not restart or pull the phone installation.

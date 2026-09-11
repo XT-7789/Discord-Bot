@@ -28,7 +28,7 @@ def render(snapshot):
         while value and draw.textlength(value,font=fonts[size])>width:value=value[:-4]+'...' if len(value)>4 else value[:-1]
         draw.text((x,y),value,font=fonts[size],fill=color)
     draw.rounded_rectangle((24,24,936,376+rows*180),radius=24,fill='#17232e',outline='#2d4452',width=2)
-    text(48,42,'X SYSTEM  /  PERSONAL DASHBOARD',18,'#41d9d0')
+    text(48,42,'X SYSTEM  /  PERSONAL DASHBOARD  /  OV-IMG-2',18,'#41d9d0')
     text(48,70,'MY OVERVIEW',42)
     draw.rounded_rectangle((48,132,912,284),radius=16,fill='#20323e')
     text(68,146,'CURRENT GOAL',18,'#41d9d0')
