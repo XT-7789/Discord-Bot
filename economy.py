@@ -1279,7 +1279,7 @@ def register_commands(bot, db, create_player) -> None:
         remaining = cooldown - (now - player["last_mine_at"])
         if remaining > 0:
             result=MiningActionResultView(interaction.user.id,'⏳ Mining is recovering',
-                f"Ready <t:{now+remaining}:R>. Your progress is saved. Sell materials or return to Lobby while you wait.",discord.Color.gold())
+                f"Ready <t:{now+remaining}:R>. Your progress is saved. Review crafting or material sales while you wait.",discord.Color.gold())
             if interaction.message is not None:
                 await interaction.response.edit_message(view=result)
             else:
@@ -1287,7 +1287,14 @@ def register_commands(bot, db, create_player) -> None:
             return
         energy = refresh_mining_energy(db, interaction.user.id, now)
         if setting(db,"mining_energy_enabled") and energy < area["energy_cost"]:
-            await interaction.response.send_message(f"⚡ You need **{area['energy_cost']} energy**. Current: **{energy}**.", ephemeral=True); db.commit(); return
+            db.commit()
+            regen=setting(db,'mining_energy_regen_amount');seconds=max(1,setting(db,'mining_energy_regen_seconds'))
+            recovery=f"Energy restores **{regen} every {seconds//60} min {seconds%60}s**, up to {setting(db,'mining_max_energy')}." if regen>0 else 'Automatic energy recovery is currently disabled.'
+            result=MiningActionResultView(interaction.user.id,'⚡ Not enough energy',
+                f"Current **{energy}** · This area needs **{area['energy_cost']}**.\n{recovery}\nChoose another area, craft from your Backpack, or review material sales.",discord.Color.gold())
+            if interaction.message is not None:await interaction.response.edit_message(view=result)
+            else:await interaction.response.send_message(view=result)
+            return
         drops = db.execute("""SELECT d.*,i.name,i.emoji FROM mining_area_drops d JOIN items i ON i.id=d.item_id
             WHERE d.area_id=? AND i.enabled=1 AND d.weight>0""", (area["id"],)).fetchall()
         if not drops:
@@ -1429,6 +1436,8 @@ def register_commands(bot, db, create_player) -> None:
                 MiningHubButton("mine", "Mine Again", "⛏️", discord.ButtonStyle.success),
                 __import__('economy_journey').Entry(bot,db,owner_id,'Craft',material=material_id,back=self),
                 __import__('economy_journey').Entry(bot,db,owner_id,'Sell Materials',page='materials',back=self),
+            ))
+            container.add_item(discord.ui.ActionRow(
                 MiningHubButton("hub", "Mining Hub", "🗺️", discord.ButtonStyle.secondary),
                 EconomyCentreButton(owner_id, "Economy"),
             ))

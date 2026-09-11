@@ -389,6 +389,16 @@ class ResearchTests(unittest.TestCase):
                     self.assertIn('Mining is recovering',str(i.response.edit_message.call_args.kwargs['view'].to_components()))
                     self.assertEqual(mined,module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
                     i.response.send_message.assert_not_called()
+                    module.db.execute("INSERT OR REPLACE INTO economy_settings(key,value) VALUES('mining_energy_enabled','1')")
+                    module.db.execute('UPDATE players SET mining_energy=0,mining_energy_updated=?,last_mine_at=0 WHERE user_id=?',(__import__('time').time(),self.uid))
+                    module.db.commit()
+                    await mine_button.callback(i)
+                    exhausted=i.response.edit_message.call_args.kwargs['view']
+                    self.assertIn('Not enough energy',str(exhausted.to_components()))
+                    self.assertIn('Energy restores',str(exhausted.to_components()))
+                    for label in ('Craft','Sell Materials','Mining Hub'):
+                        self.assertIn(label,[getattr(x,'label',None) for x in exhausted.walk_children()])
+                    self.assertEqual(mined,module.db.execute('SELECT total_mines FROM players WHERE user_id=?',(self.uid,)).fetchone()[0])
                     # Casino modal uses per-game limits, settles in-place and retains navigation.
                     import casino
                     module.db.execute("UPDATE casino_game_settings SET min_bet=25,max_bet=100,cooldown_seconds=45 WHERE game='dice'")
