@@ -534,17 +534,13 @@ def home():
     unused_items = sum(not item_usage_details(db, item_id) for item_id in all_item_ids)
     disabled_items = db.execute("SELECT COUNT(*) count FROM items WHERE enabled=0").fetchone()["count"]
     pending_applications = db.execute("SELECT COUNT(*) count FROM application_submissions WHERE status='pending'").fetchone()["count"]
+    leaders = db.execute("""SELECT x.*,COALESCE(NULLIF(p.display_name,''),CAST(x.user_id AS TEXT)) display_name
+        FROM xp_profiles x LEFT JOIN players p ON p.user_id=x.user_id ORDER BY x.total_xp DESC LIMIT 50""").fetchall()
     db.close()
-    body = """
-    <section class="workspace-launcher" aria-label="Workspaces">
-      <a href="{{url_for('casino_control')}}"><span>01 / PLAY</span><h2>Casino & Free Games</h2><p>Game availability, limits and play statistics.</p><b>Open game controls →</b></a>
-      <a href="{{url_for('settings')}}"><span>02 / ECONOMY</span><h2>Economy Settings</h2><p>Account rules, earning and market configuration.</p><b>Manage economy →</b></a>
-      <a href="{{url_for('applications_control')}}"><span>03 / COMMUNITY</span><h2>Staff Workspace</h2><p>{{pending_applications}} pending applications · review community requests.</p><b>Review applications →</b></a>
-    </section>
-    <div class="grid"><div class="card"><small>Nations</small><strong>{{s['nations']}}</strong></div><div class="card"><small>Wallet XC</small><strong>{{s['xc']}}</strong></div><div class="card"><small>Bank XC</small><strong>{{s['bank_xc']}}</strong></div><div class="card"><small>War Credits</small><strong>{{s['war_credits']}}</strong></div><div class="card"><small>XCrystals</small><strong>{{s['crystals']}}</strong></div><div class="card"><small>Military Power</small><strong>{{s['power']}}</strong></div><div class="card"><small>Active Items / Jobs</small><strong>{{s['items']}} / {{s['jobs']}}</strong></div><div class="card"><small>Market Listings</small><strong>{{s['listings']}}</strong></div><div class="card"><small>Battles Recorded</small><strong>{{s['battles']}}</strong></div></div>
-    <section class="panel"><h2>🩺 System Control Center</h2><div class="pad"><div class="notice">Live settings are read directly from X BOT's database. Click a system to configure it.</div><div class="grid">{% for system in systems %}<a class="card" href="{{url_for(system['endpoint'])}}" style="text-decoration:none"><small>{{system['label']}}</small><strong class="{{'ok' if system['enabled'] else 'bad'}}">{{'OPEN' if system['enabled'] else 'CLOSED'}}</strong></a>{% endfor %}</div><div class="grid"><a class="card" href="{{url_for('items')}}"><small>Unused / Deletable Items</small><strong>{{unused_items}}</strong></a><a class="card" href="{{url_for('items')}}"><small>Disabled Items</small><strong>{{disabled_items}}</strong></a><a class="card" href="{{url_for('applications_control')}}"><small>Pending Applications</small><strong>{{pending_applications}}</strong></a></div></div></section>
-    <section class="panel"><h2>Alliance War Status</h2><div class="pad">{% if war %}<span class="bad">ACTIVE WAR</span><h3>[{{war['attacker_tag']}}] {{war['attacker_name']}} vs [{{war['defender_tag']}}] {{war['defender_name']}}</h3>{% else %}<span class="ok">No active Alliance War</span>{% endif %}</div></section>
-    <section class="panel"><h2>Recent Economy Activity</h2><table><tr><th>User ID</th><th>Action</th><th>Detail</th></tr>{% for row in recent %}<tr><td>{{row['user_id']}}</td><td>{{row['action']}}</td><td>{{row['detail']}}</td></tr>{% else %}<tr><td colspan="3" class="muted">No economy activity yet.</td></tr>{% endfor %}</table></section>"""
+    body = render_template('dashboard/home.html',
+        s=stats, war=active_war, recent=recent, systems=systems,
+        unused_items=unused_items, disabled_items=disabled_items,
+        pending_applications=pending_applications, top_players=leaders[:5])
     return admin_page("Overview", body, s=stats, war=active_war, recent=recent, systems=systems, unused_items=unused_items, disabled_items=disabled_items, pending_applications=pending_applications)
 
 

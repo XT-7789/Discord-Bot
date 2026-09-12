@@ -1,0 +1,38 @@
+{% macro workspace_tile(endpoint, label, title, description, action_text) %}
+  <a href="{{ url_for(endpoint) }}">
+    <span>{{ label }}</span>
+    <h2>{{ title }}</h2>
+    <p>{{ description }}</p>
+    <b>{{ action_text }}</b>
+  </a>
+{% endmacro %}
+
+{% macro stat_card(label, value) %}
+  <div class="card">
+    <small>{{ label }}</small>
+    <strong>{{ value }}</strong>
+  </div>
+{% endmacro %}
+
+{% macro system_card(system) %}
+  <a class="card" href="{{ url_for(system['endpoint']) }}" style="text-decoration:none">
+    <small>{{ system['label'] }}</small>
+    <strong class="{{ 'ok' if system['enabled'] else 'bad' }}">{{ 'OPEN' if system['enabled'] else 'CLOSED' }}</strong>
+  </a>
+{% endmacro %}
+
+{% macro simple_card(label, value, link) %}
+  <a class="card" href="{{ link }}">
+    <small>{{ label }}</small>
+    <strong>{{ value }}</strong>
+  </a>
+{% endmacro %}
+{% macro leaderboard(players) %}
+  <div class="leaderboard">
+    <ol>
+    {% for p in players %}
+      <li>{{ loop.index }}. {{ p['display_name'] or p['user_id'] }} – {{ p['total_xp'] }} XP</li>
+    {% endfor %}
+    </ol>
+  </div>
+{% endmacro %}
