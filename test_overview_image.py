@@ -12,9 +12,12 @@ class TextOverviewTests(unittest.TestCase):
         async def run():
             overview.save_layout(self.db,self.uid,list(overview.BLOCKS))
             view=overview.OverviewView(None,self.db,self.uid)
-            grids=[x for x in view.walk_children() if isinstance(x,discord.ui.TextDisplay) and x.content.startswith('```')]
+            tiles=view.tiles(self.db.execute('SELECT * FROM players WHERE user_id=?',(self.uid,)).fetchone())
+            expected=[overview.tile_text(tiles[start:start+3]) for start in range(0,len(tiles),3)]
+            grids=[x for x in view.walk_children() if isinstance(x,discord.ui.TextDisplay) and x.content in expected]
             self.assertEqual(3,len(grids))
-            self.assertTrue(all(len(grid.content.splitlines())==5 for grid in grids))
+            self.assertTrue(all(len(grid.content.splitlines())==3 for grid in grids))
+            self.assertTrue(all('```' not in grid.content for grid in grids))
             self.assertTrue(all('|' not in grid.content for grid in grids))
             self.assertFalse(any(isinstance(x,discord.ui.MediaGallery) for x in view.walk_children()))
             result=await overview.image_options({'view':view})

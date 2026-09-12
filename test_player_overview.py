@@ -98,12 +98,14 @@ class OverviewTests(unittest.TestCase):
                     tiles=view.tiles(self.db.execute('SELECT * FROM players WHERE user_id=?',(self.uid,)).fetchone())
                     self.assertEqual([tile[4] for tile in tiles],destinations)
                     children=list(view.box.children)
-                    grids=[x for x in children if isinstance(x,discord.ui.TextDisplay) and x.content.startswith('```')]
+                    expected=[overview.tile_text(tiles[start:start+3]) for start in range(0,len(tiles),3)]
+                    grids=[x for x in children if isinstance(x,discord.ui.TextDisplay) and x.content in expected]
                     self.assertEqual((len(tiles)+2)//3,len(grids))
                     for grid in grids:
-                        self.assertTrue(all(len(line)<=40 for line in grid.content.splitlines()[1:-1]))
+                        self.assertEqual(3,len(grid.content.splitlines()))
+                        self.assertNotIn('```',grid.content)
                         self.assertNotIn('|',grid.content)
-                        self.assertEqual(grid.content.splitlines()[1],grid.content.splitlines()[1].upper())
+                        self.assertTrue(grid.content.splitlines()[0].startswith('**'))
                         self.assertIsInstance(children[children.index(grid)+1],discord.ui.ActionRow)
                     if len(keys)==7:
                         self.assertEqual(9,len(tiles))

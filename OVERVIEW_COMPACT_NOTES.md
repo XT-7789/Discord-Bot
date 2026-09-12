@@ -17,11 +17,11 @@ This supersedes the earlier four-sections-per-page overview layout.
 - Saved section choices still apply. Production includes Craft; Market includes Stocks.
 - Each column shows a title and two short status lines. Large totals are abbreviated; destination panels retain full details.
 - These are monospace text columns, not native cards. Each three-column status row is immediately followed by its matching three-button row.
-- Actual phone screenshots confirmed the image alternative was harder to read; the text grid is now the supported overview.
+- Actual phone screenshots confirmed both the image alternative and code-block styling were undesirable. The supported overview now uses normal Discord text with preserved figure-space columns.
 
 ## Readability polish
 
-- Uppercase tile headings and whitespace separate the columns without visual divider noise.
+- Bold uppercase tile headings and preserved whitespace separate the columns without code backgrounds, copy icons or divider noise.
 - Upgrade name and affordability/level status now use two separate lines instead of a long paragraph. Budget readiness does not imply the mining level requirement is met.
 - Saved-layout notice uses subdued text. One primary Continue action remains; shortcuts stay neutral.
 - Button widths are controlled by Discord, but their order exactly follows the text columns.

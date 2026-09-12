@@ -24,9 +24,12 @@ def compact_number(value):
     return str(value)
 
 def tile_text(tiles):
-    """Bounded ASCII columns; real action buttons are rendered separately."""
-    lines=['  '.join((str(tile[row]).upper() if row==0 else str(tile[row]))[:12].ljust(12) for tile in tiles).rstrip() for row in range(3)]
-    return '```\n'+'\n'.join(lines)+'\n```'
+    """Three normal-text columns; figure spaces survive Discord markdown."""
+    def cell(value,bold=False):
+        value=str(value)[:12]
+        padded=value+'\u2007'*(12-len(value))
+        return f'**{value}**'+'\u2007'*(12-len(value)) if bold else padded
+    return '\n'.join('\u2003'.join(cell(tile[row].upper() if row==0 else tile[row],row==0) for tile in tiles).rstrip('\u2007') for row in range(3))
 
 def layout(db,uid):
     row=db.execute("SELECT detail FROM economy_logs WHERE user_id=? AND action='overview_layout' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
