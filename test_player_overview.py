@@ -101,10 +101,11 @@ class OverviewTests(unittest.TestCase):
                     expected=[overview.tile_text(tiles[start:start+3]) for start in range(0,len(tiles),3)]
                     grids=[x for x in children if isinstance(x,discord.ui.TextDisplay) and x.content in expected]
                     self.assertEqual((len(tiles)+2)//3,len(grids))
-                    for grid in grids:
+                    for index,grid in enumerate(grids):
                         self.assertEqual(3,len(grid.content.splitlines()))
                         self.assertNotIn('```',grid.content)
-                        self.assertNotIn('|',grid.content)
+                        columns=len(tiles[index*3:index*3+3])
+                        self.assertTrue(all(line.count('│')==columns-1 for line in grid.content.splitlines()))
                         self.assertTrue(grid.content.splitlines()[0].startswith('**'))
                         self.assertTrue(grid.content.splitlines()[1].startswith('**'))
                         self.assertIsInstance(children[children.index(grid)+1],discord.ui.ActionRow)
