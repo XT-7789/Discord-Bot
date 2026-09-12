@@ -14,7 +14,7 @@ from functools import wraps
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, abort, flash, g, jsonify, redirect, render_template_string, request, session, url_for
+from flask import Flask, abort, flash, g, jsonify, redirect, render_template, render_template_string, request, session, url_for
 
 import economy
 import casino
@@ -281,258 +281,7 @@ def record_dashboard_audit(db, action, detail, status_code=200):
     ))
 
 
-STYLE = """
-<style>
-*{box-sizing:border-box}body{margin:0;background:#111214;color:#f4f4f5;font-family:Inter,Segoe UI,Arial,sans-serif}
-a{color:#67d8d1;text-decoration:none}header{position:sticky;top:0;z-index:2;background:#1b1c1f;border-bottom:3px solid #c7c7c7;padding:18px 5%;display:flex;align-items:center;justify-content:space-between}
-header h1{margin:0;font-size:23px}.version{color:#62d2ca;font-size:12px}nav{position:fixed;left:0;top:0;bottom:0;width:220px;background:#1b1c1f;border-right:3px solid #c7c7c7;padding:96px 14px 18px;display:flex;flex-direction:column;gap:9px;overflow-y:auto}nav a,.btn,button{border:2px solid #d3d3d3;border-radius:10px;background:#f39a12;color:#fff;padding:9px 12px;cursor:pointer;font-weight:800;box-shadow:3px 3px 0 #555}.secondary{background:#596269}
-header{padding-left:250px}main{width:auto;margin:24px 4% 24px 250px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.card,.panel{background:#202124;border:3px solid #c8c8c8;border-radius:14px;box-shadow:5px 5px 0 #454545}.card{padding:17px}.card small{color:#bcbcbc}.card strong{display:block;font-size:26px;margin-top:6px}.panel{margin-top:20px;overflow:hidden}.panel h2{margin:0;padding:16px;border-bottom:2px dashed #c8c8c8;font-size:18px}.pad{padding:18px}
-table{width:100%;border-collapse:collapse}th,td{padding:11px 13px;text-align:left;border-bottom:1px solid #4a4a4a;vertical-align:top}th{color:#bcbcbc;text-transform:uppercase;font-size:11px}tr:last-child td{border-bottom:0}.ok{color:#63d2ca}.bad{color:#ff6b65}.muted{color:#a9a9a9}.flash{padding:12px 14px;border:2px solid #66d3cc;background:#173a39;border-radius:10px;margin-bottom:14px}
-form.fields{padding:18px}.fields-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}label{color:#d0d0d0;font-size:14px;font-weight:700}input,select,textarea{display:block;width:100%;margin-top:6px;padding:11px;border-radius:10px;border:2px solid #c8c8c8;background:#151619;color:white}textarea{min-height:78px;resize:vertical}.actions{display:flex;gap:8px;align-items:end;margin-top:16px}.inline{display:flex;gap:8px;align-items:center}.inline input,.inline select{margin:0}.login{min-height:100vh;display:grid;place-items:center}.login .panel{width:min(390px,90%);padding:28px}.login button{width:100%;margin-top:10px}.library{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;padding:18px}.library-card{background:#202124;border:3px solid #c8c8c8;border-radius:14px;padding:16px;box-shadow:4px 4px 0 #454545}.library-card h3{margin:0 0 8px;font-size:18px}.library-card p{min-height:42px;color:#c5c5c5;font-size:14px}.badge{display:inline-block;border-radius:7px;padding:4px 7px;background:#58bcb6;color:#fff;font-size:11px;font-weight:bold}.statline{border:2px solid #c8c8c8;border-radius:10px;padding:10px;margin:9px 0;font-size:14px;line-height:1.65;background:#121315}.library-card .actions{justify-content:flex-end}.danger{background:#e8524b}.notice{padding:14px 18px;color:#d7d7d7}.top-actions{display:flex;gap:9px;padding:16px;align-items:center;flex-wrap:wrap}.top-actions form{display:flex;gap:8px;flex-wrap:wrap}.top-actions input,.top-actions select{margin:0}
-details.creator>summary{list-style:none;margin:16px;display:inline-block}details.creator>summary::-webkit-details-marker{display:none}.create-button{display:inline-block;margin:16px}@media(max-width:760px){header{position:static;display:block;padding:16px}nav{position:static;width:auto;padding:12px;flex-direction:row;margin-top:13px}main{margin:18px 3%}table{font-size:12px;display:block;overflow-x:auto}}
-.item-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(160px,280px) auto auto;gap:12px;padding:16px;align-items:center}.item-toolbar input,.item-toolbar select{margin:0}.purple{background:#6266e9}.teal{background:#1ca58f}.icon-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}.icon-actions form{margin:0}.icon-btn{width:42px;height:42px;padding:0;display:grid;place-items:center;font-size:18px;border-radius:12px}.archive{background:#e8524b}@media(max-width:900px){.item-toolbar{grid-template-columns:1fr 1fr}.item-toolbar .btn{width:100%;text-align:center}}
-.user-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:18px;padding:20px}.user-card{background:#202124;border:3px solid #c8c8c8;border-radius:14px;padding:16px;box-shadow:5px 5px 0 #454545}.user-head{display:flex;align-items:center;gap:12px;padding-bottom:13px;border-bottom:2px dashed #c8c8c8}.avatar{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:#6266e9;border:3px solid #ddd;font-size:20px;font-weight:900}.user-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.user-stat{border:3px solid #c8c8c8;border-radius:11px;background:#121315;padding:10px;font-weight:800}.user-meta{display:flex;justify-content:space-between;margin-top:13px;color:#aaa;font-size:12px}.user-card .actions{justify-content:flex-end}.control-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;padding:18px}.control-card{border:3px solid #c8c8c8;border-radius:12px;padding:15px;background:#151619}.control-card form{margin-top:12px}
-.role-native-hidden{display:none!important}.role-multi{position:relative;margin-top:8px;font-weight:600}.role-multi-control{min-height:58px;border:3px solid #f39a12;border-radius:12px;background:#151619;padding:9px 58px 9px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer;box-shadow:3px 3px 0 #555;font-size:14px}.role-chip{display:inline-flex;align-items:center;gap:8px;background:#f39a12;color:#fff;border:2px solid #eee;border-radius:8px;padding:8px 11px;font-size:13px;font-weight:800}.role-chip button{all:unset;cursor:pointer;font-size:18px;line-height:1}.role-placeholder{color:#b8b8b8;padding:7px;font-size:14px;pointer-events:none}.role-multi-menu{display:none;position:absolute;z-index:100;left:0;right:0;top:calc(100% + 7px);max-height:360px;overflow:auto;background:#202124;border:3px solid #c8c8c8;border-radius:12px;box-shadow:6px 6px 0 #454545;padding:10px}.role-multi.open .role-multi-menu{display:block}.role-search{margin:0 0 9px;font-size:14px;padding:12px}.role-choice{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:11px 12px;border-radius:8px;cursor:pointer;color:#eee;font-size:14px}.role-choice:hover{background:#3a3c41}.role-choice.selected{background:#5c3c0d;color:#ffc45f}.role-check{width:20px;text-align:center;font-weight:900}.role-toggle{position:absolute;z-index:2;right:7px;top:7px;width:44px;height:44px;padding:0;border:0;background:#2c2e32;box-shadow:none;font-size:23px;color:#fff;border-radius:9px;pointer-events:none}.role-multi.open .role-toggle{transform:rotate(180deg);background:#f39a12}.role-multi:focus-within .role-multi-control,.role-multi.open .role-multi-control{border-color:#66d3cc;box-shadow:0 0 0 3px rgba(102,211,204,.14),3px 3px 0 #555}
-.command-grid{grid-template-columns:repeat(auto-fill,minmax(430px,1fr))}.command-card{transition:border-color .15s,transform .15s}.command-card:hover{border-color:#f39a12;transform:translateY(-2px)}.command-card[hidden]{display:none}.command-card .fields-grid{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.command-card label{font-size:14px}.command-card input,.command-card select,.command-card textarea{font-size:14px}.command-search{flex:1;min-width:280px;margin:0;font-size:15px}.picker-help{display:block;color:#aeb4ba;font-size:12px;margin-top:7px}
-.panel:has(.role-multi.open),.library-card:has(.role-multi.open),.control-card:has(.role-multi.open){overflow:visible;position:relative;z-index:90}.fields-grid>label:has(.role-multi.open){position:relative;z-index:100}
-.nation-state-actions{display:flex;gap:10px;flex-wrap:wrap;padding:0 18px 16px}.nation-state-actions .btn{min-height:42px}.nation-state-library{align-items:start}.nation-state-card{padding:0;overflow:hidden;align-self:start}.nation-state-card[open]{border-color:#f39a12;box-shadow:5px 5px 0 #6b4a12}.nation-state-card>summary{position:relative;list-style:none;cursor:pointer;padding:16px;font-size:17px;font-weight:800;display:flex;flex-direction:column;gap:6px;touch-action:manipulation}.nation-state-card>summary::-webkit-details-marker{display:none}.nation-state-card>summary::after{content:'⌄';position:absolute;right:16px;top:15px;color:#f39a12;font-size:22px}.nation-state-card[open]>summary{border-bottom:2px dashed #c8c8c8;background:#292b30}.nation-state-card[open]>summary::after{transform:rotate(180deg)}.nation-state-card>summary span{font-size:13px;font-weight:500;color:#bfc3ca;padding-right:24px}.nation-state-card form{padding:16px}.nation-state-card[open] .fields-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}.nation-state-note{min-height:0!important;margin:0 0 12px!important;color:#bfc3ca!important}
-.mobile-menu{display:none;background:#6266e9;min-width:48px;min-height:44px;padding:8px 12px;font-size:21px}
-@media(max-width:760px){
- body{font-size:15px;overflow-x:hidden}header{position:sticky;top:0;display:flex;padding:12px 14px;z-index:200}header h1{font-size:19px}.version{display:block;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mobile-menu{display:block}
- nav{display:none;position:absolute;left:10px;right:10px;top:74px;bottom:auto;width:auto;max-height:calc(100vh - 88px);padding:12px;border:3px solid #c8c8c8;border-radius:14px;box-shadow:6px 6px 0 #454545;grid-template-columns:1fr 1fr;gap:9px;overflow-y:auto;background:#18191c}nav.mobile-open{display:grid}nav a{display:flex;align-items:center;justify-content:center;min-height:45px;padding:9px 7px;text-align:center;font-size:12px}
- main{margin:12px 10px;width:auto}.panel{margin-top:13px;border-width:2px;box-shadow:3px 3px 0 #454545}.panel h2{padding:13px;font-size:16px}.pad,form.fields,.library,.user-grid,.control-strip{padding:12px}
- .grid,.library,.user-grid,.control-strip,.fields-grid,.command-grid,.command-card .fields-grid,.item-toolbar{grid-template-columns:minmax(0,1fr)}.library,.user-grid{gap:12px}.library-card,.user-card{padding:12px;border-width:2px;box-shadow:3px 3px 0 #454545}.library-card p{min-height:0}
- input,select,textarea{font-size:16px;padding:12px}.actions,.inline,.top-actions,.icon-actions{flex-wrap:wrap;align-items:stretch}.actions>*{flex:1 1 auto}.actions button,.actions .btn{width:100%;text-align:center}.inline>*{min-width:100%}.top-actions>*{width:100%}.top-actions form>*{flex:1 1 100%}.item-toolbar{padding:12px}.item-toolbar .btn{width:100%;text-align:center}
- table{font-size:12px;display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:9px;white-space:nowrap}.command-search{min-width:0;width:100%}.command-grid{padding:10px}.command-card{min-width:0}.role-multi-control{min-height:52px;padding-right:52px}.role-multi-menu{position:fixed;left:10px;right:10px;top:18vh;max-height:68vh;z-index:500}.role-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis}.role-choice{min-height:48px}
- details.creator>summary,.create-button{display:block;margin:12px;text-align:center}.user-stats{grid-template-columns:1fr 1fr}.user-meta{gap:8px;flex-wrap:wrap}.card strong{font-size:22px}button,.btn{min-height:46px;font-size:15px}
- .nation-state-actions{padding:0 12px 12px}.nation-state-actions .btn{width:100%;text-align:center}.nation-state-card>summary{padding:14px;font-size:16px}.nation-state-card form{padding:12px}
-}
-/* Dashboard 2.0: calmer hierarchy, larger touch targets and fewer heavy outlines. */
-:root{--surface:#1b1d22;--surface-2:#24272e;--line:#3a3f49;--brand:#f0a11a;--teal:#55d2c8;--text:#f5f7fa;--muted:#aeb5c0}
-body{background:radial-gradient(circle at 85% 0,#17272c 0,transparent 28%),#101216;color:var(--text)}
-header{background:rgba(20,22,27,.96);border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}
-nav{background:#15171c;border-right:1px solid var(--line)}nav a{background:transparent;border:1px solid transparent;box-shadow:none;text-align:left;color:#dce1e8}nav a:hover{background:#252932;border-color:#3c424d;color:#fff}
-.panel,.card,.library-card,.user-card{background:var(--surface);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.22);border-radius:14px}.panel h2{border-bottom:1px solid var(--line)}
-input,select,textarea{background:#121419;border:1px solid #555d69;border-radius:10px;min-height:44px}input:focus,select:focus,textarea:focus{outline:2px solid var(--teal);border-color:transparent}
-button,.btn{border:0;box-shadow:none;border-radius:9px;min-height:42px}.notice{border-radius:10px;border:1px solid #3b6670;background:#17272d}
-.war-step{margin:16px;padding:18px;background:var(--surface-2);border:1px solid var(--line);border-radius:13px}.war-step h3{margin:0 0 6px}.war-step .step-help{color:var(--muted);margin:0 0 16px}.territory-map-shell{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:16px;margin-top:14px;align-items:start}.territory-map{width:100%;height:auto;min-height:330px;background:#0e2b3a;border:1px solid #426071;border-radius:12px;cursor:crosshair;touch-action:none}.territory-map-tools{display:flex;flex-direction:column;gap:12px;padding:14px;background:#191c22;border:1px solid var(--line);border-radius:12px;position:sticky;top:88px}.territory-map-tools label{display:grid;gap:6px}.territory-map-tools button{width:100%;margin:0}.territory-map-status{padding:12px;background:#121419;border:1px solid var(--line);border-radius:10px;min-height:64px}.territory-map-status strong{display:block;color:var(--teal);margin-top:5px}.territory-loading{color:var(--muted)}.territory-search-results{display:grid;gap:6px;max-height:280px;overflow-y:auto;overscroll-behavior:contain;padding-right:4px;scrollbar-width:auto;scrollbar-color:#747d89 #17191e}.territory-search-results::-webkit-scrollbar{width:12px}.territory-search-results::-webkit-scrollbar-track{background:#17191e;border-radius:8px}.territory-search-results::-webkit-scrollbar-thumb{background:#747d89;border:3px solid #17191e;border-radius:8px}.territory-result{width:100%;min-height:44px;padding:9px 11px;text-align:left;background:#292d35;color:var(--text);border:1px solid #444b56;flex:none}.territory-result:hover{border-color:var(--teal);background:#303641}.war-control-page>details.creator{margin-bottom:12px}.war-control-page>details.creator>summary{display:flex;align-items:center;justify-content:space-between;text-align:left;margin:0;padding:14px 16px}.war-control-page>details.creator>summary::after{content:'Open';font-size:12px;color:var(--muted)}.war-control-page>details.creator[open]>summary::after{content:'Close'}.war-control-page form>button{display:block;margin-left:auto}.war-control-page .actions{justify-content:flex-end}
-@media(max-width:900px){.territory-map-shell{grid-template-columns:1fr}.territory-map{min-height:240px}.territory-map-tools{position:static}.war-step{margin:10px;padding:13px}}
-/* Dashboard 2.1: usable desktop navigation and grids without tiny scroll handles. */
-html,body{max-width:100%;overflow-x:hidden}header,main,.panel,.user-grid,.user-card{min-width:0}
-header{padding-left:282px;transition:padding-left .2s ease}.mobile-menu{display:block;position:relative;z-index:3;background:#6266e9;min-width:50px}
-nav{width:260px;height:100vh;height:100dvh;min-height:100vh;max-height:none;padding:88px 14px 22px;gap:6px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#727985 #191b20;transition:transform .2s ease}
-nav::-webkit-scrollbar{width:16px}nav::-webkit-scrollbar-track{background:#191b20}nav::-webkit-scrollbar-thumb{background:#727985;border:4px solid #191b20;border-radius:10px}
-nav a{min-height:42px;padding:10px 12px;border-radius:9px;font-size:14px}
-main{margin-left:282px;margin-right:22px;max-width:calc(100vw - 304px);transition:margin-left .2s ease,max-width .2s ease}
-body.nav-collapsed nav{transform:translateX(-105%)}body.nav-collapsed header{padding-left:22px}body.nav-collapsed main{margin-left:22px;max-width:calc(100vw - 44px)}
-.user-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,285px),1fr));width:100%;overflow:visible}.user-card{width:100%;max-width:none}.user-head>div:last-child{min-width:0;overflow-wrap:anywhere}.user-card .actions{display:grid;grid-template-columns:1fr 1fr;align-items:stretch}.user-card .actions>*{min-width:0}.user-card .actions .btn,.user-card .actions button{width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center}.user-card .actions form{margin:0}
-@media(max-width:1100px) and (min-width:761px){.user-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:760px){header{padding:12px 14px}main,body.nav-collapsed main{margin:12px 10px;max-width:none}nav{position:fixed;left:10px;right:10px;top:72px;bottom:10px;width:auto;height:auto;min-height:0;max-height:none;padding:12px;transform:none;overflow-y:auto;grid-template-columns:1fr 1fr;align-content:start}body.nav-collapsed nav{transform:none}.user-grid{grid-template-columns:1fr}.user-card .actions{grid-template-columns:1fr}}
-/* Dashboard 2.2: one consistent control language for desktop and phones. */
-:root{--nav-width:280px;--shadow:0 12px 30px rgba(0,0,0,.26);--focus:0 0 0 3px rgba(85,210,200,.22)}
-body{line-height:1.45;background:radial-gradient(circle at 100% 0,rgba(48,114,110,.16),transparent 34%),radial-gradient(circle at 0 100%,rgba(98,102,233,.11),transparent 32%),#101216}
-header{min-height:78px;padding-left:calc(var(--nav-width) + 22px);gap:16px;box-shadow:0 1px 0 rgba(255,255,255,.035)}
-header>div{min-width:0}header h1{letter-spacing:.2px}.version{letter-spacing:.2px}
-nav{width:var(--nav-width);padding:18px 12px 28px;background:linear-gradient(180deg,#181b21 0%,#121419 100%);gap:4px}
-nav::before{content:'CONTROL CENTER';display:block;margin:2px 8px 12px;color:#7b8492;font-weight:900;font-size:10px;letter-spacing:1.2px}
-nav a{display:flex;align-items:center;min-height:44px;padding:10px 13px;border-left:3px solid transparent;transition:background .15s ease,border-color .15s ease,transform .15s ease}
-nav a:hover{border-left-color:var(--teal);transform:translateX(2px)}
-nav a.secondary{margin-top:8px;justify-content:center;background:#30353d;border:1px solid #48505d;color:#fff}
-main{margin:22px 24px 40px calc(var(--nav-width) + 24px);max-width:calc(100vw - var(--nav-width) - 48px)}
-body.nav-collapsed header{padding-left:22px}body.nav-collapsed main{margin-left:24px;max-width:calc(100vw - 48px)}
-.mobile-menu{display:grid;place-items:center;width:50px;height:46px;padding:0;border:1px solid #7276e9;border-radius:12px;background:linear-gradient(135deg,#676aef,#5053ba);box-shadow:0 6px 16px rgba(80,83,186,.28)}
-.mobile-menu:hover{filter:brightness(1.1);transform:translateY(-1px)}
-.panel,.card,.library-card,.user-card{box-shadow:var(--shadow)}
-.panel h2{display:flex;align-items:center;gap:9px;background:linear-gradient(90deg,rgba(255,255,255,.018),transparent)}
-.panel h2::before{content:'';width:4px;height:19px;border-radius:99px;background:var(--brand);display:inline-block}
-.pad{padding:20px}.grid{gap:16px}.card{position:relative;overflow:hidden}.card::after{content:'';position:absolute;inset:0 auto 0 0;width:3px;background:var(--teal);opacity:.72}
-input,select,textarea{transition:border-color .15s ease,box-shadow .15s ease,background .15s ease}input:hover,select:hover,textarea:hover{border-color:#89919c}input:focus,select:focus,textarea:focus{box-shadow:var(--focus)}
-button,.btn{font-weight:850;letter-spacing:.1px;transition:filter .15s ease,transform .15s ease,box-shadow .15s ease}button:hover,.btn:hover{filter:brightness(1.08);transform:translateY(-1px)}button:active,.btn:active{transform:translateY(0)}
-.secondary{background:#3e4651}.danger,.archive{background:linear-gradient(135deg,#eb5b55,#cc3e42)}.purple{background:linear-gradient(135deg,#7477f4,#5356c6)}.teal{background:linear-gradient(135deg,#20ae9b,#168370)}
-.top-actions{padding:14px 18px;background:rgba(255,255,255,.017);border-bottom:1px solid var(--line)}.top-actions input{min-height:42px}.top-actions .btn{min-height:42px}
-.fields-grid{gap:16px}.fields-grid>label{min-width:0}.actions{gap:10px}.actions .btn,.actions button{min-height:43px}.inline{min-width:0}.inline input,.inline select{min-width:0}
-.library{grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:18px}.library-card{display:flex;flex-direction:column;min-width:0}.library-card .actions{margin-top:auto}.library-card h3{overflow-wrap:anywhere}
-.user-grid{gap:18px}.user-card{padding:18px}.user-stat{border:1px solid #505866;background:#14171c}.user-card .actions{gap:10px}.user-card .actions .btn,.user-card .actions button{min-height:46px}
-details.creator{border:1px solid var(--line);border-radius:13px;background:#1a1d23;overflow:hidden}details.creator>summary{position:relative;cursor:pointer;margin:0;padding:15px 18px;font-weight:850;background:#20242b;touch-action:manipulation}details.creator>summary::after{content:'⌄';float:right;color:var(--brand);font-size:20px;line-height:14px}details.creator[open]>summary{border-bottom:1px solid var(--line)}details.creator[open]>summary::after{transform:rotate(180deg)}details.creator>.create-button{margin:16px}
-table{border-radius:12px;overflow:hidden}th{background:#181b20;color:#bec6d1;letter-spacing:.55px}tr:hover td{background:rgba(255,255,255,.018)}
-.flash{border:1px solid #3a8882;box-shadow:0 8px 20px rgba(0,0,0,.15)}
-.role-multi-control{border-color:#5b6573;background:#12151a;box-shadow:none;min-height:50px}.role-multi-control:hover{border-color:#8994a3}.role-multi.open .role-multi-control{box-shadow:var(--focus)}.role-toggle{height:40px;width:40px;top:5px;right:5px}.role-multi-menu{box-shadow:var(--shadow);border-color:#57606e}.role-choice{border-bottom:1px solid rgba(255,255,255,.04)}
-.nation-state-card>summary{min-height:86px;justify-content:center}.nation-state-card>summary:hover{background:#292d35}.nation-state-card[open]{grid-column:1/-1}.nation-state-card[open]>summary{min-height:0}
-@media(max-width:1100px) and (min-width:761px){header{padding-left:244px}nav{width:222px}main{margin-left:244px;max-width:calc(100vw - 268px)}nav a{font-size:13px;padding:9px 10px}}
-@media(max-width:760px){header{min-height:68px;padding:10px 12px}.mobile-menu{width:48px;height:44px;flex:none}nav{top:66px;left:8px;right:8px;bottom:8px;border-color:#535d6c;background:#15181e;box-shadow:var(--shadow);grid-template-columns:1fr;padding:12px}nav::before{grid-column:1/-1;margin:4px 5px 8px}nav a{justify-content:flex-start;text-align:left;min-height:48px;font-size:15px;padding:12px 14px;border-left-width:3px}nav a.secondary{margin-top:4px}.panel h2{font-size:17px}.panel h2::before{height:17px}.pad{padding:14px}.top-actions{padding:12px}.library{grid-template-columns:1fr;padding:12px}.library-card,.user-card{border-radius:12px}.card{padding:15px}.fields-grid{gap:12px}.actions .btn,.actions button{min-height:48px}.nation-state-card[open]{grid-column:auto}.nation-state-card>summary{min-height:74px}.role-multi-menu{top:12vh;left:8px;right:8px;max-height:75vh}.territory-map-tools{padding:12px}.territory-search-results{max-height:250px}.war-step{border-radius:11px}}
-/* Some mobile browsers expose a desktop-width viewport even on a phone.
-   Keep the navigation as an overlay through tablet widths so it never
-   squeezes the working area into an unusable narrow column. */
-@media(max-width:1024px){
- header{min-height:68px;padding:10px 12px;position:sticky;top:0;z-index:200}
- header h1{font-size:20px}.mobile-menu{display:grid;width:48px;height:44px;flex:none}
- main,body.nav-collapsed main{margin:12px 10px;max-width:none;width:auto}
- nav{display:none;position:fixed;left:8px;right:8px;top:66px;bottom:8px;width:auto;height:auto;min-height:0;max-height:none;padding:12px;transform:none;overflow-y:auto;grid-template-columns:1fr;align-content:start;border-color:#535d6c;background:#15181e;box-shadow:var(--shadow);z-index:300}
- nav.mobile-open{display:grid}body.nav-collapsed nav{transform:none}
- nav::before{grid-column:1/-1;margin:4px 5px 8px}nav a{justify-content:flex-start;text-align:left;min-height:48px;font-size:15px;padding:12px 14px;border-left-width:3px}
- .library,.user-grid{grid-template-columns:1fr;padding:12px}.command-grid,.fields-grid,.control-strip{grid-template-columns:minmax(0,1fr)}
- .territory-map-shell{grid-template-columns:1fr}.territory-map-tools{position:static}
-}
-</style>
-"""
 
-HEADER = """
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ title }} · X BOT</title>""" + STYLE + """</head><body>
-<header><div><h1>⚔️ X BOT Admin</h1><span class="version">V2 · Tier 7 · {{session.get('discord_name','Owner')}} ({{session.get('dashboard_role','owner')}})</span></div><button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button></header><nav id="dashboard-nav">
-<a href="{{ url_for('home') }}">Overview</a><a href="{{ url_for('players') }}">Users</a><a href="{{ url_for('dashboard_users') }}">Dashboard Online</a><a href="{{ url_for('leveling_control') }}">Levels & XP</a><a href="{{ url_for('mining_control') }}">Mining</a><a href="{{ url_for('items') }}">Items & Categories</a><a href="{{ url_for('item_shop_control') }}">Item Shop</a><a href="{{ url_for('recipes_control') }}">Recipes</a><a href="{{ url_for('finance_control') }}">Bills & Income</a><a href="{{ url_for('role_shop_control') }}">Role Shop</a><a href="{{ url_for('reward_codes_control') }}">Reward Codes</a><a href="{{ url_for('market_control') }}">Market</a><a href="{{ url_for('auction_control') }}">Auction</a><a href="{{ url_for('casino_control') }}">Casino</a><a href="{{ url_for('war_control') }}">War</a><a href="{{ url_for('diplomacy_control') }}">Diplomacy</a><a href="{{ url_for('command_access') }}">Command Access</a><a href="{{ url_for('log_settings_control') }}">Log Settings</a><a href="{{ url_for('dashboard_access') }}">Dashboard Access</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('logs') }}">Logs</a><a class="secondary" href="{{ url_for('logout') }}">Log out</a>
-</nav><main>{% with messages=get_flashed_messages() %}{% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}{% endwith %}
-"""
-HEADER = HEADER.replace('<a href="{{ url_for(\'leveling_control\') }}">Levels & XP</a>', '<a href="{{ url_for(\'leveling_control\') }}">Levels & XP</a><a href="{{ url_for(\'applications_control\') }}">Applications & Verification</a>')
-HEADER = HEADER.replace('<a href="{{ url_for(\'mining_control\') }}">Mining</a>', '<a href="{{ url_for(\'tier6_economy_control\') }}">Tier 6 Economy</a><a href="{{ url_for(\'mining_control\') }}">Mining</a>')
-FOOTER = r"""
-</main><script>
-(() => {
-  // Keep the administrator at the same card after Edit/Save/Delete redirects.
-  // Query strings are intentionally ignored so /items?edit=5 restores /items.
-  const scrollKey = `xbot-scroll:${location.pathname}`;
-  const savedScroll = sessionStorage.getItem(scrollKey);
-  if (savedScroll !== null) {
-    sessionStorage.removeItem(scrollKey);
-    requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
-  }
-  const rememberScroll = () => sessionStorage.setItem(scrollKey, String(window.scrollY));
-  document.querySelectorAll('form').forEach(form => form.addEventListener('submit', rememberScroll));
-  document.querySelectorAll('a[href]').forEach(link => {
-    try {
-      const target = new URL(link.href, location.href);
-      if (target.origin === location.origin && target.pathname === location.pathname && !target.hash) {
-        link.addEventListener('click', rememberScroll);
-      }
-    } catch (_) {}
-  });
-  const mobileMenu = document.querySelector('#mobile-menu');
-  const dashboardNav = document.querySelector('#dashboard-nav');
-  if (mobileMenu && dashboardNav) {
-    const isPhoneMenu = () => window.matchMedia('(max-width:1024px)').matches;
-    if (!isPhoneMenu() && localStorage.getItem('xbot-dashboard-nav') === 'collapsed') {
-      document.body.classList.add('nav-collapsed');
-      mobileMenu.textContent = '☰';
-    }
-    mobileMenu.addEventListener('click', event => {
-      event.stopPropagation();
-      if (isPhoneMenu()) {
-        const open = dashboardNav.classList.toggle('mobile-open');
-        mobileMenu.setAttribute('aria-expanded', String(open));
-        mobileMenu.textContent = open ? '✕' : '☰';
-      } else {
-        const collapsed = document.body.classList.toggle('nav-collapsed');
-        localStorage.setItem('xbot-dashboard-nav', collapsed ? 'collapsed' : 'open');
-        mobileMenu.setAttribute('aria-expanded', String(!collapsed));
-        mobileMenu.textContent = collapsed ? '☰' : '✕';
-      }
-    });
-    dashboardNav.querySelectorAll('a').forEach(link => link.addEventListener('click', () => dashboardNav.classList.remove('mobile-open')));
-    document.addEventListener('click', event => {
-      if (isPhoneMenu() && !dashboardNav.contains(event.target) && event.target !== mobileMenu) {
-        dashboardNav.classList.remove('mobile-open'); mobileMenu.setAttribute('aria-expanded','false'); mobileMenu.textContent='☰';
-      }
-    });
-  }
-  const sources = {
-    role: {{ server_roles|tojson }}.map(row => ({id:String(row.id), label:'@' + row.name})),
-    channel: {{ picker_channels|tojson }}.map(row => ({id:String(row.id), label:'# ' + row.name})),
-    user: {{ server_members|tojson }}.map(row => ({id:String(row.id), label:'@' + row.name}))
-  };
-  const enhancePicker = (picker, type) => {
-    picker.classList.add('role-native-hidden');
-    const shell = document.createElement('div'); shell.className = 'role-multi';
-    const control = document.createElement('div'); control.className = 'role-multi-control'; control.tabIndex = 0;
-    const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'role-toggle'; toggle.textContent = '⌄'; toggle.title = 'Open role menu';
-    const menu = document.createElement('div'); menu.className = 'role-multi-menu';
-    const search = document.createElement('input'); search.className = 'role-search'; search.placeholder = `Search server ${type}s...`;
-    const choices = document.createElement('div'); menu.append(search, choices); shell.append(control, toggle, menu);
-    picker.insertAdjacentElement('afterend', shell);
-    const render = () => {
-      control.innerHTML = ''; choices.innerHTML = '';
-      const selectedOptions = [...picker.options].filter(option => option.selected && option.value !== '');
-      if (!selectedOptions.length) {
-        const placeholder = document.createElement('span'); placeholder.className = 'role-placeholder';
-        placeholder.textContent = picker.multiple ? `Click anywhere to choose one or more ${type}s...` : `Click anywhere to choose a ${type}...`;
-        control.appendChild(placeholder);
-      }
-      selectedOptions.forEach(option => {
-        const chip = document.createElement('span'); chip.className = 'role-chip'; chip.append(document.createTextNode(option.textContent));
-        const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.title = `Remove ${type}`;
-        remove.addEventListener('click', event => { event.stopPropagation(); option.selected = false; render(); });
-        chip.appendChild(remove); control.appendChild(chip);
-      });
-      [...picker.options].filter(option => option.textContent.toLowerCase().includes(search.value.toLowerCase())).forEach(option => {
-        const choice = document.createElement('div'); choice.className = 'role-choice' + (option.selected ? ' selected' : '');
-        const check = document.createElement('span'); check.className = 'role-check'; check.textContent = option.selected ? '✓' : '';
-        choice.append(check, document.createTextNode(option.textContent));
-        choice.addEventListener('click', event => {
-          event.stopPropagation();
-          if (!picker.multiple) [...picker.options].forEach(item => item.selected = false);
-          option.selected = !option.selected;
-          picker.dispatchEvent(new Event('change', {bubbles:true})); render();
-          if (picker.multiple) { shell.classList.add('open'); search.focus(); } else shell.classList.remove('open');
-        });
-        choices.appendChild(choice);
-      });
-    };
-    control.addEventListener('click', event => {
-      event.preventDefault(); event.stopPropagation();
-      shell.classList.toggle('open'); if (shell.classList.contains('open')) search.focus();
-    });
-    control.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault(); shell.classList.toggle('open'); if (shell.classList.contains('open')) search.focus();
-      }
-    });
-    toggle.addEventListener('click', event => { event.stopPropagation(); shell.classList.toggle('open'); if (shell.classList.contains('open')) search.focus(); });
-    search.addEventListener('input', render); search.addEventListener('click', event => event.stopPropagation());
-    document.addEventListener('click', event => { if (!shell.contains(event.target)) shell.classList.remove('open'); });
-    render();
-  };
-  const buildPicker = (oldField, type, multiple) => {
-    const selected = new Set((oldField.value || '').split(',').map(value => value.trim()).filter(Boolean));
-    const picker = document.createElement('select');
-    picker.name = oldField.name; picker.required = oldField.required; picker.multiple = multiple;
-    if (!multiple) {
-      const empty = document.createElement('option'); empty.value = ''; empty.textContent = `No ${type} selected`; picker.appendChild(empty);
-    }
-    sources[type].forEach(row => {
-      const option = document.createElement('option'); option.value = row.id; option.textContent = row.label;
-      option.selected = selected.has(row.id); picker.appendChild(option); selected.delete(row.id);
-    });
-    selected.forEach(id => {
-      const option = document.createElement('option'); option.value = id; option.textContent = `Unknown ${type} (${id})`; option.selected = true; picker.appendChild(option);
-    });
-    oldField.replaceWith(picker); enhancePicker(picker, type);
-  };
-  const roleFieldNames = new Set([
-    'role_id', 'required_role_id', 'reviewer_role_id', 'accepted_role_id',
-    'verification_unverified_role_id', 'verification_guest_role_id',
-    'verification_member_role_id', 'mention_role_id'
-  ]);
-  document.querySelectorAll('input[name], textarea[name]').forEach(oldField => {
-    if (oldField.type === 'hidden') return;
-    const name = oldField.name;
-    if (name.endsWith('_role_ids') || roleFieldNames.has(name)) buildPicker(oldField, 'role', name.endsWith('_role_ids'));
-    else if (name.endsWith('_channel_ids')) buildPicker(oldField, 'channel', true);
-    else if (name.endsWith('_user_ids')) buildPicker(oldField, 'user', true);
-  });
-  document.querySelectorAll('select[name]').forEach(picker => {
-    if (picker.classList.contains('role-native-hidden')) return;
-    const name = picker.name;
-    if (name.endsWith('_channel_id') || name.endsWith('_channel_ids')) enhancePicker(picker, 'channel');
-    else if (name.endsWith('_role_id') || name.endsWith('_role_ids')) enhancePicker(picker, 'role');
-    else if (name.endsWith('_user_id') || name.endsWith('_user_ids')) enhancePicker(picker, 'user');
-  });
-  const commandSearch = document.querySelector('#command-search');
-  if (commandSearch) commandSearch.addEventListener('input', () => {
-    const query = commandSearch.value.trim().toLowerCase();
-    document.querySelectorAll('.command-card').forEach(card => {
-      card.hidden = Boolean(query && !card.dataset.command.includes(query));
-    });
-  });
-})();
-</script></body></html>"""
 
 
 def admin_page(title, body, **context):
@@ -558,15 +307,11 @@ def admin_page(title, body, **context):
                             '<section id="item-editor" class="panel"><h2>{{\'Edit\' if edit else \'Create New\'}} Item</h2>')
         body = body.replace("href=\"{{url_for('items',edit=i['id'])}}\"",
                             "href=\"{{url_for('items',edit=i['id'])}}#item-editor\"")
-    return render_template_string(dashboard_ui.header(HEADER) + body + FOOTER, title=title, setting_metadata={k: settings_admin.metadata(k) for k in settings_admin.KEYS}, **context)
+        context['setting_metadata'] = {k: settings_admin.metadata(k) for k in settings_admin.KEYS}
+    rendered_body = render_template_string(body, **context)
+    return render_template('legacy.html', title=title, body=rendered_body, setting_metadata={k: settings_admin.metadata(k) for k in settings_admin.KEYS}, **context)
 
 
-LOGIN = """
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>X BOT Admin Login</title>""" + STYLE + """</head><body class="login"><div class="panel"><h1>⚔️ X BOT V2</h1><p class="muted">Tier 4 Multi-Admin Dashboard</p>
-{% with messages=get_flashed_messages() %}{% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}{% endwith %}
-{% if oauth_configured %}<a class="btn purple" style="display:block;text-align:center;margin:16px 0" href="{{url_for('discord_login')}}">Login with Discord</a>{% else %}<div class="notice bad">Discord OAuth is not configured.</div>{% endif %}
-<details><summary>Moderator Access Code</summary><p class="muted">Use the personal code given to you by an Administrator. Keep it private.</p><form method="post"><input type="hidden" name="login_mode" value="access_code"><label>Personal access code<input type="password" name="access_code" autocomplete="current-password" required></label><button class="purple">Login with Access Code</button></form></details><details><summary>Emergency Owner Login</summary><form method="post"><input type="hidden" name="login_mode" value="owner"><label>Dashboard password<input type="password" name="password" required></label><button>Owner Login</button></form></details></div></body></html>
-"""
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -593,7 +338,7 @@ def login():
             return redirect(url_for("home"))
         else:
             flash("Incorrect password.")
-    return render_template_string(LOGIN, oauth_configured=OAUTH_CONFIGURED)
+    return render_template('login.html', oauth_configured=OAUTH_CONFIGURED)
 
 
 def discord_api(url, token=None, data=None):
@@ -815,7 +560,7 @@ def leveling_control():
             if key in toggles:
                 value = "1" if request.form.get(key) == "1" else "0"
             elif key in numeric:
-                value = str(max(0, int(request.form.get(key, 0))))
+                value = str(settings_admin.integer(request.form.get(key, 0), key, 0, 999999999))
             elif key in {"xp_ignored_channel_ids", "xp_ignored_role_ids"}:
                 value = ",".join(filter(None, (mention_id(item) for item in request.form.getlist(key))))
             else:
@@ -856,7 +601,7 @@ def save_level_reward():
     else:
         role_text = request.form.get("role_id", "").strip(); role_id = "".join(c for c in role_text if c.isdigit())
         item_id = int(request.form["item_id"]) if request.form.get("item_id") else None
-        values = (max(2, int(request.form["level"])), role_id, request.form["name"].strip(), request.form.get("emoji", "🏅").strip() or "🏅", request.form.get("reward_mode", "exclusive"), request.form.get("announcement", "").strip(), int(request.form.get("enabled", 1)), item_id, max(0,int(request.form.get("item_quantity",0))), max(0,int(request.form.get("xc",0))), max(0,int(request.form.get("war_credits",0))), max(0,int(request.form.get("xcrystals",0))))
+        values = (settings_admin.integer(request.form["level"], "level", 2, 999999999), role_id, request.form["name"].strip(), request.form.get("emoji", "🏅").strip() or "🏅", request.form.get("reward_mode", "exclusive"), request.form.get("announcement", "").strip(), int(request.form.get("enabled", 1)), item_id, settings_admin.integer(request.form.get("item_quantity", 0), "item_quantity", 0, 999999999), settings_admin.integer(request.form.get("xc", 0), "xc", 0, 999999999), settings_admin.integer(request.form.get("war_credits", 0), "war_credits", 0, 999999999), settings_admin.integer(request.form.get("xcrystals", 0), "xcrystals", 0, 999999999))
         if reward_id:
             db.execute("UPDATE xp_rewards SET level=?,role_id=?,name=?,emoji=?,reward_mode=?,announcement=?,enabled=?,item_id=?,item_quantity=?,xc=?,war_credits=?,xcrystals=? WHERE id=?", values + (int(reward_id),))
         else:
@@ -873,7 +618,7 @@ def save_streak_reward():
         db.execute("DELETE FROM streak_rewards WHERE id=?",(int(reward_id),)); flash("Streak reward deleted.")
     else:
         item_id=int(request.form["item_id"]) if request.form.get("item_id") else None
-        values=(max(1,int(request.form.get("days",1))),item_id,max(0,int(request.form.get("item_quantity",0))),max(0,int(request.form.get("xc",0))),max(0,int(request.form.get("war_credits",0))),max(0,int(request.form.get("xcrystals",0))),int(request.form.get("enabled",1)))
+        values=(settings_admin.integer(request.form.get("days", 1), "days", 1, 999999999),item_id,settings_admin.integer(request.form.get("item_quantity", 0), "item_quantity", 0, 999999999),settings_admin.integer(request.form.get("xc", 0), "xc", 0, 999999999),settings_admin.integer(request.form.get("war_credits", 0), "war_credits", 0, 999999999),settings_admin.integer(request.form.get("xcrystals", 0), "xcrystals", 0, 999999999),int(request.form.get("enabled",1)))
         try:
             if reward_id: db.execute("UPDATE streak_rewards SET days=?,item_id=?,item_quantity=?,xc=?,war_credits=?,xcrystals=?,enabled=? WHERE id=?",values+(int(reward_id),))
             else: db.execute("INSERT INTO streak_rewards(days,item_id,item_quantity,xc,war_credits,xcrystals,enabled) VALUES(?,?,?,?,?,?,?)",values)
@@ -923,12 +668,12 @@ def edit_player(user_id):
             capital = request.form["capital_name"].strip()
             if not 3 <= len(nation) <= 30 or not 3 <= len(capital) <= 30:
                 raise ValueError("Nation and Capital names must be 3–30 characters.")
-            nums = {key: max(0, int(request.form[key])) for key in ("xc", "bank_xc", "money", "xcrystals", "land", "capital_health")}
+            nums = {key: settings_admin.integer(request.form[key], key, 0, 999999999) for key in ("xc", "bank_xc", "money", "xcrystals", "land", "capital_health")}
             nums.update({"land_army": player["land_army"], "air_army": player["air_army"], "navy": player["navy"]})
             nums["capital_health"] = min(100, nums["capital_health"])
             job_id = int(request.form["job_id"]) if request.form.get("job_id") else None
             db.execute("""UPDATE players SET nation_name=?,capital_name=?,xc=?,bank_xc=?,money=?,xcrystals=?,job_id=?,land=?,land_army=?,air_army=?,navy=?,capital_health=? WHERE user_id=?""", (nation, capital, nums['xc'], nums['bank_xc'], nums['money'], nums['xcrystals'], job_id, nums['land'], nums['land_army'], nums['air_army'], nums['navy'], nums['capital_health'], user_id))
-            fortification = max(0, int(request.form.get("fortification_level", 0))); morale = min(100, max(0, int(request.form.get("morale", 100))))
+            fortification = settings_admin.integer(request.form.get("fortification_level", 0), "fortification_level", 0, 999999999); morale = min(100, settings_admin.integer(request.form.get("morale", 100), "morale", 0, 999999999))
             db.execute("""INSERT INTO player_war_settings(user_id,fortification_level,morale) VALUES(?,?,?)
                 ON CONFLICT(user_id) DO UPDATE SET fortification_level=excluded.fortification_level,morale=excluded.morale""", (user_id,fortification,morale))
             db.commit()
@@ -1006,7 +751,7 @@ def delete_player_data(user_id):
 @login_required
 def set_inventory(user_id):
     item_id = int(request.form["item_id"])
-    quantity = max(0, int(request.form["quantity"]))
+    quantity = settings_admin.integer(request.form["quantity"], "quantity", 0, 999999999)
     db = get_db()
     db.execute("INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=excluded.quantity", (user_id, item_id, quantity))
     db.commit(); db.close(); flash("Inventory updated.")
@@ -1016,12 +761,21 @@ def set_inventory(user_id):
 @app.post("/player/<int:user_id>/war-units")
 @login_required
 def set_war_units(user_id):
-    unit_type_id = int(request.form["unit_type_id"]); quantity = max(0, int(request.form["quantity"])); db = get_db()
+    unit_type_id = int(request.form["unit_type_id"]); quantity = settings_admin.integer(request.form["quantity"], "quantity", 0, 999999999); db = get_db()
     db.execute("""INSERT INTO player_war_units(user_id,unit_type_id,quantity) VALUES(?,?,?)
         ON CONFLICT(user_id,unit_type_id) DO UPDATE SET quantity=excluded.quantity""", (user_id, unit_type_id, quantity))
     db.commit(); db.close(); flash("Military unit quantity updated.")
     return redirect(url_for("edit_player", user_id=user_id))
 
+
+def setting_groups(keys):
+    import economy_settings_admin as settings_admin
+    groups = {}
+    for key in keys:
+        spec = settings_admin.metadata(key)
+        if spec:
+            groups.setdefault(spec['group'], []).append((key, spec))
+    return list(groups.items())
 
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
@@ -1031,9 +785,7 @@ def settings():
     db = get_db()
     values = {row['key']: row['value'] for row in db.execute("SELECT * FROM economy_settings")}
     db.close()
-    return admin_page("Settings", dashboard_ui.SETTINGS_PANEL, setting_values=values,
-                      setting_groups=dashboard_ui.setting_groups(settings_admin.GENERAL_KEYS),
-                      setting_action=url_for("settings"))
+    return admin_page("Settings", render_template("settings_panel.html", setting_values=values, setting_groups=setting_groups(settings_admin.GENERAL_KEYS), setting_action=url_for("settings")))
 
 
 
@@ -1092,7 +844,7 @@ def save_application_form():
         digits=lambda name: "".join(c for c in request.form.get(name,"") if c.isdigit()) or "0"
         role_ids=lambda name: ",".join(filter(None,(mention_id(value) for value in request.form.getlist(name))))
         reviewer_ids=role_ids("reviewer_role_ids"); accepted_ids=role_ids("accepted_role_ids")
-        values=(request.form["name"].strip(),request.form.get("emoji","📋").strip() or "📋",request.form.get("description","").strip(),reviewer_ids,accepted_ids,digits("review_channel_id"),digits("result_channel_id"),max(0,int(request.form.get("cooldown_hours",24)))*3600,int(request.form.get("enabled",1)))
+        values=(request.form["name"].strip(),request.form.get("emoji","📋").strip() or "📋",request.form.get("description","").strip(),reviewer_ids,accepted_ids,digits("review_channel_id"),digits("result_channel_id"),settings_admin.integer(request.form.get("cooldown_hours", 24), "cooldown_hours", 0, 999999999)*3600,int(request.form.get("enabled",1)))
         if form_id: db.execute("UPDATE application_forms SET name=?,emoji=?,description=?,reviewer_role_ids=?,accepted_role_ids=?,review_channel_id=?,result_channel_id=?,cooldown_seconds=?,enabled=? WHERE id=?",values+(int(form_id),))
         else: db.execute("INSERT INTO application_forms(name,emoji,description,reviewer_role_ids,accepted_role_ids,review_channel_id,result_channel_id,cooldown_seconds,enabled) VALUES(?,?,?,?,?,?,?,?,?)",values)
         flash("Application form saved.")
@@ -1111,7 +863,7 @@ def save_application_question():
             db.close();flash("X BOT applications support a maximum of 10 questions (two Discord pages).");return redirect(url_for("applications_control"))
         question_type=request.form.get("question_type","long"); question_type=question_type if question_type in {"long","short","choice","department"} else "long"
         paragraph=1 if question_type=="long" else 0
-        values=(form_id,request.form["label"].strip(),request.form.get("placeholder","").strip(),paragraph,int(request.form.get("required",1)),max(0,int(request.form.get("position",10))),question_type)
+        values=(form_id,request.form["label"].strip(),request.form.get("placeholder","").strip(),paragraph,int(request.form.get("required",1)),settings_admin.integer(request.form.get("position", 10), "position", 0, 999999999),question_type)
         if question_id: db.execute("UPDATE application_questions SET form_id=?,label=?,placeholder=?,paragraph=?,required=?,position=?,question_type=? WHERE id=?",values+(int(question_id),))
         else: db.execute("INSERT INTO application_questions(form_id,label,placeholder,paragraph,required,position,question_type) VALUES(?,?,?,?,?,?,?)",values)
         flash("Application question saved.")
@@ -1126,7 +878,7 @@ def save_application_option():
         db.execute("DELETE FROM application_question_options WHERE id=?", (int(option_id),)); flash("Department choice deleted.")
     else:
         role_id=mention_id(request.form.get("role_id","")) or ""
-        values=(question_id,request.form["label"].strip(),request.form.get("emoji","🏢").strip() or "🏢",role_id,max(0,int(request.form.get("position",10))))
+        values=(question_id,request.form["label"].strip(),request.form.get("emoji","🏢").strip() or "🏢",role_id,settings_admin.integer(request.form.get("position", 10), "position", 0, 999999999))
         if option_id: db.execute("UPDATE application_question_options SET question_id=?,label=?,emoji=?,role_id=?,position=? WHERE id=?", values+(int(option_id),))
         else: db.execute("INSERT INTO application_question_options(question_id,label,emoji,role_id,position) VALUES(?,?,?,?,?)", values)
         flash("Department choice and role mapping saved.")
@@ -1188,7 +940,7 @@ def jobs():
 @login_required
 def save_job_inactivity():
     db = get_db()
-    warning = min(365, max(1, int(request.form.get("job_warning_days", 7))))
+    warning = min(365, settings_admin.integer(request.form.get("job_warning_days", 7), "job_warning_days", 1, 999999999))
     firing = min(365, max(warning + 1, int(request.form.get("job_fire_days", 14))))
     channel_text = request.form.get("job_log_channel_id", "0").strip()
     channel_digits = "".join(character for character in channel_text if character.isdigit()) or "0"
@@ -1206,11 +958,11 @@ def save_job_incentives():
     db = get_db()
     item_keys = ("job_recommendation_item_id", "job_apology_item_id", "job_vacation_item_id")
     for key in item_keys:
-        item_id = max(1, int(request.form[key]))
+        item_id = settings_admin.integer(request.form[key], key, 1, 999999999)
         if db.execute("SELECT 1 FROM items WHERE id=?", (item_id,)).fetchone():
             db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(item_id)))
-    base = min(100, max(0, int(request.form.get("job_drop_base_chance", 6))))
-    multiplier = min(100, max(0, int(request.form.get("job_drop_tenure_multiplier", 1))))
+    base = min(100, settings_admin.integer(request.form.get("job_drop_base_chance", 6), "job_drop_base_chance", 0, 999999999))
+    multiplier = min(100, settings_admin.integer(request.form.get("job_drop_tenure_multiplier", 1), "job_drop_tenure_multiplier", 0, 999999999))
     maximum = min(100, max(base, int(request.form.get("job_drop_max_chance", 25))))
     values = {"job_drop_base_chance": base, "job_drop_tenure_multiplier": multiplier,
         "job_drop_max_chance": maximum, "job_keep_recommendation": int(request.form.get("job_keep_recommendation", 1)),
@@ -1224,11 +976,11 @@ def save_job_incentives():
 @app.post("/jobs/incentives/pool")
 @login_required
 def save_job_incentive_pool():
-    db = get_db(); item_id = max(1, int(request.form["item_id"])); action = request.form.get("action", "save")
+    db = get_db(); item_id = settings_admin.integer(request.form["item_id"], "item_id", 1, 999999999); action = request.form.get("action", "save")
     if action == "remove":
         db.execute("DELETE FROM job_incentive_pool WHERE item_id=?", (item_id,)); flash("Incentive item removed.")
     elif db.execute("SELECT 1 FROM items WHERE id=?", (item_id,)).fetchone():
-        amount = max(1, int(request.form.get("amount", 1))); weight = max(1, int(request.form.get("weight", 1)))
+        amount = settings_admin.integer(request.form.get("amount", 1), "amount", 1, 999999999); weight = settings_admin.integer(request.form.get("weight", 1), "weight", 1, 999999999)
         db.execute("""INSERT INTO job_incentive_pool(item_id,amount,weight,enabled) VALUES(?,?,?,1)
             ON CONFLICT(item_id) DO UPDATE SET amount=excluded.amount,weight=excluded.weight,enabled=1""", (item_id, amount, weight))
         flash("Incentive item saved.")
@@ -1239,7 +991,7 @@ def save_job_incentive_pool():
 @app.post("/jobs/save")
 @login_required
 def save_job():
-    db = get_db(); job_id = request.form.get("id"); name = request.form["name"].strip(); description = request.form["description"].strip(); low = max(0, int(request.form["min_salary"])); high = max(low, int(request.form["max_salary"])); enabled = int(request.form["enabled"]); emoji = request.form.get("emoji", "💼").strip() or "💼"; shifts = max(1, int(request.form["shifts_per_day"])); item_id = int(request.form["requirement_item_id"]) if request.form.get("requirement_item_id") else None; quantity = max(0, int(request.form["requirement_quantity"])); role_text = request.form.get("required_role_id", "").strip(); digits = "".join(character for character in role_text if character.isdigit()); role_id = digits or role_text.removeprefix("@").strip()
+    db = get_db(); job_id = request.form.get("id"); name = request.form["name"].strip(); description = request.form["description"].strip(); low = settings_admin.integer(request.form["min_salary"], "min_salary", 0, 999999999); high = max(low, int(request.form["max_salary"])); enabled = int(request.form["enabled"]); emoji = request.form.get("emoji", "💼").strip() or "💼"; shifts = settings_admin.integer(request.form["shifts_per_day"], "shifts_per_day", 1, 999999999); item_id = int(request.form["requirement_item_id"]) if request.form.get("requirement_item_id") else None; quantity = settings_admin.integer(request.form["requirement_quantity"], "requirement_quantity", 0, 999999999); role_text = request.form.get("required_role_id", "").strip(); digits = "".join(character for character in role_text if character.isdigit()); role_id = digits or role_text.removeprefix("@").strip()
     try:
         if job_id:
             db.execute("UPDATE jobs SET name=?,description=?,min_salary=?,max_salary=?,enabled=?,emoji=?,shifts_per_day=?,requirement_item_id=?,requirement_quantity=?,required_role_id=? WHERE id=?", (name, description, low, high, enabled, emoji, shifts, item_id, quantity, role_id, int(job_id)))
@@ -1382,7 +1134,7 @@ def save_mining_area():
             db.execute("DELETE FROM mining_areas WHERE id=?",(int(row_id),));db.commit()
             flash(f"Mining area {area['name']} and its drop pool deleted.")
         db.close();return redirect(url_for("mining_control"))
-    low=max(1,int(request.form["exp_min"])); high=max(low,int(request.form["exp_max"])); values=(request.form["name"].strip(),request.form.get("emoji","⛏️").strip() or "⛏️",request.form.get("description","").strip(),max(1,int(request.form["required_level"])),max(1,int(request.form["cooldown_seconds"])),max(0,int(request.form["energy_cost"])),low,high,min(100,max(0,int(request.form["crystal_chance"]))),max(0,int(request.form["position"])),int(request.form.get("enabled",1)))
+    low=settings_admin.integer(request.form["exp_min"], "exp_min", 1, 999999999); high=max(low,int(request.form["exp_max"])); values=(request.form["name"].strip(),request.form.get("emoji","⛏️").strip() or "⛏️",request.form.get("description","").strip(),settings_admin.integer(request.form["required_level"], "required_level", 1, 999999999),settings_admin.integer(request.form["cooldown_seconds"], "cooldown_seconds", 1, 999999999),settings_admin.integer(request.form["energy_cost"], "energy_cost", 0, 999999999),low,high,min(100,settings_admin.integer(request.form["crystal_chance"], "crystal_chance", 0, 999999999)),settings_admin.integer(request.form["position"], "position", 0, 999999999),int(request.form.get("enabled",1)))
     try:
         if row_id: db.execute("UPDATE mining_areas SET name=?,emoji=?,description=?,required_level=?,cooldown_seconds=?,energy_cost=?,exp_min=?,exp_max=?,crystal_chance=?,position=?,enabled=? WHERE id=?",values+(int(row_id),))
         else: db.execute("INSERT INTO mining_areas(name,emoji,description,required_level,cooldown_seconds,energy_cost,exp_min,exp_max,crystal_chance,position,enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?)",values)
@@ -1397,15 +1149,15 @@ def save_mining_drop():
     db=get_db(); area_id=int(request.form["area_id"]);item_id=int(request.form["item_id"])
     if request.form.get("action")=="remove": db.execute("DELETE FROM mining_area_drops WHERE area_id=? AND item_id=?",(area_id,item_id))
     else:
-        low=max(1,int(request.form.get("min_yield",1)));high=max(low,int(request.form.get("max_yield",1)))
-        db.execute("""INSERT INTO mining_area_drops(area_id,item_id,weight,min_yield,max_yield,rare) VALUES(?,?,?,?,?,?) ON CONFLICT(area_id,item_id) DO UPDATE SET weight=excluded.weight,min_yield=excluded.min_yield,max_yield=excluded.max_yield,rare=excluded.rare""",(area_id,item_id,max(1,int(request.form.get("weight",1))),low,high,int(request.form.get("rare",0))))
+        low=settings_admin.integer(request.form.get("min_yield", 1), "min_yield", 1, 999999999);high=max(low,int(request.form.get("max_yield",1)))
+        db.execute("""INSERT INTO mining_area_drops(area_id,item_id,weight,min_yield,max_yield,rare) VALUES(?,?,?,?,?,?) ON CONFLICT(area_id,item_id) DO UPDATE SET weight=excluded.weight,min_yield=excluded.min_yield,max_yield=excluded.max_yield,rare=excluded.rare""",(area_id,item_id,settings_admin.integer(request.form.get("weight", 1), "weight", 1, 999999999),low,high,int(request.form.get("rare",0))))
     db.commit();db.close();flash("Mining drop pool updated.");return redirect(url_for("mining_control"))
 
 
 @app.post("/mining/pickaxe/save")
 @login_required
 def save_pickaxe_stats():
-    db=get_db();db.execute("""UPDATE items SET pickaxe_power=?,pickaxe_luck=?,pickaxe_yield_bonus=?,pickaxe_cooldown_reduction=?,pickaxe_required_level=? WHERE id=? AND effect='mine_tool'""",(max(1,int(request.form["pickaxe_power"])),min(100,max(0,int(request.form["pickaxe_luck"]))),min(500,max(0,int(request.form["pickaxe_yield_bonus"]))),min(90,max(0,int(request.form["pickaxe_cooldown_reduction"]))),max(1,int(request.form["pickaxe_required_level"])),int(request.form["id"])));db.commit();db.close();flash("Pickaxe stats saved.");return redirect(url_for("mining_control"))
+    db=get_db();db.execute("""UPDATE items SET pickaxe_power=?,pickaxe_luck=?,pickaxe_yield_bonus=?,pickaxe_cooldown_reduction=?,pickaxe_required_level=? WHERE id=? AND effect='mine_tool'""",(settings_admin.integer(request.form["pickaxe_power"], "pickaxe_power", 1, 999999999),min(100,settings_admin.integer(request.form["pickaxe_luck"], "pickaxe_luck", 0, 999999999)),min(500,settings_admin.integer(request.form["pickaxe_yield_bonus"], "pickaxe_yield_bonus", 0, 999999999)),min(90,settings_admin.integer(request.form["pickaxe_cooldown_reduction"], "pickaxe_cooldown_reduction", 0, 999999999)),settings_admin.integer(request.form["pickaxe_required_level"], "pickaxe_required_level", 1, 999999999),int(request.form["id"])));db.commit();db.close();flash("Pickaxe stats saved.");return redirect(url_for("mining_control"))
 
 
 @app.post("/items/save")
@@ -1415,8 +1167,8 @@ def save_item():
     category_id = int(request.form['category_id']); category = db.execute("SELECT label FROM item_categories WHERE id=?", (category_id,)).fetchone()
     if category is None:
         db.close(); flash("Choose a valid category."); return redirect(url_for("items"))
-    mine_min = max(1, int(request.form['mine_min_yield'])); mine_max = max(mine_min, int(request.form['mine_max_yield']))
-    values = (request.form['name'].strip(), request.form['description'].strip(), request.form.get('emoji', '📦').strip() or '📦', request.form.get('aliases', '').strip(), category['label'].lower(), category_id, max(0, int(request.form['price'])), request.form['currency'], max(0, int(request.form['sell_price'])), max(-1, int(request.form['stock'])), request.form['effect'], min(100, max(0, int(request.form['effect_value']))), int(request.form['sellable']), int(request.form['tradeable']), int(request.form['shop_visible']), max(0, int(request.form['mine_weight'])), mine_min, mine_max, int(request.form['enabled']))
+    mine_min = settings_admin.integer(request.form['mine_min_yield'], 'mine_min_yield', 1, 999999999); mine_max = max(mine_min, int(request.form['mine_max_yield']))
+    values = (request.form['name'].strip(), request.form['description'].strip(), request.form.get('emoji', '📦').strip() or '📦', request.form.get('aliases', '').strip(), category['label'].lower(), category_id, settings_admin.integer(request.form['price'], 'price', 0, 999999999), request.form['currency'], settings_admin.integer(request.form['sell_price'], 'sell_price', 0, 999999999), max(-1, int(request.form['stock'])), request.form['effect'], min(100, settings_admin.integer(request.form['effect_value'], 'effect_value', 0, 999999999)), int(request.form['sellable']), int(request.form['tradeable']), int(request.form['shop_visible']), settings_admin.integer(request.form['mine_weight'], 'mine_weight', 0, 999999999), mine_min, mine_max, int(request.form['enabled']))
     try:
         if item_id:
             db.execute("UPDATE items SET name=?,description=?,emoji=?,aliases=?,category=?,category_id=?,price=?,currency=?,sell_price=?,stock=?,effect=?,effect_value=?,sellable=?,tradeable=?,shop_visible=?,mine_weight=?,mine_min_yield=?,mine_max_yield=?,enabled=? WHERE id=?", values + (int(item_id),))
@@ -1474,7 +1226,7 @@ def save_item_category():
             flash(f"Item category {current['label']} deleted.")
         db.close(); return redirect(url_for("items") + "#category-manager")
     label = request.form["label"].strip()
-    emoji = request.form.get("emoji", "📦").strip() or "📦"; position = max(0, int(request.form.get("position", 99)))
+    emoji = request.form.get("emoji", "📦").strip() or "📦"; position = settings_admin.integer(request.form.get("position", 99), "position", 0, 999999999)
     try:
         if not label:
             raise ValueError("Category name is required.")
@@ -1501,7 +1253,7 @@ def categories():
                 category_id = request.form.get("id")
                 label = request.form["label"].strip()
                 emoji = request.form.get("emoji", "📦").strip() or "📦"
-                position = max(0, int(request.form.get("position", 99)))
+                position = settings_admin.integer(request.form.get("position", 99), "position", 0, 999999999)
                 if not label:
                     raise ValueError("Category label is required.")
                 if category_id:
@@ -1718,7 +1470,7 @@ def tier6_economy_control():
     return admin_page("Tier 6 Economy", body, settings=settings, totals=totals, stock_value=stock_value,
                       companies=companies, contracts=contracts, items=items, recent_trades=recent_trades,
                       market_trades=market_trades, production=production, activity=activity, health=health,
-                      setting_values=settings, setting_groups=dashboard_ui.setting_groups(settings_admin.TIER6_KEYS),
+                      setting_values=settings, setting_groups=setting_groups(settings_admin.TIER6_KEYS),
                       setting_action=url_for("tier6_save_settings"))
 
 
@@ -1734,14 +1486,14 @@ def tier6_save_company():
     db = get_db(); company_id = request.form.get("id")
     symbol = request.form["symbol"].strip().upper()[:8]
     name = request.form["name"].strip()[:80]
-    price = max(1, int(request.form.get("price", 100)))
-    minimum = max(1, int(request.form.get("min_price", 1)))
+    price = settings_admin.integer(request.form.get("price", 100), "price", 1, 999999999)
+    minimum = settings_admin.integer(request.form.get("min_price", 1), "min_price", 1, 999999999)
     maximum = max(minimum, int(request.form.get("max_price", 1000)))
     price = min(maximum, max(minimum, price))
-    total = max(1, int(request.form.get("total_shares", 100000)))
+    total = settings_admin.integer(request.form.get("total_shares", 100000), "total_shares", 1, 999999999)
     values = (symbol, name, request.form.get("emoji", "📈").strip() or "📈", request.form.get("industry", "Industry").strip()[:60],
               request.form.get("description", "").strip()[:500], price, minimum, maximum, total,
-              max(1, min(50, int(request.form.get("volatility", 8)))), max(-20, min(20, int(request.form.get("trend", 0)))), int(request.form.get("enabled", 1)))
+              settings_admin.integer(request.form.get("volatility", 8), "volatility", 1, 50), max(-20, min(20, int(request.form.get("trend", 0)))), int(request.form.get("enabled", 1)))
     try:
         if company_id:
             held = int(db.execute("SELECT COALESCE(SUM(quantity),0) FROM tier6_stock_holdings WHERE company_id=?", (int(company_id),)).fetchone()[0])
@@ -1765,9 +1517,9 @@ def tier6_save_contract():
     db = get_db(); contract_id = request.form.get("id")
     item_id = request.form.get("reward_item_id")
     values = (request.form["contract_key"].strip()[:80], request.form["title"].strip()[:100], request.form.get("emoji", "📋").strip() or "📋",
-              request.form.get("description", "").strip()[:500], request.form.get("action_type", "mine"), max(1, int(request.form.get("target", 1))),
-              max(0, int(request.form.get("reward_xc", 0))), max(0, int(request.form.get("reward_war_credits", 0))), int(item_id) if item_id else None,
-              max(0, int(request.form.get("reward_item_quantity", 0))), request.form.get("period", "daily"), max(1, min(10, int(request.form.get("minimum_level", 1)))), int(request.form.get("enabled", 1)))
+              request.form.get("description", "").strip()[:500], request.form.get("action_type", "mine"), settings_admin.integer(request.form.get("target", 1), "target", 1, 999999999),
+              settings_admin.integer(request.form.get("reward_xc", 0), "reward_xc", 0, 999999999), settings_admin.integer(request.form.get("reward_war_credits", 0), "reward_war_credits", 0, 999999999), int(item_id) if item_id else None,
+              settings_admin.integer(request.form.get("reward_item_quantity", 0), "reward_item_quantity", 0, 999999999), request.form.get("period", "daily"), settings_admin.integer(request.form.get("minimum_level", 1), "minimum_level", 1, 10), int(request.form.get("enabled", 1)))
     try:
         if contract_id:
             db.execute("""UPDATE tier6_contracts SET contract_key=?,title=?,emoji=?,description=?,action_type=?,target=?,reward_xc=?,reward_war_credits=?,reward_item_id=?,reward_item_quantity=?,period=?,minimum_level=?,enabled=? WHERE id=?""", values + (int(contract_id),))
@@ -1841,7 +1593,7 @@ def save_reward_code():
         expires_text = request.form.get("expires_at", "").strip()
         expires_at = int(datetime.fromisoformat(expires_text).timestamp()) if expires_text else 0
         item_id = int(request.form["item_id"]) if request.form.get("item_id") else None
-        values = (request.form.get("description", "").strip()[:180], max(0, int(request.form.get("reward_xc", 0))), max(0, int(request.form.get("reward_war_credits", 0))), max(0, int(request.form.get("reward_xcrystals", 0))), item_id, max(0, int(request.form.get("item_quantity", 0))), max(0, int(request.form.get("max_uses", 0))), expires_at, int(request.form.get("enabled", 0)))
+        values = (request.form.get("description", "").strip()[:180], settings_admin.integer(request.form.get("reward_xc", 0), "reward_xc", 0, 999999999), settings_admin.integer(request.form.get("reward_war_credits", 0), "reward_war_credits", 0, 999999999), settings_admin.integer(request.form.get("reward_xcrystals", 0), "reward_xcrystals", 0, 999999999), item_id, settings_admin.integer(request.form.get("item_quantity", 0), "item_quantity", 0, 999999999), settings_admin.integer(request.form.get("max_uses", 0), "max_uses", 0, 999999999), expires_at, int(request.form.get("enabled", 0)))
         if code_id:
             db.execute("""UPDATE reward_codes SET description=?,reward_xc=?,reward_war_credits=?,reward_xcrystals=?,item_id=?,item_quantity=?,max_uses=?,expires_at=?,enabled=? WHERE id=?""", (*values, int(code_id)))
             flash("Reward code saved.")
@@ -2430,7 +2182,7 @@ def move_nation_territory():
 def set_land_development():
     db = get_db()
     code = request.form.get("territory_code", "")
-    level = max(1, min(5, int(request.form.get("level", 1))))
+    level = settings_admin.integer(request.form.get("level", 1), "level", 1, 5)
     row = db.execute("SELECT territory_name FROM map_territories WHERE territory_code=?", (code,)).fetchone()
     if row:
         db.execute("UPDATE map_territories SET level=? WHERE territory_code=?", (level, code))
@@ -2480,10 +2232,10 @@ def start_war_season_dashboard():
             flash("Season name is required.")
         else:
             now=int(time.time())
-            duration_days=max(1,min(365,int(request.form.get("duration_days",14))))
+            duration_days=settings_admin.integer(request.form.get("duration_days", 14), "duration_days", 1, 365)
             scheduled_ends_at=now+(duration_days*86400)
             participation_xc=war_tier.setting(db,"war_season_participation_xc")
-            rewards = [max(0, int(request.form.get(key, 0))) for key in (
+            rewards = [settings_admin.integer(request.form.get(key, 0), key, 0, 999999999) for key in (
                 "reward_xc", "reward_war_credits", "reward_xc_2", "reward_war_credits_2",
                 "reward_xc_3", "reward_war_credits_3")]
             db.execute("""INSERT INTO war_seasons(name,status,starts_at,reward_xc,reward_war_credits,
@@ -2576,7 +2328,7 @@ def save_war_season_rules():
     for form_key,setting_key in (("war_new_nation_protection_hours","war_new_nation_protection_seconds"),
                                  ("war_pair_attack_cooldown_hours","war_pair_attack_cooldown"),
                                  ("nation_war_duration_hours","nation_war_duration")):
-        value=max(0,int(request.form.get(form_key,0)))*3600
+        value=settings_admin.integer(request.form.get(form_key, 0), form_key, 0, 999999999)*3600
         db.execute("INSERT INTO economy_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                    (setting_key,str(value)))
     db.commit();db.close();flash("War Campaign scoring saved.");return redirect(url_for("war_control")+"#war-season")
@@ -2595,7 +2347,7 @@ def save_war_logistics():
         "war_navy_blockade_penalty","war_navy_supply_damage")
     percent_keys={"war_readiness_per_prepare","capital_damage","capital_reward_percent","fortified_defense_bonus","aggressive_attack_bonus","demobilize_refund_percent","fortify_power_percent","war_winner_loss_percent","war_loser_loss_percent","war_readiness_loss_per_battle","war_winner_morale_gain","war_loser_morale_loss","war_rally_morale_gain","war_air_superiority_bonus","war_navy_blockade_penalty"}
     for key in keys:
-        value=max(0,int(request.form.get(key,0)))
+        value=settings_admin.integer(request.form.get(key, 0), key, 0, 999999999)
         if key in percent_keys: value=min(100,value)
         if key=="war_battle_variance_percent": value=min(50,value)
         if key=="war_max_supply": value=max(1,value)
@@ -2609,13 +2361,13 @@ def save_war_logistics():
 def save_nation_war_state():
     db=get_db(); user_id=int(request.form["user_id"])
     maximum_supply=int((db.execute("SELECT value FROM economy_settings WHERE key='war_max_supply'").fetchone() or {"value":1000})["value"])
-    supply=min(maximum_supply,max(0,int(request.form.get("supply",0))))
-    readiness=max(0,min(100,int(request.form.get("readiness",100))))
-    morale=max(0,min(100,int(request.form.get("morale",100))))
-    fortification=max(0,int(request.form.get("fortification_level",0)))
+    supply=min(maximum_supply,settings_admin.integer(request.form.get("supply", 0), "supply", 0, 999999999))
+    readiness=settings_admin.integer(request.form.get("readiness", 100), "readiness", 0, 100)
+    morale=settings_admin.integer(request.form.get("morale", 100), "morale", 0, 100)
+    fortification=settings_admin.integer(request.form.get("fortification_level", 0), "fortification_level", 0, 999999999)
     stance=request.form.get("defense_stance","balanced")
     if stance not in {"balanced","fortified","aggressive"}: stance="balanced"
-    capital=max(0,min(100,int(request.form.get("capital_health",100))))
+    capital=settings_admin.integer(request.form.get("capital_health", 100), "capital_health", 0, 100)
     db.execute("""INSERT INTO player_war_settings(user_id,defense_stance,fortification_level,morale,supply,readiness)
         VALUES(?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET defense_stance=excluded.defense_stance,
         fortification_level=excluded.fortification_level,morale=excluded.morale,supply=excluded.supply,readiness=excluded.readiness""",
@@ -2629,7 +2381,7 @@ def save_nation_war_state():
 def save_war_unit():
     db = get_db(); unit_id = request.form.get("id")
     code = request.form["code"].strip().lower().replace(" ", "_"); name = request.form["name"].strip()
-    values = (code, name, request.form.get("emoji", "🪖").strip() or "🪖", request.form.get("branch", "land"), int(request.form["category_id"]), max(0, int(request.form["cost"])), max(0, int(request.form["power"])), request.form.get("description", "").strip(), int(request.form.get("enabled", 1)), max(0, int(request.form.get("position", 99))))
+    values = (code, name, request.form.get("emoji", "🪖").strip() or "🪖", request.form.get("branch", "land"), int(request.form["category_id"]), settings_admin.integer(request.form["cost"], "cost", 0, 999999999), settings_admin.integer(request.form["power"], "power", 0, 999999999), request.form.get("description", "").strip(), int(request.form.get("enabled", 1)), settings_admin.integer(request.form.get("position", 99), "position", 0, 999999999))
     try:
         if not code or not name:
             raise ValueError("Code and model name are required.")
@@ -2723,7 +2475,7 @@ def save_war_category():
             flash(f"Recruit category {category['label']} deleted.")
         db.close();return redirect(url_for("war_control")+"#war-category-manager")
     label = request.form["label"].strip()
-    emoji = request.form.get("emoji", "⚔️").strip() or "⚔️"; position = max(0, int(request.form.get("position", 99)))
+    emoji = request.form.get("emoji", "⚔️").strip() or "⚔️"; position = settings_admin.integer(request.form.get("position", 99), "position", 0, 999999999)
     parent_branch = request.form.get("parent_branch", "land")
     if parent_branch not in {"land", "air", "navy"}:
         parent_branch = "land"
@@ -2846,7 +2598,7 @@ def recipes_control():
 @login_required
 def save_recipe():
     db = get_db(); recipe_id = request.form.get("id")
-    values = (request.form["name"].strip(), request.form.get("emoji","🧪").strip() or "🧪", request.form.get("description","").strip(), int(request.form["output_item_id"]), max(1,int(request.form["output_quantity"])), max(0,int(request.form["xc_cost"])), int(request.form.get("enabled",1)))
+    values = (request.form["name"].strip(), request.form.get("emoji","🧪").strip() or "🧪", request.form.get("description","").strip(), int(request.form["output_item_id"]), settings_admin.integer(request.form["output_quantity"], "output_quantity", 1, 999999999), settings_admin.integer(request.form["xc_cost"], "xc_cost", 0, 999999999), int(request.form.get("enabled",1)))
     try:
         if recipe_id:
             db.execute("UPDATE recipes SET name=?,emoji=?,description=?,output_item_id=?,output_quantity=?,xc_cost=?,enabled=? WHERE id=?", values+(int(recipe_id),))
@@ -2857,7 +2609,7 @@ def save_recipe():
         for slot in range(4):
             item = request.form.get(f"ingredient_item_{slot}")
             if item:
-                combined[int(item)] = combined.get(int(item),0) + max(1,int(request.form.get(f"ingredient_qty_{slot}",1)))
+                combined[int(item)] = combined.get(int(item),0) + settings_admin.integer(request.form.get(f"ingredient_qty_{slot}", 1), f"ingredient_qty_{slot}", 1, 999999999)
         db.executemany("INSERT INTO recipe_ingredients(recipe_id,item_id,quantity) VALUES(?,?,?)", [(rid,item,qty) for item,qty in combined.items()])
         db.commit(); flash("Recipe saved.")
     except (ValueError,sqlite3.IntegrityError) as error:
@@ -2912,7 +2664,7 @@ def save_finance_rule():
         db.execute(f"DELETE FROM {table} WHERE id=?",(int(row_id),));db.commit()
         flash(f"{row['name'] if row else 'Finance rule'} deleted.")
         db.close();return redirect(url_for("finance_control"))
-    values=(request.form["name"].strip(),request.form.get("emoji","🧾").strip() or "🧾",max(0,int(request.form["amount"])),max(60,int(request.form["interval_seconds"])),int(request.form.get("enabled",1)))
+    values=(request.form["name"].strip(),request.form.get("emoji","🧾").strip() or "🧾",settings_admin.integer(request.form["amount"], "amount", 0, 999999999),settings_admin.integer(request.form["interval_seconds"], "interval_seconds", 60, 999999999),int(request.form.get("enabled",1)))
     try:
         if row_id: db.execute(f"UPDATE {table} SET name=?,emoji=?,amount=?,interval_seconds=?,enabled=? WHERE id=?",values+(int(row_id),))
         else: db.execute(f"INSERT INTO {table}(name,emoji,amount,interval_seconds,enabled) VALUES(?,?,?,?,?)",values)
@@ -2940,7 +2692,7 @@ def item_shop_control():
 @app.post("/item-shop/save")
 @login_required
 def save_item_offer():
-    db = get_db(); item_id = max(1, int(request.form["item_id"])); action = request.form.get("action", "save")
+    db = get_db(); item_id = settings_admin.integer(request.form["item_id"], "item_id", 1, 999999999); action = request.form.get("action", "save")
     item = db.execute("SELECT name FROM items WHERE id=?", (item_id,)).fetchone()
     if item is None:
         db.close(); flash("Choose a valid Item Library entry."); return redirect(url_for("item_shop_control"))
@@ -2950,8 +2702,8 @@ def save_item_offer():
         currency = request.form.get("currency", "xc")
         if currency not in {"xc", "xcrystals"}: currency = "xc"
         db.execute("""UPDATE items SET price=?,currency=?,stock=?,sell_price=?,sellable=?,shop_visible=1,enabled=1 WHERE id=?""",
-            (max(0,int(request.form.get("price",0))),currency,max(-1,int(request.form.get("stock",-1))),
-             max(0,int(request.form.get("sell_price",0))),int(request.form.get("sellable",0)),item_id))
+            (settings_admin.integer(request.form.get("price", 0), "price", 0, 999999999),currency,max(-1,int(request.form.get("stock",-1))),
+             settings_admin.integer(request.form.get("sell_price", 0), "sell_price", 0, 999999999),int(request.form.get("sellable",0)),item_id))
         flash(f"{item['name']} shop offer saved.")
     db.commit(); db.close(); return redirect(url_for("item_shop_control"))
 
@@ -2974,7 +2726,7 @@ def save_role_offer():
         db.execute("DELETE FROM role_shop WHERE id=?",(int(row_id),));db.commit()
         flash(f"{row['name'] if row else 'Role offer'} deleted.")
         db.close();return redirect(url_for("role_shop_control"))
-    values=(role_id,request.form["name"].strip(),request.form.get("emoji","🎭").strip() or "🎭",request.form.get("description","").strip(),max(0,int(request.form["price"])),request.form.get("currency","xc"),max(-1,int(request.form["stock"])),int(request.form.get("enabled",1)))
+    values=(role_id,request.form["name"].strip(),request.form.get("emoji","🎭").strip() or "🎭",request.form.get("description","").strip(),settings_admin.integer(request.form["price"], "price", 0, 999999999),request.form.get("currency","xc"),max(-1,int(request.form["stock"])),int(request.form.get("enabled",1)))
     try:
         if not role_id: raise ValueError("Enter a valid Discord @Role mention or Role ID.")
         if row_id: db.execute("UPDATE role_shop SET role_id=?,name=?,emoji=?,description=?,price=?,currency=?,stock=?,enabled=? WHERE id=?",values+(int(row_id),))
@@ -3005,7 +2757,7 @@ def command_access():
         ids=lambda key: ",".join(filter(None,(mention_id(x) for value in request.form.getlist(key) for x in value.replace(";",",").split(","))))
         scope=request.form.get("cooldown_scope","user"); scope=scope if scope in {"user","guild","global"} else "user"
         values=(mode,ids("allowed_role_ids"),ids("allowed_user_ids"),int(request.form.get("enabled",1)),ids("blocked_role_ids"),
-            ids("allowed_channel_ids"),ids("blocked_channel_ids"),max(0,int(request.form.get("cooldown_seconds",0))),scope,
+            ids("allowed_channel_ids"),ids("blocked_channel_ids"),settings_admin.integer(request.form.get("cooldown_seconds", 0), "cooldown_seconds", 0, 999999999),scope,
             ids("cooldown_bypass_role_ids"),request.form.get("required_permissions","").strip(),int(request.form.get("log_usage",0)),command)
         db.execute("""UPDATE command_permissions SET access_mode=?,allowed_role_ids=?,allowed_user_ids=?,enabled=?,blocked_role_ids=?,
             allowed_channel_ids=?,blocked_channel_ids=?,cooldown_seconds=?,cooldown_scope=?,cooldown_bypass_role_ids=?,required_permissions=?,log_usage=? WHERE command_name=?""",values)
@@ -3040,7 +2792,7 @@ def dashboard_access():
         if action == "code_create":
             label = request.form.get("code_label", "Moderator").strip()[:80] or "Moderator"
             try:
-                valid_days = max(0, min(365, int(request.form.get("code_days", "90"))))
+                valid_days = settings_admin.integer(request.form.get("code_days", "90"), "code_days", 0, 365)
             except ValueError:
                 valid_days = 90
             raw_code = "MOD-" + "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(16))
@@ -3095,7 +2847,6 @@ def dashboard_access():
     return admin_page("Dashboard Access", body, rows=rows, code_rows=code_rows, new_code=new_code)
 
 
-HEADER = HEADER.replace('Tier 7 ·', 'Tier 8 ·').replace('</nav>', '<a href="{{url_for(\'research_control\')}}">Research · T8</a></nav>')
 
 
 @app.route('/research', methods=['GET','POST'])

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>{% block title %}Overview{% endblock %} · X BOT</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin-system.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+
+<header>
+    <div>
+        <h1>X SYSTEM</h1>
+        <span class="version">V2 · Tier 7 · {{ session.get('discord_name', 'Owner') }} ({{ session.get('dashboard_role', 'owner') }})</span>
+    </div>
+    <button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button>
+</header>
+
+<nav id="dashboard-nav" aria-label="Administration navigation">
+    <div class="nav-brand">X CONTROL</div>
+    
+    <label class="nav-search">
+        <input type="search" id="page-search" placeholder="Search pages..." autocomplete="off">
+    </label>
+
+    <section class="nav-group">
+        <h2>Overview</h2>
+        <a href="{{ url_for('home') }}">Overview</a>
+        <a href="{{ url_for('dashboard_users') }}">Dashboard Online</a>
+    </section>
+
+    <section class="nav-group">
+        <h2>Players</h2>
+        <a href="{{ url_for('players') }}">Users</a>
+        <a href="{{ url_for('leveling_control') }}">Levels & XP</a>
+    </section>
+
+    <section class="nav-group">
+        <h2>Economy</h2>
+        <a href="{{ url_for('settings') }}">Settings</a>
+        <a href="{{ url_for('tier6_economy_control') }}">Tier 6 Economy</a>
+        <a href="{{ url_for('mining_control') }}">Mining</a>
+        <a href="{{ url_for('items') }}">Items & Categories</a>
+        <a href="{{ url_for('item_shop_control') }}">Item Shop</a>
+        <a href="{{ url_for('recipes_control') }}">Recipes</a>
+        <a href="{{ url_for('finance_control') }}">Bills & Income</a>
+        <a href="{{ url_for('role_shop_control') }}">Role Shop</a>
+        <a href="{{ url_for('market_control') }}">Market</a>
+        <a href="{{ url_for('auction_control') }}">Auction</a>
+        <a href="{{ url_for('casino_control') }}">Casino</a>
+        <a href="{{ url_for('research_control') }}">Research</a>
+    </section>
+
+    <section class="nav-group">
+        <h2>War</h2>
+        <a href="{{ url_for('war_control') }}">War Control</a>
+        <a href="{{ url_for('diplomacy_control') }}">Diplomacy</a>
+    </section>
+
+    <section class="nav-group">
+        <h2>Administration</h2>
+        <a href="{{ url_for('applications_control') }}">Applications & Verification</a>
+        <a href="{{ url_for('reward_codes_control') }}">Reward Codes</a>
+        <a href="{{ url_for('command_access') }}">Command Access</a>
+        <a href="{{ url_for('log_settings_control') }}">Log Settings</a>
+        <a href="{{ url_for('dashboard_access') }}">Dashboard Access</a>
+        <a href="{{ url_for('logs') }}">Logs</a>
+        <a class="secondary" href="{{ url_for('logout') }}">Log out</a>
+    </section>
+</nav>
+
+<main id="main-content">
+    <div class="page-heading">
+        <div>
+            <span>X SYSTEM / CONTROL CENTRE</span>
+            <h1>{% block page_heading %}{% endblock %}</h1>
+        </div>
+        {% block heading_actions %}{% endblock %}
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <div role="status" class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</main>
+
+<script>
+(() => {
+    // Keep scroll position on form submits/reloads
+    const scrollKey = `xbot-scroll:${location.pathname}`;
+    const savedScroll = sessionStorage.getItem(scrollKey);
+    if (savedScroll !== null) {
+        sessionStorage.removeItem(scrollKey);
+        requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
+    }
+    const rememberScroll = () => sessionStorage.setItem(scrollKey, String(window.scrollY));
+    document.querySelectorAll('form').forEach(form => form.addEventListener('submit', rememberScroll));
+
+    // Mobile menu toggle
+    const mobileMenu = document.querySelector('#mobile-menu');
+    const dashboardNav = document.querySelector('#dashboard-nav');
+    if (mobileMenu && dashboardNav) {
+        mobileMenu.addEventListener('click', event => {
+            event.stopPropagation();
+            const open = dashboardNav.classList.toggle('mobile-open');
+            mobileMenu.setAttribute('aria-expanded', String(open));
+            mobileMenu.textContent = open ? '✕' : '☰';
+        });
+        document.addEventListener('click', event => {
+            if (!dashboardNav.contains(event.target) && event.target !== mobileMenu) {
+                dashboardNav.classList.remove('mobile-open'); 
+                mobileMenu.setAttribute('aria-expanded','false'); 
+                mobileMenu.textContent='☰';
+            }
+        });
+    }
+    
+    // Page search in sidebar
+    const search = document.querySelector('#page-search');
+    if (search) {
+        search.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            document.querySelectorAll('nav a').forEach(link => {
+                if(link.classList.contains('secondary')) return;
+                const match = link.textContent.toLowerCase().includes(query);
+                link.style.display = match ? 'flex' : 'none';
+            });
+        });
+    }
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

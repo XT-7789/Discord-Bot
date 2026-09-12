@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+{% block page_heading %}Login{% endblock %}
+{% block body_class %}login{% endblock %}
+
+{% block content %}
+<style>
+    /* Add basic login center styling override */
+    #dashboard-nav, header .mobile-menu { display: none; }
+    header { padding-left: 24px; justify-content: center; }
+    main { margin: 10vh auto; max-width: 400px; }
+</style>
+
+<div class="panel" style="padding: 24px;">
+    <h2 style="justify-content: center;">⚔️ X BOT V2</h2>
+    <p class="muted" style="text-align: center; margin-bottom: 24px;">Tier 4 Multi-Admin Dashboard</p>
+
+    {% if oauth_configured %}
+        <a class="btn purple" style="display:flex; width: 100%; margin-bottom: 24px;" href="{{ url_for('discord_login') }}">Login with Discord</a>
+    {% else %}
+        <div class="notice bad">Discord OAuth is not configured.</div>
+    {% endif %}
+
+    <details style="margin-bottom: 16px;">
+        <summary style="cursor: pointer; font-weight: bold; padding: 12px; background: var(--surface-2); border-radius: 8px;">Moderator Access Code</summary>
+        <div style="padding: 12px;">
+            <p class="muted">Use the personal code given to you by an Administrator. Keep it private.</p>
+            <form method="post">
+                <input type="hidden" name="login_mode" value="access_code">
+                <label>Personal access code
+                    <input type="password" name="access_code" autocomplete="current-password" required>
+                </label>
+                <button type="submit" class="purple" style="width: 100%; margin-top: 16px;">Login with Access Code</button>
+            </form>
+        </div>
+    </details>
+
+    <details>
+        <summary style="cursor: pointer; font-weight: bold; padding: 12px; background: var(--surface-2); border-radius: 8px;">Emergency Owner Login</summary>
+        <div style="padding: 12px;">
+            <form method="post">
+                <input type="hidden" name="login_mode" value="owner">
+                <label>Dashboard password
+                    <input type="password" name="password" required>
+                </label>
+                <button type="submit" style="width: 100%; margin-top: 16px;">Owner Login</button>
+            </form>
+        </div>
+    </details>
+</div>
+{% endblock %}

@@ -1,0 +1,10 @@
+<section class="panel"><h2>Research · T8</h2><p>Benefits activate automatically. Queue prices and finish times are saved when confirmed. Costs and durations below are per level: level 2 costs twice the base.</p>
+        <form method="post" class="fields"><input type="hidden" name="csrf" value="{{session.research_csrf}}"><input type="hidden" name="action" value="settings">
+        <label>Research and benefits enabled (0/1)<input name="enabled" type="number" min="0" max="1" value="{{settings.tier8_enabled}}" required></label>
+        <label>Queue limit<input name="queue_limit" type="number" min="1" max="6" value="{{settings.tier8_queue_limit}}" required></label><button>Save settings</button></form></section>
+        <section class="panel"><h2>Technology balance</h2><div class="library">{% for r in rows %}<article class="library-card"><h3>{{r.name}}</h3><p>{{r.description}}</p>
+        <form method="post" class="fields"><input type="hidden" name="csrf" value="{{session.research_csrf}}"><input type="hidden" name="code" value="{{r.code}}">
+        {% for key,label in [('max_level','Maximum level'),('base_cost','Base XC cost'),('seconds','Base duration (seconds)'),('bonus_per_level','Bonus per level (%)'),('bonus_cap','Maximum benefit (%)'),('enabled','Enabled (0/1)')] %}
+        <label>{{label}}<input type="number" name="{{key}}" min="{{technology_limits(r.code)[key][0]}}" max="{{technology_limits(r.code)[key][1]}}" value="{{r[key]}}" required><small class="setting-hint">{{technology_limits(r.code)[key][0]}}–{{technology_limits(r.code)[key][1]}} · {{r.name}}. Existing order costs and times stay unchanged.</small></label>{% endfor %}<button>Save technology</button></form></article>{% endfor %}</div></section>
+        <section class="panel"><h2>Recent research orders</h2><table><tr><th>Nation</th><th>Research</th><th>Paid XC</th><th>Status</th><th>Ready</th></tr>
+        {% for j in jobs %}<tr><td>{{j.nation_name}}</td><td>{{j.name}} · Lv {{j.level}}</td><td>{{j.paid}}</td><td>{{'active benefit' if j.status == 'queued' and j.ready_at <= now else j.status}}</td><td>{{j.ready_at|timestamp}}</td></tr>{% endfor %}</table></section>

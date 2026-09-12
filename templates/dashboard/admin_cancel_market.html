@@ -1,0 +1,14 @@
+<section class="panel"><h2>💰 Tier 6 Economy Control Centre</h2><div class="pad">
+      <div class="notice">Every Tier 6 rule is stored in the shared Bot database. Changes apply after the next panel refresh; no code edit is required.</div>
+      <div class="grid">
+        <div class="card"><small>Players</small><strong>{{totals['players']}}</strong></div>
+        <div class="card"><small>Wallet + Bank XC</small><strong>{{totals['wallet']+totals['bank']}}</strong></div>
+        <div class="card"><small>War Credits</small><strong>{{totals['war_credits']}}</strong></div>
+        <div class="card"><small>Stock Market Value</small><strong>{{stock_value}} XC</strong></div>
+      </div>
+      <p class="notice">{{health}}</p>
+      <div class="actions">
+        <form method="post" action="{{url_for('tier6_force_stock_update')}}"><button class="purple">Update Stock Prices Now</button></form>
+        <form method="post" action="{{url_for('tier6_repair')}}" onsubmit="return confirm('Run safe Tier 6 Economy repair?')"><button class="teal">Health Check & Repair</button></form>
+      </div>
+    </div></section>

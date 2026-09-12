@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block page_heading %}{{ title }}{% endblock %}
+
+{% block content %}
+    {{ body | safe }}
+{% endblock %}
+
+{% block scripts %}
+<script id="setting-metadata" type="application/json">{{ setting_metadata|tojson|safe if setting_metadata else "{}" }}</script>
+<script>
+(() => {
+    // Legacy pickers and dynamic features from the old dashboard FOOTER
+    const sources = {
+        role: {{ server_roles|tojson|default('[]') }},
+        channel: {{ picker_channels|tojson|default('[]') }},
+        user: {{ server_members|tojson|default('[]') }}
+    };
+    // Helper to enhance old select boxes (ported from dashboard.py inline JS)
+    const enhancePicker = (picker, type) => {
+        picker.classList.add('role-native-hidden');
+        picker.style.display = 'none';
+        
+        const shell = document.createElement('div'); shell.className = 'role-multi';
+        const control = document.createElement('div'); control.className = 'role-multi-control'; control.tabIndex = 0;
+        const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'role-toggle'; toggle.textContent = '⌄';
+        const menu = document.createElement('div'); menu.className = 'role-multi-menu';
+        const search = document.createElement('input'); search.className = 'role-search'; search.placeholder = `Search...`;
+        const choices = document.createElement('div'); 
+        
+        menu.style.display = 'none';
+        menu.append(search, choices); 
+        shell.append(control, toggle, menu);
+        picker.insertAdjacentElement('afterend', shell);
+        
+        // Very basic render for legacy compatibility
+        const render = () => {
+            control.innerHTML = '';
+            const selectedOptions = [...picker.options].filter(o => o.selected && o.value !== '');
+            if(!selectedOptions.length) {
+                control.innerHTML = `<span style="color:#888">Select ${type}...</span>`;
+            } else {
+                selectedOptions.forEach(o => {
+                    const chip = document.createElement('span');
+                    chip.style = 'background:var(--brand); color:#fff; padding:4px 8px; border-radius:4px; margin-right:4px; font-size:12px;';
+                    chip.textContent = o.textContent;
+                    control.appendChild(chip);
+                });
+            }
+        };
+        
+        toggle.onclick = (e) => {
+            e.preventDefault();
+            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        };
+        
+        render();
+    };
+    
+    document.querySelectorAll('select[name]').forEach(picker => {
+        if (picker.name.endsWith('_role_id') || picker.name.endsWith('_role_ids')) enhancePicker(picker, 'role');
+        else if (picker.name.endsWith('_channel_id')) enhancePicker(picker, 'channel');
+    });
+})();
+</script>
+{% endblock %}
