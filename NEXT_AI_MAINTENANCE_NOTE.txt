@@ -1,0 +1,211 @@
+X WAR BOT - MAINTENANCE AND AI HANDOFF NOTE
+Last updated: 2026-09-12 (Asia/Kuala_Lumpur)
+Repository: https://github.com/XT-7789/Discord-Bot.git
+Branch: main
+Code baseline immediately before this note: 7ff6770
+
+PURPOSE
+=======
+This file is the starting point for a maintainer or AI that cannot see the
+previous conversation. Read it before changing the project.
+
+The current product goal is simple: a new player should understand the game,
+find the next useful action, and complete the Economy loop without guessing
+commands. The principal loop is Mine -> Craft -> Sell -> Upgrade. Warfront and
+Casino are optional. XC and War Credits are separate currencies.
+
+OWNER PREFERENCES AND NON-NEGOTIABLE RULES
+==========================================
+1. Speak Chinese with the owner. Keep all player, Admin and Help UI in English.
+2. Use the current X SYSTEM visual language: dark Discord panels, cyan accent,
+   strong headings, short explanations and obvious primary actions.
+3. Design for Discord mobile first. Prefer short native text and real buttons.
+4. Help belongs on the Main Menu only. Other panels use Back, Menu and Close.
+5. Back must return to the actual previous panel and preserve useful selection.
+6. Never require a slash command when a normal panel button can perform or open
+   the same action. The Admin panel should expose almost all routine Admin tools.
+7. Do not change rewards, prices, odds, cooldowns, VIP/SVIP rights, permissions
+   or war balance unless the owner explicitly approves that scope.
+8. Do not reset data, modify real player assets, run repairs/backups against
+   production, or start a second production Bot.
+9. Every completed code or documentation update must be committed and pushed to
+   GitHub. Give the owner the commit hash.
+10. Offline tests are not mobile visual approval. Ask for a fresh phone screenshot
+    after a visual change and label it pending until the screenshot is reviewed.
+
+CURRENT OVERVIEW UI - IMPORTANT
+===============================
+The /overview panel is implemented in player_overview.py.
+
+Several designs were tested and rejected on an actual phone:
+- Pillow image dashboard: text was too small, looked poor and FreeType failed on
+  Termux builds without PIL._imagingft.
+- Discord code block grid: unwanted code styling and copy icon.
+- Normal text fake columns using spaces, vertical bars or dot separators: Discord
+  uses a proportional font, so later rows drift even when the first row looks OK.
+
+Do not restore those designs without explicit owner approval.
+
+The current implementation at commit 7ff6770 uses one stable summary line for
+each tile:
+
+  WALLET · 1,854 XC · Bank 17,127
+  MINES · Energy 92 · Level 2
+  PRODUCTION · Ready 0 · Queue 0/7
+
+Each group contains up to three summary lines and is followed immediately by its
+matching row of up to three real buttons. Groups are separated by native Discord
+horizontal separators. This retains compact three-item groups without pretending
+that proportional text can form a real three-column table.
+
+With every section selected, tile order is:
+1. Wallet, Mines, Production
+2. Market, Nation, Missions
+3. Craft, Stocks, VIP
+
+The current phone appearance of commit 7ff6770 is still awaiting a new screenshot.
+The screenshot that triggered it showed the older dot-column layout from 60ea641.
+Do not call the broad UI goal complete until 7ff6770 or a later design is checked
+on the owner's phone.
+
+Overview compatibility details:
+- image_options() remains as a compatibility hook and clears obsolete attachments.
+- Overview is native text only; it performs no Pillow rendering.
+- assets/fonts/Overview.ttf and its licence remain in the repository but are unused.
+- test_overview_image.py has a historical filename but now tests text-only output.
+- Saved Customize selections, ownership checks and live-state reads must remain.
+- Opening, refreshing or navigating the Overview must never settle an asset action.
+
+CURRENT PLAYER EXPERIENCE
+=========================
+- Main Menu: Profile, Economy, Warfront (optional) and Missions. Help and Close
+  appear only at the bottom of this menu.
+- Economy Centre groups Finance, Earn, Market and Casino-related destinations.
+- My Overview shows the current goal, next upgrade and selected live summaries.
+- Workshop shows recipe count/readiness, a recipe selector and a direct recommended
+  recipe. It uses one Back/Menu/Close navigation row.
+- Economy journey: mined materials can lead to a matching recipe, crafting can lead
+  to system sale, and completed products can lead to valid use/sale actions.
+- Resource Pack is the beginner civilian product. It uses the existing item/recipe
+  database and must not be made directly purchasable or player-market tradeable.
+- Missing pickaxe, missing materials, insufficient balance/energy, full queue and
+  empty lists should explain the reason and offer a useful next panel.
+- Transaction confirmation must re-check price, balance, inventory, permissions and
+  feature switches. Duplicate clicks must never settle twice.
+
+ADMIN AND DASHBOARD
+===================
+- /admin opens the private X BOT Staff Control Centre in staff_panel.py and
+  staff_sections.py. Routine tools should be available through selectors, forms
+  and confirmation buttons instead of command typing.
+- Discord Admin includes Applications, Tester Reports, Verification, Reward Codes,
+  Economy status and maintenance tools. Economy status is read-only there.
+- Dashboard is the only editor for Economy settings. Keep its existing Flask app,
+  URL, authentication and database. Do not create a second configuration source.
+- Dashboard settings must validate explicitly and save atomically. Log operator,
+  changed setting and before/after value, excluding credentials and tokens.
+- Bot and Dashboard share xwar.db. A successfully saved setting is read on the next
+  relevant Bot action unless its field is explicitly documented as restart-only.
+- Never weaken the existing role or owner permission policy for UI convenience.
+
+IMPORTANT FILES
+===============
+bot.py                         Main Discord Bot, schema bootstrap and registration
+dashboard.py                   Flask Dashboard and the shared xwar.db path
+dashboard_ui.py                Dashboard page shell and styling
+system_ui.py                   Player navigation/presentation integration
+xbot_ui.py                     Shared X SYSTEM UI helpers
+player_overview.py             /overview layout, summaries and navigation
+economy_journey.py             Mine -> Craft -> Sell guidance and recipe journey
+economy_transactions.py        Shared atomic Economy transaction logic
+economy_trade_ui.py            Quantity previews and confirmations
+economy_progress.py            Goal and upgrade guidance
+economy_settings_admin.py      Dashboard Economy validation/settings bridge
+staff_panel.py                 Main Discord Admin panel
+staff_sections.py              Admin secondary pages and forms
+staff_tools.py                 Admin operations and permission checks
+casino.py / svip.py            Casino and membership logic
+tier4.py ... tier8.py          Later Economy, mission, production, stock and war tiers
+phone_start.sh                 Existing Termux supervisor for Bot and Dashboard
+xwar.db                        Production database; never use it for destructive tests
+
+Useful reference documents:
+- BEGINNER_USABILITY_CHECKLIST.md
+- ECONOMY_JOURNEY_NOTES.md
+- PLAYER_ECONOMY_UI_NOTES.md
+- SYSTEM_UI_NOTES.md
+- ADMIN_DASHBOARD_NOTES.md
+- ADMIN_ECONOMY_SETTINGS_MAP.md
+- ADMIN_DASHBOARD_ACCEPTANCE.md
+- OVERVIEW_COMPACT_NOTES.md
+
+Some older notes describe superseded designs. Treat this handoff and the newest
+section of OVERVIEW_COMPACT_NOTES.md as authoritative for the current Overview.
+
+LOCAL DEVELOPMENT AND VERIFICATION
+==================================
+Windows workspace used by the previous maintainer:
+  C:\Users\wongy\X-War-Bot
+
+Use the repository virtual environment:
+  .venv\Scripts\python.exe
+
+The established full regression command is:
+  .venv\Scripts\python.exe -m unittest test_admin_dashboard test_staff_tools test_tier6 test_tier7 test_tier8 test_economy_journey test_economy_transactions test_svip test_player_overview test_overview_image -q
+
+At commit 7ff6770 this suite passed 109 tests. Known DeprecationWarning messages
+from discord.py do not currently fail the suite. Import order above matters because
+some Dashboard fixtures and module caches are shared.
+
+Before committing:
+1. Use temporary SQLite databases and independent connections for transaction tests.
+2. Run the targeted tests for the changed feature.
+3. Run the full 109-test command above.
+4. Run git diff --check and inspect git status/diff.
+5. Preserve unrelated owner changes in a dirty worktree.
+6. Commit only the intended files, push main, and report the commit hash.
+
+PHONE DEPLOYMENT
+================
+On the existing Termux checkout:
+  git pull --ff-only
+
+Then restart the existing supervised Bot process. Do not launch another Bot token
+session. Old Discord messages do not automatically change; open a fresh /overview,
+/menu, /economy or /admin panel after restart.
+
+phone_start.sh supervises both python -u dashboard.py and python -u bot.py and writes
+logs under logs/. Do not print or commit .env contents. Required secrets include
+DISCORD_TOKEN and DASHBOARD_PASSWORD; Dashboard OAuth variables are optional only
+where the current code already treats them as optional.
+
+NEXT WORK IN PRIORITY ORDER
+===========================
+1. Obtain and review a fresh phone screenshot of /overview after commit 7ff6770.
+   Check wrapping, information density and whether each three-button row clearly
+   corresponds to the three summary lines above it.
+2. If the summary lines wrap, shorten labels/status values before adding styling.
+   Do not try another space-aligned table. Keep exact totals in destination panels.
+3. Run a fresh-player end-to-end temporary-database/UI test:
+   Main Menu -> Economy -> Mine -> matching recipe -> confirm Craft -> confirm Sell.
+   Verify every Back route and confirm no screen performs a transaction automatically.
+4. Review cooldown, locked, empty and error states across player secondary panels.
+   Every state should state the reason and offer at least one useful next action.
+5. Continue actual phone screenshot acceptance for Main Menu, Workshop/missing
+   materials, quantity preview, transaction result and Admin secondary pages.
+6. Only after those checks, update BEGINNER_USABILITY_CHECKLIST.md and decide whether
+   the broad new-player usability goal is complete.
+
+SAFE CHANGE PRINCIPLES
+======================
+- Prefer a small shared renderer/service change over duplicating logic in panels.
+- Discord component limits and total text limits must be tested for every page.
+- Defer interactions before phone-sensitive database or rendering work.
+- Re-read live state after transactions and when returning to a previous page.
+- Preserve selected recipe/item/company, quantity, page and real Back destination.
+- Never silently clamp invalid Dashboard data; reject it with an English error.
+- Never infer permission for a balance/VIP/war rule change from a UI request.
+- If a change would alter paid rights, permission policy or game balance, stop and
+  ask the owner in Chinese before implementation.
+
+END OF HANDOFF NOTE
