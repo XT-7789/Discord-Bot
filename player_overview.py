@@ -29,7 +29,7 @@ def tile_text(tiles):
         value=str(value)[:12]
         padded=value+'\u2007'*(12-len(value))
         return f'**{value}**'+'\u2007'*(12-len(value)) if bold else padded
-    return '\n'.join('\u2003'.join(cell(tile[row].upper() if row==0 else tile[row],row==0) for tile in tiles).rstrip('\u2007') for row in range(3))
+    return '\n'.join('\u2003'.join(cell(tile[row].upper() if row==0 else tile[row],row<2) for tile in tiles).rstrip('\u2007') for row in range(3))
 
 def layout(db,uid):
     row=db.execute("SELECT detail FROM economy_logs WHERE user_id=? AND action='overview_layout' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
@@ -81,6 +81,7 @@ class OverviewView(discord.ui.LayoutView):
                 if tiles:
                     self.box.add_item(discord.ui.Separator())
                     for start in range(0,len(tiles),3):
+                        if start:self.box.add_item(discord.ui.Separator())
                         group=tiles[start:start+3]
                         self.text(tile_text(group))
                         self.row(*[(tile[3],('nav',tile[4])) for tile in group])
@@ -110,13 +111,13 @@ class OverviewView(discord.ui.LayoutView):
         if 'production' in self.selected:
             state=journey.activity(db,uid)
             result.append(('Production','Ready '+n(state['ready']),'Queue '+n(state['active'])+'/'+n(svip.production_limit(db,uid)),'Production','production'))
-            extra.append(('Craft','Products '+n(state['products']),'View recipes','Craft','craft'))
+            extra.append(('Craft','Products '+n(state['products']),'Ready to sell' if state['products'] else 'No products','Craft','craft'))
         if 'market' in self.selected:
             cutoff=int(time.time())-max(1,svip.setting(db,'tier6_market_expiry_days',7))*86400
             count=db.execute('SELECT COUNT(*) FROM market_listings WHERE seller_id=? AND active=1 AND quantity>0 AND created_at>?',(uid,cutoff)).fetchone()[0]
             shares=db.execute('SELECT COALESCE(SUM(quantity),0) FROM tier6_stock_holdings WHERE user_id=?',(uid,)).fetchone()[0]
             result.append(('Market','Listings '+n(count),'Limit '+n(svip.market_limit(db,uid)),'My Listings','market_mine'))
-            extra.append(('Stocks','Shares '+n(shares),'Virtual only','Stocks','stock'))
+            extra.append(('Stocks','Shares '+n(shares),'Virtual market','Stocks','stock'))
         if 'nation' in self.selected:
             cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(uid,)).fetchone()[0]
             result.append(('Nation','Cities '+n(cities),n(p['money'])+' WC','Warfront','war'))
@@ -128,7 +129,7 @@ class OverviewView(discord.ui.LayoutView):
         if 'vip' in self.selected:
             paid=db.execute('SELECT expires_at FROM casino_vip_members WHERE user_id=?',(uid,)).fetchone()
             status='SVIP active' if svip.summary(db,uid) else 'VIP active' if paid and paid[0]>int(time.time()) else 'Check status'
-            extra.append(('VIP',status,'View perks','VIP Status','vip'))
+            extra.append(('VIP',status,'Perks active' if status!='Check status' else 'Open status','VIP Status','vip'))
         return result+extra
 
     def section(self,key,p):

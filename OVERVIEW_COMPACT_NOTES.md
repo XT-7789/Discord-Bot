@@ -22,6 +22,8 @@ This supersedes the earlier four-sections-per-page overview layout.
 ## Readability polish
 
 - Bold uppercase tile headings and preserved whitespace separate the columns without code backgrounds, copy icons or divider noise.
+- Primary values are bold, supporting values stay lighter, and each group has a native separator so rows do not visually run together.
+- Craft and VIP supporting lines now report useful state rather than repeating button instructions.
 - Upgrade name and affordability/level status now use two separate lines instead of a long paragraph. Budget readiness does not imply the mining level requirement is met.
 - Saved-layout notice uses subdued text. One primary Continue action remains; shortcuts stay neutral.
 - Button widths are controlled by Discord, but their order exactly follows the text columns.

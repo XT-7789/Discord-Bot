@@ -106,12 +106,13 @@ class OverviewTests(unittest.TestCase):
                         self.assertNotIn('```',grid.content)
                         self.assertNotIn('|',grid.content)
                         self.assertTrue(grid.content.splitlines()[0].startswith('**'))
+                        self.assertTrue(grid.content.splitlines()[1].startswith('**'))
                         self.assertIsInstance(children[children.index(grid)+1],discord.ui.ActionRow)
                     if len(keys)==7:
                         self.assertEqual(9,len(tiles))
                         self.assertEqual(['Wallet','Mines','Production'],[t[0] for t in tiles[:3]])
                     self.assertNotIn('Help',[getattr(x,'label',None) for x in view.walk_children()])
-                    self.assertLessEqual(len([x for x in view.walk_children() if isinstance(x,discord.ui.Separator)]),2)
+                    self.assertLessEqual(len([x for x in view.walk_children() if isinstance(x,discord.ui.Separator)]),3)
             self.assertEqual(1000,self.balance())
         asyncio.run(run())
 
