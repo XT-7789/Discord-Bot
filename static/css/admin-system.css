@@ -344,7 +344,6 @@ main#main-content {
   margin-left: var(--nav-width);
   padding: 36px 36px 64px;
   min-height: calc(100vh - var(--header-height));
-  max-width: 1440px;
 }
 
 .page-heading {
