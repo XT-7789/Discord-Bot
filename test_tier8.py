@@ -435,6 +435,9 @@ class ResearchTests(unittest.TestCase):
                         await next(x for x in preview.walk_children() if getattr(x,'label','').startswith('Play ·')).callback(i)
                     self.assertEqual(before-25,self.balance())
                     result=i.response.edit_message.call_args.kwargs['view']
+                    await next(x for x in preview.walk_children() if getattr(x,'label','').startswith('Play ·')).callback(i)
+                    self.assertEqual(before-25,self.balance())
+                    self.assertIn('already been used', i.response.send_message.call_args.args[0])
                     rendered=str(result.to_components())
                     for expected in ('Net result: **-25 XC**','Change Bet','Back to Casino','Menu'):
                         self.assertIn(expected,rendered)

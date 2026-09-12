@@ -398,6 +398,8 @@ def register_commands(bot, db, create_player) -> None:
             panel=self.panel
             if interaction.user.id!=panel.owner_id:
                 await interaction.response.send_message('Open /casino for your own game.',ephemeral=True);return
+            if panel.consumed:
+                await interaction.response.send_message('This confirmation has already been used. Open a new round.',ephemeral=True);return
             current_summary,current_cost=preview_text(panel.game,panel.args,panel.owner_id)
             if game_fingerprint(panel.game)!=panel.fingerprint or (current_summary,current_cost)!=(panel.summary,panel.cost):
                 await interaction.response.edit_message(view=CasinoConfirmView(panel.owner_id,panel.game,panel.command,panel.args,panel.previous_bet,notice='Game settings changed. Review the updated cost and confirm again.'))
@@ -410,6 +412,7 @@ def register_commands(bot, db, create_player) -> None:
             if info['remaining']:
                 await interaction.response.edit_message(view=CasinoBlockedView(panel,cooldown_text(db,interaction.user,panel.game)))
                 return
+            panel.consumed=True
             _replay_game_names[interaction.id]=panel.game
             try:
                 await panel.command.callback(interaction,*panel.args)
@@ -429,6 +432,7 @@ def register_commands(bot, db, create_player) -> None:
         def __init__(self,owner_id,game,command,args,previous_bet=None,notice=''):
             super().__init__(timeout=300)
             self.owner_id,self.game,self.command,self.args=owner_id,game,command,args
+            self.consumed=False
             self.previous_bet=previous_bet
             self.fingerprint=game_fingerprint(game)
             summary,self.cost=preview_text(game,args,owner_id)
@@ -508,7 +512,7 @@ def register_commands(bot, db, create_player) -> None:
                 "keno": ("Five numbers", "For example: 1 3 5 7 9", "1 3 5 7 9"),
                 "tower": ("Floors (1–6)", "For example: 3", "3"),
                 "highlow": ("Choice", "higher or lower", "higher"),
-                "balloonpop": ("Balloon colour", "red, blue, green, or gold", "red"),
+                "balloonpop": ("Balloon colour", "red, blue, or gold", "red"),
             }
             self.detail = None
             if game in details:
@@ -535,7 +539,7 @@ def register_commands(bot, db, create_player) -> None:
                         "coinflip": {"heads", "tails"},
                         "roulette": {"red", "black", "green"},
                         "highlow": {"higher", "lower"},
-                        "balloonpop": {"red", "blue", "green", "gold"},
+                        "balloonpop": {"red", "blue", "gold"},
                     }[self.game]
                     if detail not in allowed:
                         raise ValueError(f"Choose one of: {', '.join(sorted(allowed))}.")
@@ -553,6 +557,17 @@ def register_commands(bot, db, create_player) -> None:
                     args = (primary,)
                 else:
                     args = (primary,)
+                ranges = {"dice": (1, 6), "mines": (1, 5), "tower": (1, 6), "crash": (1.1, 5.0)}
+                if self.game in ranges:
+                    low, high = ranges[self.game]
+                    if not low <= args[1] <= high:
+                        raise ValueError(f'Choose a value from {low} to {high}.')
+                if self.game == 'lottery' and not 1 <= primary <= 100:
+                    raise ValueError('Choose 1 to 100 tickets.')
+                if self.game == 'keno':
+                    numbers = [int(n) for n in detail.replace(',', ' ').split()]
+                    if len(numbers) != 5 or len(set(numbers)) != 5 or not all(1 <= n <= 10 for n in numbers):
+                        raise ValueError('Choose five different numbers from 1 to 10.')
             except ValueError as error:
                 await interaction.response.send_message(view=xbot_ui.danger("Invalid Game Choice", str(error)), ephemeral=True)
                 return

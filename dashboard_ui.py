@@ -46,7 +46,7 @@ def header(source):
         endpoint = match[1] if match else ''
         group = next((name for name, endpoints in GROUPS.items() if endpoint in endpoints), 'Administration')
         buckets[group].append(link)
-    navigation = '<nav id="dashboard-nav" aria-label="Administration navigation">' + ''.join(
+    navigation = '<nav id="dashboard-nav" aria-label="Administration navigation"><div class="nav-brand">X<span>CONTROL</span></div><label class="nav-search">Find a page<input type="search" id="page-search" placeholder="Search pages…" autocomplete="off"></label><p id="page-search-empty" hidden>No matching pages.</p>' + ''.join(
         f'<section class="nav-group"><h2>{name}</h2>{"".join(items)}</section>' for name, items in buckets.items())
     result = source[:start] + navigation + source[end:]
     result = result.replace('⚔️ X BOT Admin', 'X SYSTEM')
@@ -54,7 +54,9 @@ def header(source):
     result = result.replace('</head>', '''<link rel="stylesheet" href="{{url_for('static',filename='admin-system.css')}}">
         <script id="setting-metadata" type="application/json">{{setting_metadata|tojson}}</script>
         <script defer src="{{url_for('static',filename='admin-system.js')}}"></script></head>''')
-    result = result.replace('<main>', '<main><div class="page-heading"><span>ADMINISTRATION</span><h1>{{title}}</h1></div>')
+    result = result.replace('<main>', '''<main id="main-content"><div class="page-heading"><div><span>X SYSTEM / CONTROL CENTRE</span><h1>{{title}}</h1><p>Manage your community, games and economy.</p></div><a class="btn secondary" href="{{url_for('home')}}">Overview</a></div><nav class="page-index" aria-label="On this page"></nav>''')
+    result = result.replace("filename='admin-system.css'", "filename='admin-system.css',v='play-dashboard-2'")
+    result = result.replace("filename='admin-system.js'", "filename='admin-system.js',v='play-dashboard-2'")
     result = result.replace('messages=get_flashed_messages()', 'messages=get_flashed_messages(with_categories=true)')
     result = result.replace('for message in messages', 'for category,message in messages')
     result = result.replace('<div class="flash">', '<div role="status" class="flash {{category}}">')

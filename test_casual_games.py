@@ -108,6 +108,23 @@ class CasualGameTests(unittest.TestCase):
             settings_admin.save(self.db, {"memory_daily_reward_games": "11", "memory_daily_xc_limit": "30"}, settings_admin.FREE_GAME_KEYS, actor, "casino_control")
         self.assertEqual(40, games.setting(self.db, "memory_daily_xc_limit"))
 
+    def test_best_score_keeps_lowest_attempts(self):
+        self.complete()
+        self.db.execute('UPDATE casual_game_progress SET memory_best=8 WHERE user_id=?', (self.uid,))
+        self.db.commit()
+        self.complete(1700000001)
+        self.assertEqual(3, self.db.execute('SELECT memory_best FROM casual_game_progress WHERE user_id=?', (self.uid,)).fetchone()[0])
+        self.complete(1700000002)
+        self.assertEqual(3, self.db.execute('SELECT memory_best FROM casual_game_progress WHERE user_id=?', (self.uid,)).fetchone()[0])
+
+    def test_continue_cannot_revive_expired_mismatch(self):
+        row = games.start_memory(self.db, self.uid, 1000, BOARD)
+        for pick in (0, 1):
+            row = games.flip_memory(self.db, self.uid, row['id'], pick, row['version'], 1001)['session']
+        with self.assertRaises(ValueError):
+            games.continue_memory(self.db, self.uid, row['id'], row['version'], 1001 + games.SESSION_TTL)
+        self.assertEqual(0, self.db.execute('SELECT COUNT(*) FROM casual_game_completions').fetchone()[0])
+
 
 if __name__ == "__main__":
     unittest.main()

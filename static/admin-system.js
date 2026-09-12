@@ -1,6 +1,35 @@
 (() => {
   const nav = document.getElementById('dashboard-nav');
   const toggle = document.getElementById('mobile-menu');
+  const search = document.getElementById('page-search');
+  search?.addEventListener('input', () => {
+    let matches = 0;
+    for (const group of nav.querySelectorAll('.nav-group')) {
+      let visible = 0;
+      for (const link of group.querySelectorAll('a')) {
+        link.hidden = !link.textContent.toLowerCase().includes(search.value.trim().toLowerCase());
+        if (!link.hidden) visible++;
+      }
+      group.hidden = visible === 0;
+      matches += visible;
+    }
+    document.getElementById('page-search-empty').hidden = matches > 0;
+  });
+  const index = document.querySelector('.page-index');
+  document.querySelectorAll('main .panel > h2').forEach((heading, n) => {
+    heading.id ||= `panel-section-${n}`;
+    if (index) {
+      const link = document.createElement('a');
+      link.href = `#${heading.id}`; link.textContent = heading.textContent;
+      index.append(link);
+    }
+  });
+  for (const table of document.querySelectorAll('main table')) {
+    const wrapper = document.createElement('div'); wrapper.className = 'table-scroll';
+    wrapper.tabIndex = 0; wrapper.setAttribute('role','region');
+    wrapper.setAttribute('aria-label','Scrollable data table');
+    table.before(wrapper); wrapper.append(table);
+  }
   for (const link of nav?.querySelectorAll('a[href]') || []) {
     if (new URL(link.href).pathname === location.pathname) {
       link.classList.add('active'); link.setAttribute('aria-current','page');

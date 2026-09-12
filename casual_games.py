@@ -182,7 +182,7 @@ def _complete(db, row, now):
         VALUES(?,?,?,?,?,?,?)""", (row["id"], row["user_id"], "memory", day, row["attempts"], reward, now))
     db.execute("INSERT OR IGNORE INTO casual_game_progress(user_id) VALUES(?)", (row["user_id"],))
     db.execute("""UPDATE casual_game_progress SET memory_completed=memory_completed+1,
-        memory_best=CASE WHEN memory_best=0 OR ?>memory_best THEN ? ELSE memory_best END WHERE user_id=?""",
+        memory_best=CASE WHEN memory_best=0 OR ?<memory_best THEN ? ELSE memory_best END WHERE user_id=?""",
         (row["attempts"], row["attempts"], row["user_id"]))
     progress = db.execute("SELECT * FROM casual_game_progress WHERE user_id=?", (row["user_id"],)).fetchone()
     unlocked = _unlock(db, row["user_id"], row["attempts"], progress["memory_completed"], now)
@@ -246,6 +246,8 @@ def continue_memory(db, user_id, session_id, expected_version, now=None):
         row = db.execute("SELECT * FROM casual_game_sessions WHERE id=? AND user_id=? AND status='active'", (session_id, user_id)).fetchone()
         if not row or row["version"] != expected_version:
             raise ValueError("The board changed. Refresh the game.")
+        if row["updated_at"] + SESSION_TTL <= now:
+            raise ValueError("This game expired. Start a new game from Play.")
         if row["second_pick"] is None:
             raise ValueError("There are no cards to hide.")
         db.execute("UPDATE casual_game_sessions SET first_pick=NULL,second_pick=NULL,version=version+1,updated_at=? WHERE id=?", (now, session_id))
@@ -327,7 +329,11 @@ class PlayHubView(discord.ui.LayoutView):
     async def act(self, interaction, action):
         await interaction.response.defer()
         if action[0] == "memory":
-            row = active_session(self.db, self.owner) or start_memory(self.db, self.owner)
+            try:
+                row = active_session(self.db, self.owner) or start_memory(self.db, self.owner)
+            except (ValueError, sqlite3.Error) as error:
+                await interaction.followup.send(str(error) if isinstance(error, ValueError) else 'Games are busy. Please try again.', ephemeral=True)
+                return
             view = MemoryView(self.bot, self.db, self.owner, row["id"])
         elif action[0] == "collection":
             view = CollectionView(self.bot, self.db, self.owner)
@@ -358,6 +364,9 @@ class MemoryView(discord.ui.LayoutView):
             box.add_item(discord.ui.TextDisplay(f"-# ✦ X SYSTEM / PLAY\n## ✅ MEMORY COMPLETE\nAttempts **{row['attempts']}** · {reward_line}{unlock_line}"))
             box.add_item(discord.ui.ActionRow(CasualButton(self, "Play Again", ("restart",), discord.ButtonStyle.success), CasualButton(self, "Games", ("games",)), CasualButton(self, "Collection", ("collection",))))
             box.add_item(discord.ui.ActionRow(CasualButton(self, "Menu", ("menu",)), CasualButton(self, "Close", ("close",))))
+        elif row["status"] != "active" or row["updated_at"] + SESSION_TTL <= int(time.time()):
+            box.add_item(discord.ui.TextDisplay("## MEMORY MATCH\nThis game has ended. Open Games to start again."))
+            box.add_item(discord.ui.ActionRow(CasualButton(self, "Games", ("games",)), CasualButton(self, "Menu", ("menu",))))
         else:
             board, matched = json.loads(row["board"]), set(json.loads(row["matched"]))
             status = reward_status(db, owner)
@@ -463,13 +472,21 @@ class CollectionView(discord.ui.LayoutView):
         box.add_item(discord.ui.TextDisplay("\n\n".join(lines)))
         if data["unlocked"]:
             box.add_item(discord.ui.ActionRow(TitleSelect(self, data)))
-        box.add_item(discord.ui.ActionRow(CasualButton(self, "Play Memory", ("memory",), discord.ButtonStyle.success), CasualButton(self, "Profile", ("profile",)), CasualButton(self, "Menu", ("menu",))))
+        box.add_item(discord.ui.ActionRow(CasualButton(self, "Play Memory", ("memory",), discord.ButtonStyle.success, disabled=not setting(db, 'free_games_enabled')), CasualButton(self, "Profile", ("profile",))))
+        box.add_item(discord.ui.ActionRow(CasualButton(self, "Games", ("play",)), CasualButton(self, "Menu", ("menu",)), CasualButton(self, "Close", ("close",))))
         self.add_item(box)
 
     async def act(self, interaction, action):
         await interaction.response.defer()
+        if action[0] == 'close':
+            await interaction.edit_original_response(content='Panel closed.', view=None, attachments=[])
+            return
         if action[0] == "memory":
-            row = active_session(self.db, self.owner) or start_memory(self.db, self.owner)
+            try:
+                row = active_session(self.db, self.owner) or start_memory(self.db, self.owner)
+            except (ValueError, sqlite3.Error) as error:
+                await interaction.followup.send(str(error) if isinstance(error, ValueError) else 'Games are busy. Please try again.', ephemeral=True)
+                return
             view = MemoryView(self.bot, self.db, self.owner, row["id"])
         else:
             view = _page(self.bot, self.owner, action[0], interaction.user)
