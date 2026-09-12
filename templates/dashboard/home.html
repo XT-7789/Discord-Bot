@@ -7,56 +7,102 @@
 </section>
 
 <div class="grid stats-grid">
-  {{ comps.stat_card('Nations', s['nations']) }}
-  {{ comps.stat_card('Wallet XC', s['xc']) }}
-  {{ comps.stat_card('Bank XC', s['bank_xc']) }}
-  {{ comps.stat_card('War Credits', s['war_credits']) }}
-  {{ comps.stat_card('XCrystals', s['crystals']) }}
-  {{ comps.stat_card('Military Power', s['power']) }}
-  {{ comps.stat_card('Active Items / Jobs', s['items'] ~ ' / ' ~ s['jobs']) }}
-  {{ comps.stat_card('Market Listings', s['listings']) }}
-  {{ comps.stat_card('Battles Recorded', s['battles']) }}
+  {{ comps.stat_card_icon('🌍', 'Nations', s['nations'], 'cyan') }}
+  {{ comps.stat_card_icon('💰', 'Wallet XC', s['xc'], 'gold') }}
+  {{ comps.stat_card_icon('🏦', 'Bank XC', s['bank_xc'], 'purple') }}
+  {{ comps.stat_card_icon('⚔️', 'War Credits', s['war_credits'], 'red') }}
+  {{ comps.stat_card_icon('💎', 'XCrystals', s['crystals'], 'cyan') }}
+  {{ comps.stat_card_icon('🛡️', 'Military Power', s['power'], 'gold') }}
+  {{ comps.stat_card_icon('📦', 'Active Items / Jobs', s['items'] ~ ' / ' ~ s['jobs'], 'green') }}
+  {{ comps.stat_card_icon('🏪', 'Market Listings', s['listings'], 'purple') }}
+  {{ comps.stat_card_icon('⚡', 'Battles Recorded', s['battles'], 'red') }}
+</div>
+
+<div class="dashboard-two-col">
+  <!-- Left column: System Control -->
+  <section class="panel">
+    <h2>🩺 System Control Center</h2>
+    <div class="pad">
+      <div class="notice">Live settings are read directly from X BOT's database. Click a system to configure it.</div>
+      <div class="systems-compact">
+        {% for system in systems %}
+          <a class="system-tag {{ 'on' if system['enabled'] else 'off' }}" href="{{ url_for(system['endpoint']) }}">
+            <span class="system-dot"></span>
+            {{ system['label'] }}
+          </a>
+        {% endfor %}
+      </div>
+      <div class="grid" style="padding:16px 0 0;">
+        {{ comps.simple_card('Unused / Deletable Items', unused_items, url_for('items')) }}
+        {{ comps.simple_card('Disabled Items', disabled_items, url_for('items')) }}
+        {{ comps.simple_card('Pending Applications', pending_applications, url_for('applications_control')) }}
+      </div>
+    </div>
+  </section>
+
+  <!-- Right column: Top Players -->
+  <section class="panel">
+    <h2>🏆 Top Players</h2>
+    <div class="pad">
+      {% if top_players %}
+        <div class="leaderboard-list">
+          {% for p in top_players %}
+            <div class="leader-row">
+              <span class="leader-rank {% if loop.index == 1 %}gold{% elif loop.index == 2 %}silver{% elif loop.index == 3 %}bronze{% endif %}">
+                {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}#{{ loop.index }}{% endif %}
+              </span>
+              <div class="leader-info">
+                <strong>{{ p['display_name'] or p['user_id'] }}</strong>
+                <span class="muted">Level {{ p['level'] }} · {{ p['total_xp']|int }} XP</span>
+              </div>
+              <div class="leader-xp-bar">
+                <div class="leader-xp-fill" style="width: {{ [(p['total_xp'] / (top_players[0]['total_xp'] or 1) * 100)|int, 5]|max }}%"></div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No XP activity yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<div class="dashboard-two-col">
+  <!-- Left: War Status -->
+  <section class="panel">
+    <h2>⚔️ Alliance War Status</h2>
+    <div class="pad">
+      {% if war %}
+        <div class="war-status-active">
+          <span class="bad pulse">● ACTIVE WAR</span>
+          <h3>[{{ war['attacker_tag'] }}] {{ war['attacker_name'] }} <span class="vs">vs</span> [{{ war['defender_tag'] }}] {{ war['defender_name'] }}</h3>
+        </div>
+      {% else %}
+        <div class="war-status-peace">
+          <span class="ok">● No active Alliance War</span>
+          <p class="muted">All alliances are at peace.</p>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Right: Quick Actions -->
+  <section class="panel">
+    <h2>🚀 Quick Actions</h2>
+    <div class="pad">
+      <div class="quick-actions">
+        <a class="quick-btn" href="{{ url_for('players') }}">👤 Search Players</a>
+        <a class="quick-btn" href="{{ url_for('logs') }}">📋 View Logs</a>
+        <a class="quick-btn" href="{{ url_for('items') }}">📦 Manage Items</a>
+        <a class="quick-btn" href="{{ url_for('war_control') }}">⚔️ War Control</a>
+      </div>
+    </div>
+  </section>
 </div>
 
 <section class="panel">
-  <h2>🩺 System Control Center</h2>
-  <div class="pad">
-    <div class="notice">Live settings are read directly from X BOT's database. Click a system to configure it.</div>
-    <div class="grid">
-      {% for system in systems %}
-        {{ comps.system_card(system) }}
-      {% endfor %}
-    </div>
-    <div class="grid">
-      {{ comps.simple_card('Unused / Deletable Items', unused_items, url_for('items')) }}
-      {{ comps.simple_card('Disabled Items', disabled_items, url_for('items')) }}
-      {{ comps.simple_card('Pending Applications', pending_applications, url_for('applications_control')) }}
-    </div>
-  </div>
-</section>
-
-<!-- Top Players Leaderboard -->
-<section class="panel">
-  <h2>🏆 Top Players</h2>
-  <div class="pad">
-    {{ comps.leaderboard(top_players) }}
-  </div>
-</section>
-
-<section class="panel">
-  <h2>Alliance War Status</h2>
-  <div class="pad">
-    {% if war %}
-      <span class="bad">ACTIVE WAR</span>
-      <h3>[{{ war['attacker_tag'] }}] {{ war['attacker_name'] }} vs [{{ war['defender_tag'] }}] {{ war['defender_name'] }}</h3>
-    {% else %}
-      <span class="ok">No active Alliance War</span>
-    {% endif %}
-  </div>
-</section>
-
-<section class="panel">
-  <h2>Recent Economy Activity</h2>
+  <h2>📊 Recent Economy Activity</h2>
   <div class="pad table-scroll">
     <table>
       <tr><th>User ID</th><th>Action</th><th>Detail</th></tr>

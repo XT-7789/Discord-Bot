@@ -14,6 +14,16 @@
   </div>
 {% endmacro %}
 
+{% macro stat_card_icon(icon, label, value, color) %}
+  <div class="card stat-{{ color }}">
+    <div class="card-top">
+      <small>{{ label }}</small>
+      <span class="card-icon">{{ icon }}</span>
+    </div>
+    <strong>{{ value }}</strong>
+  </div>
+{% endmacro %}
+
 {% macro system_card(system) %}
   <a class="card" href="{{ url_for(system['endpoint']) }}" style="text-decoration:none">
     <small>{{ system['label'] }}</small>
@@ -27,6 +37,7 @@
     <strong>{{ value }}</strong>
   </a>
 {% endmacro %}
+
 {% macro leaderboard(players) %}
   <div class="leaderboard">
     <ol>
