@@ -177,25 +177,25 @@ class ResearchTests(unittest.TestCase):
                         self.assertLessEqual(panel.total_children_count,40)
                         self.assertTrue(panel.to_components())
                     main_buttons=[x for x in panels[0].walk_children() if isinstance(x,discord.ui.Button)]
-                    self.assertTrue({'profile','economy','war','missions','help','close','overview'} <= {getattr(x,'key',None) for x in main_buttons})
+                    self.assertTrue({'play','profile','economy','war','missions','help','close','overview'} <= {getattr(x,'key',None) for x in main_buttons})
                     self.assertIn('MAIN MENU',str(panels[0].to_components()))
                     menu_text=str(panels[0].to_components())
-                    self.assertIn('War and Casino are optional',menu_text)
+                    self.assertIn('Start with a free game',menu_text)
                     self.assertIn('Separate from XC',menu_text)
                     menu_keys=[getattr(x,'key',None) for x in panels[0].walk_children()]
-                    for destination in ('profile','economy','war','missions','overview'):
+                    for destination in ('play','profile','economy','war','missions','overview'):
                         self.assertIn(destination,menu_keys)
                     for destination in ('finance','casino','city','army'):
                         self.assertNotIn(destination,menu_keys)
                     menu_content=str(panels[0].to_components())
-                    for heading in ('Profile','Economy','Warfront','Missions'):
+                    for heading in ('Play','Profile','Economy','Warfront','Missions'):
                         self.assertIn(heading,menu_content)
-                    self.assertEqual(4,sum(isinstance(x,discord.ui.Separator) for x in panels[0].walk_children()))
+                    self.assertEqual(5,sum(isinstance(x,discord.ui.Separator) for x in panels[0].walk_children()))
                     self.assertFalse(any(getattr(x,'action',None) in {'deposit','withdraw'} for x in main_buttons))
                     for button in main_buttons:
                         if getattr(button,'action',None) in {'deposit','withdraw'}:
                             self.assertEqual(discord.ButtonStyle.secondary,button.style)
-                        if getattr(button,'key',None) in {'profile','economy','war','missions'} and button.label not in {'Continue','View Rewards'}:
+                        if getattr(button,'key',None) in {'play','profile','economy','missions'} and button.label not in {'Continue','View Rewards'}:
                             self.assertEqual(discord.ButtonStyle.primary,button.style)
                         if button.label in {'Continue','View Rewards'}:
                             self.assertEqual(discord.ButtonStyle.success,button.style)
@@ -327,16 +327,9 @@ class ResearchTests(unittest.TestCase):
                         answer=i.edit_original_response.call_args.kwargs['view']
                         self.assertIn('Open Panel',str(answer.to_components()))
                         self.assertLessEqual(answer.total_children_count,40)
-                    visual=next(x for x in help_view.walk_children() if getattr(x,'key',None)=='help_map')
-                    await visual.callback(i)
-                    self.assertEqual(1,len(i.edit_original_response.call_args.kwargs['attachments']))
-                    self.assertIn('attachment://navigation-guide.png',str(i.edit_original_response.call_args.kwargs['view'].to_components()))
-                    i.edit_original_response.call_args.kwargs['attachments'][0].close()
+                    self.assertFalse(any(getattr(x,'key',None)=='help_map' for x in help_view.walk_children()))
                     await next(x for x in main_buttons if getattr(x,'key',None)=='help').callback(i)
                     self.assertEqual([],i.edit_original_response.call_args.kwargs['attachments'])
-                    with patch.object(system_ui,'GUIDE_IMAGE',Path(self.tmp.name)/'missing.png'):
-                        fallback=bot.xbot_system_page_builder(self.uid,'help_map')
-                        self.assertIn('directions remain available',str(fallback.to_components()))
                     for name in ('lobby','research'):
                         command=bot.tree.get_command(name,guild=guild)
                         self.assertIsNotNone(command)
@@ -434,8 +427,12 @@ class ResearchTests(unittest.TestCase):
                     modal.primary._value='25'
                     modal.detail._value='1'
                     before=self.balance()
+                    await modal.on_submit(i)
+                    self.assertEqual(before,self.balance())
+                    preview=i.response.edit_message.call_args.kwargs['view']
+                    self.assertIn('Nothing is charged until you confirm',str(preview.to_components()))
                     with patch.object(casino.random,'randint',return_value=2):
-                        await modal.on_submit(i)
+                        await next(x for x in preview.walk_children() if getattr(x,'label','').startswith('Play ·')).callback(i)
                     self.assertEqual(before-25,self.balance())
                     result=i.response.edit_message.call_args.kwargs['view']
                     rendered=str(result.to_components())
@@ -444,6 +441,7 @@ class ResearchTests(unittest.TestCase):
                     replay=next(x for x in result.walk_children() if getattr(x,'label','').startswith('Play Again'))
                     await replay.callback(i)
                     self.assertEqual(before-25,self.balance())
+                    self.assertIn('Nothing is charged until you confirm',str(i.response.edit_message.call_args.kwargs['view'].to_components()))
                     self.assertNotIn(i.id,casino._replay_game_names)
                     back=next(x for x in result.walk_children() if getattr(x,'label',None)=='Back to Casino')
                     outsider=SimpleNamespace(user=SimpleNamespace(id=123),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
@@ -475,7 +473,9 @@ class ResearchTests(unittest.TestCase):
                     self.assertIn('Next round',str(hand.to_components()))
                     change=next(x for x in hand.walk_children() if getattr(x,'label',None)=='Change Bet')
                     await change.callback(i)
-                    self.assertEqual('25',i.response.send_modal.call_args.args[0].primary.default)
+                    bet_picker=i.response.edit_message.call_args.kwargs['view']
+                    self.assertIn('Selected **25 XC**',str(bet_picker.to_components()))
+                    self.assertIn('Custom',[getattr(x,'label',None) for x in bet_picker.walk_children()])
                     # Invalid late surrender must not refund or settle a live hand.
                     late=type(hand)(self.uid,25,[('2',2,'♥️')]*3,[('10',10,'♠️')]*2)
                     balance=self.balance()

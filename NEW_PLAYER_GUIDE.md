@@ -1,19 +1,21 @@
 # X BOT New Player Guide
 
-X BOT is designed around panels. You only need a few short slash commands; most actions are buttons and menus inside the same Discord message.
+X BOT is designed around panels. Open `/menu`, choose **Play**, and you can begin a free Memory Match in two clicks. Most actions use buttons and menus inside the same Discord message.
 
-The compact X SYSTEM menu has four entries: **Profile, Economy, War and Missions**. Casino is under Economy and remains optional entertainment using fictional XC, not guaranteed income. Choose an existing game, read the bet range and submit one bet. Completed rounds separate total return from net profit/loss. Existing quick slash commands are retained.
+The main entries are **Play, Economy, Profile and Missions**. Warfront remains an optional secondary entry. Play contains free games, Casino and Collection progress. Casino uses fictional XC and can lose the stake; every panel-launched round now has a review step before payment.
 
-Casino includes direct Blackjack, Coinflip and Slots buttons; other games remain in the selector. These buttons open a bet form, not an immediate wager. Change Bet pre-fills the previous stake when it is still within limits. In Blackjack, your cards and the dealer's cards are stacked for mobile readability. Hit takes a card; Stand finishes your hand. Double shows its extra cost, Surrender returns half, and Quit loses the stake.
+Casino includes direct Blackjack, Coinflip and Slots buttons; other games remain in the selector. Blackjack, Coinflip and Slots offer 1×, 2× and 5× minimum-bet buttons plus Custom. Coinflip provides Heads and Tails buttons. The final button states the XC cost before one round begins. In Blackjack, your cards and the dealer's cards are stacked for mobile readability.
+
+Memory Match has six cards and three pairs. It requires no bet. Choose two cards; after a miss, press Continue to hide them. The first three completed games per day share a default 25 XC limit (9, 8 and 8 XC); later games remain available as Practice. The Dashboard may change these values. Completing challenges unlocks cosmetic titles under Profile → Collection.
 
 Casino result panels show your membership tier, effective cooldown and next-round timestamp. SVIP reduces cooldown; it does not normally remove it. With the default 75% reduction, 45 seconds rounds to 11 seconds. VIP and SVIP discounts do not add together: the stronger applicable reduction is used. Game-specific Dashboard settings still apply. The next round always requires a manual click.
 
 ## 1. Start here
 
-Use `/menu`, `/profile`, `/economy` or `/warfront` for direct access. The previous `/lobby` and `/war` names are no longer public shortcuts. **Menu → Help** answers common questions in English and provides an **Open Panel** button for each answer. **Visual Guide** shows a feature map you can tap to enlarge.
+Use `/menu`, `/profile`, `/economy` or `/warfront` for direct access. The previous `/lobby` and `/war` names are no longer public shortcuts. **Menu → Help** answers common questions in English and provides an **Open Panel** button for each answer.
 
-1. Use `/menu` for the four-entry menu. Profile contains personal progress, assets and Backpack.
-2. Open **Economy → Earn → Daily** for your 50 XC reward. **Economy → Mines** opens mining and selling.
+1. Use `/menu` and open **Play → Memory Match** for a free first game.
+2. Open **Economy → Earn → Daily** for your configured Daily reward. **Economy → Mines** opens mining and selling.
 3. Open **War → Cities** to build and upgrade several Cities together.
 4. Open **Missions** and choose Starter, Daily or Weekly to review progress and claim rewards.
 

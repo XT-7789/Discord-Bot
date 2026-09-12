@@ -1,5 +1,14 @@
 # X BOT Maintenance Log
 
+## 2026-09-12 — Casual Play, Memory Match and Collection titles
+
+- Added a Play centre to Main Menu with a persistent six-card Memory Match requiring no bet.
+- Added daily capped Memory rewards, continued Practice play, best-attempt tracking and four cosmetic Collection titles.
+- Added Dashboard Free Games settings and read-only Admin status using the existing Economy settings and audit path.
+- Added Casino review-before-payment panels for panel-launched games. Blackjack, Coinflip and Slots provide mobile bet presets; blocked rounds link to Free Game.
+- Active games expire after 30 minutes. Transaction/version checks and unique completion records prevent duplicate sessions and rewards across connections.
+- Existing Casino odds, VIP/SVIP perks, Economy values and War rules are unchanged. Phone visual acceptance remains pending.
+
 ## 2026-09-09 — Command names and English Help
 
 - Public entry commands are now /menu, /warfront and /profile. Legacy lobby/war callbacks remain internal but are excluded from the public startup sync catalogue.

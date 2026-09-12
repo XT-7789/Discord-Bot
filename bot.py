@@ -28,6 +28,7 @@ import tier6
 import tier7
 import tier8
 import system_ui
+import casual_games
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -136,6 +137,7 @@ tier5.initialise(db)
 tier6.initialise(db)
 tier7.initialise(db)
 tier8.initialise(db)
+casual_games.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -1700,6 +1702,7 @@ async def attack(interaction: discord.Interaction, target: discord.Member):
 # so Discord's command catalogue does not grow.
 tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
 tier8.register_commands(bot, db, create_player)
+casual_games.register(bot, db, create_player)
 system_ui.register(bot, db, create_player)
 
 

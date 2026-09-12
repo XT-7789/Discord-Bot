@@ -302,13 +302,9 @@ def register_commands(bot, db, create_player) -> None:
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message("This Casino result belongs to the player who started it.", ephemeral=True)
                 return
-            # A component interaction has no slash-command name.  Preserve it
-            # so Dashboard game rules and cooldowns apply to the correct game.
-            _replay_game_names[interaction.id] = self.game
-            try:
-                await self.command.callback(interaction, *self.args)
-            finally:
-                _replay_game_names.pop(interaction.id,None)
+            await interaction.response.edit_message(view=CasinoConfirmView(
+                self.owner_id, self.game, self.command, self.args,
+                previous_bet=self.args[1] if self.game == 'balloonpop' else self.args[0]))
 
     async def send_result(interaction, view):
         if interaction.message is not None:
@@ -325,7 +321,22 @@ def register_commands(bot, db, create_player) -> None:
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message('Open /casino for your own game.',ephemeral=True)
                 return
-            await interaction.response.send_modal(CasinoGameModal(self.game,self.stake))
+            if self.game in {'blackjack','coinflip','slot'}:
+                await interaction.response.edit_message(view=CasinoBetView(self.owner_id,self.game,self.stake))
+            else:
+                await interaction.response.send_modal(CasinoGameModal(self.game,self.stake))
+
+    class FreeGameButton(discord.ui.Button):
+        def __init__(self,owner_id):
+            super().__init__(label='Free Game',emoji='🧠',style=discord.ButtonStyle.success)
+            self.owner_id=owner_id
+        async def callback(self,interaction):
+            if interaction.user.id!=self.owner_id:
+                await interaction.response.send_message('Open /menu for your own game.',ephemeral=True);return
+            builder=getattr(bot,'xbot_system_page_builder',None)
+            if not builder:
+                await interaction.response.send_message('Play is loading. Try again shortly.',ephemeral=True);return
+            await interaction.response.edit_message(view=builder(self.owner_id,'play',member=interaction.user))
 
     def casino_result(title: str, body: str, *, won: bool, owner_id: int, game: str, command, args, stake: int, payout: int, member):
         """A coloured end card with a same-bet Next Round button."""
@@ -343,6 +354,7 @@ def register_commands(bot, db, create_player) -> None:
         if game in {'spin','balloonpop'} and args[-1]==0:
             replay.label='Play Again · Use Item'
         container.add_item(discord.ui.ActionRow(replay,ChangeBetButton(owner_id,game,stake),CasinoHubBackButton(owner_id),CasinoLobbyButton(owner_id)))
+        container.add_item(discord.ui.ActionRow(FreeGameButton(owner_id)))
         container.add_item(discord.ui.TextDisplay('-# Each click starts one paid round, subject to cooldown. No automatic bets. XC is a fictional game currency.'))
         view.add_item(container)
         return view
@@ -352,6 +364,125 @@ def register_commands(bot, db, create_player) -> None:
         if command is None and interaction.guild:
             command = bot.tree.get_command(name, guild=interaction.guild)
         return command
+
+    def game_fingerprint(game):
+        row=db.execute('SELECT enabled,min_bet,max_bet,cooldown_seconds FROM casino_game_settings WHERE game=?',(game,)).fetchone()
+        global_rules=(setting(db,'casino_enabled'),setting(db,'casino_min_bet'),setting(db,'casino_max_bet'))
+        if game=='lottery':global_rules+= (setting(db,'lottery_ticket_price'),)
+        return (tuple(row) if row else None,global_rules)
+
+    def preview_text(game,args,owner_id=None):
+        primary=args[1] if game=='balloonpop' else args[0]
+        if game=='lottery':
+            owned=0
+            if owner_id is not None:
+                row=db.execute("""SELECT COALESCE(v.quantity,0) quantity FROM items i LEFT JOIN inventories v
+                    ON v.item_id=i.id AND v.user_id=? WHERE i.name='Lottery Ticket' COLLATE NOCASE""",(owner_id,)).fetchone()
+                owned=min(int(primary),int(row['quantity'])) if row else 0
+            paid=int(primary)-owned
+            total=paid*setting(db,'lottery_ticket_price')
+            payment=f'{owned} inventory · {paid} paid' if owned else f'{paid} paid'
+            return f'Tickets **{int(primary):,}** · {payment} · Total cost **{total:,} XC**',total
+        detail=''
+        if len(args)>1:
+            value=args[0] if game=='balloonpop' else args[1]
+            value=getattr(value,'value',value)
+            detail=f' · Choice **{str(value).title()}**'
+        return f'Stake **{int(primary):,} XC**{detail}',int(primary)
+
+    class CasinoConfirmButton(discord.ui.Button):
+        def __init__(self,panel):
+            super().__init__(label=f'Play · {panel.cost:,} XC'[:80],style=discord.ButtonStyle.success)
+            self.panel=panel
+        async def callback(self,interaction):
+            panel=self.panel
+            if interaction.user.id!=panel.owner_id:
+                await interaction.response.send_message('Open /casino for your own game.',ephemeral=True);return
+            current_summary,current_cost=preview_text(panel.game,panel.args,panel.owner_id)
+            if game_fingerprint(panel.game)!=panel.fingerprint or (current_summary,current_cost)!=(panel.summary,panel.cost):
+                await interaction.response.edit_message(view=CasinoConfirmView(panel.owner_id,panel.game,panel.command,panel.args,panel.previous_bet,notice='Game settings changed. Review the updated cost and confirm again.'))
+                return
+            player=create_player_from_id(panel.owner_id)
+            if player is None or int(player['xc'])<panel.cost:
+                await interaction.response.edit_message(view=CasinoBlockedView(panel,'You do not have enough XC for this round.'))
+                return
+            info=cooldown_info(db,interaction.user,panel.game)
+            if info['remaining']:
+                await interaction.response.edit_message(view=CasinoBlockedView(panel,cooldown_text(db,interaction.user,panel.game)))
+                return
+            _replay_game_names[interaction.id]=panel.game
+            try:
+                await panel.command.callback(interaction,*panel.args)
+            finally:
+                _replay_game_names.pop(interaction.id,None)
+
+    class CasinoBlockedView(discord.ui.LayoutView):
+        def __init__(self,panel,reason):
+            super().__init__(timeout=300)
+            self.panel=panel
+            box=discord.ui.Container(accent_color=discord.Color(0xFFB020))
+            box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO\n## ROUND NOT STARTED\n{reason}\nNo XC was charged.'))
+            box.add_item(discord.ui.ActionRow(ChangeBetButton(panel.owner_id,panel.game,panel.previous_bet),FreeGameButton(panel.owner_id),CasinoHubBackButton(panel.owner_id)))
+            self.add_item(box)
+
+    class CasinoConfirmView(discord.ui.LayoutView):
+        def __init__(self,owner_id,game,command,args,previous_bet=None,notice=''):
+            super().__init__(timeout=300)
+            self.owner_id,self.game,self.command,self.args=owner_id,game,command,args
+            self.previous_bet=previous_bet
+            self.fingerprint=game_fingerprint(game)
+            summary,self.cost=preview_text(game,args,owner_id)
+            self.summary=summary
+            player=create_player_from_id(owner_id)
+            info=f'Wallet **{player["xc"]:,} XC**' if player else 'Wallet unavailable'
+            box=discord.ui.Container(accent_color=discord.Color(0x41D9D0))
+            box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO / REVIEW\n## {game.replace("_"," ").upper()}\n{summary}\n{info}\nNothing is charged until you confirm.'+(f'\n\n{notice}' if notice else '')))
+            box.add_item(discord.ui.ActionRow(CasinoConfirmButton(self),ChangeBetButton(owner_id,game,previous_bet),CasinoHubBackButton(owner_id)))
+            box.add_item(discord.ui.ActionRow(FreeGameButton(owner_id)))
+            self.add_item(box)
+
+    class BetPickButton(discord.ui.Button):
+        def __init__(self,panel,label,action,style=discord.ButtonStyle.secondary):
+            super().__init__(label=label,style=style)
+            self.panel,self.action=panel,action
+        async def callback(self,interaction):
+            if interaction.user.id!=self.panel.owner_id:
+                await interaction.response.send_message('Open /casino for your own game.',ephemeral=True);return
+            kind,value=self.action
+            if kind=='amount':
+                await interaction.response.edit_message(view=CasinoBetView(self.panel.owner_id,self.panel.game,value,self.panel.choice));return
+            if kind=='choice':
+                await interaction.response.edit_message(view=CasinoBetView(self.panel.owner_id,self.panel.game,self.panel.amount,value));return
+            if kind=='custom':
+                await interaction.response.send_modal(CasinoGameModal(self.panel.game,self.panel.amount));return
+            command=casino_command(interaction,self.panel.game)
+            if command is None:
+                await interaction.response.send_message('This game is unavailable.',ephemeral=True);return
+            args=(self.panel.amount,app_commands.Choice(name=self.panel.choice.title(),value=self.panel.choice)) if self.panel.game=='coinflip' else (self.panel.amount,)
+            await interaction.response.edit_message(view=CasinoConfirmView(self.panel.owner_id,self.panel.game,command,args,self.panel.amount))
+
+    class CasinoBetView(discord.ui.LayoutView):
+        def __init__(self,owner_id,game,amount=None,choice='heads'):
+            super().__init__(timeout=300)
+            self.owner_id,self.game,self.choice=owner_id,game,choice
+            rules=db.execute('SELECT * FROM casino_game_settings WHERE game=?',(game,)).fetchone()
+            minimum=rules['min_bet'] if rules and rules['min_bet']>0 else setting(db,'casino_min_bet')
+            maximum=rules['max_bet'] if rules and rules['max_bet']>0 else setting(db,'casino_max_bet')
+            self.amount=int(amount) if amount is not None and minimum<=int(amount)<=maximum else minimum
+            player=create_player_from_id(owner_id)
+            box=discord.ui.Container(accent_color=discord.Color(0x41D9D0))
+            choice_line=f' · **{choice.title()}**' if game=='coinflip' else ''
+            box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO / SETUP\n## {game.upper()}\nWallet **{player["xc"]:,} XC** · Range **{minimum:,}–{maximum:,} XC**\nSelected **{self.amount:,} XC**{choice_line}\nChoose an amount, then review before playing.'))
+            presets=[]
+            for multiplier in (1,2,5):
+                value=minimum*multiplier
+                if value<=maximum and value not in [item[0] for item in presets]:presets.append((value,multiplier))
+            box.add_item(discord.ui.ActionRow(*[BetPickButton(self,f'{multi}× · {value:,}',('amount',value),discord.ButtonStyle.primary if value==self.amount else discord.ButtonStyle.secondary) for value,multi in presets]))
+            if game=='coinflip':
+                box.add_item(discord.ui.ActionRow(BetPickButton(self,'Heads',('choice','heads'),discord.ButtonStyle.primary if choice=='heads' else discord.ButtonStyle.secondary),BetPickButton(self,'Tails',('choice','tails'),discord.ButtonStyle.primary if choice=='tails' else discord.ButtonStyle.secondary)))
+            box.add_item(discord.ui.ActionRow(BetPickButton(self,f'Review · {self.amount:,} XC',('review',None),discord.ButtonStyle.success),BetPickButton(self,'Custom',('custom',None)),CasinoHubBackButton(owner_id)))
+            box.add_item(discord.ui.ActionRow(FreeGameButton(owner_id)))
+            self.add_item(box)
 
     class CasinoGameModal(discord.ui.Modal):
         """One guided input panel for every Casino game, so players do not need command syntax."""
@@ -429,11 +560,7 @@ def register_commands(bot, db, create_player) -> None:
             if command is None:
                 await interaction.response.send_message("❌ This game is not available right now.", ephemeral=True)
                 return
-            _replay_game_names[interaction.id]=self.game
-            try:
-                await command.callback(interaction, *args)
-            finally:
-                _replay_game_names.pop(interaction.id,None)
+            await interaction.response.edit_message(view=CasinoConfirmView(interaction.user.id,self.game,command,args,primary))
 
     class CasinoGameSelect(discord.ui.Select):
         def __init__(self, owner_id: int):
@@ -460,7 +587,11 @@ def register_commands(bot, db, create_player) -> None:
             if interaction.user.id != self.owner_id:
                 await interaction.response.send_message("Open `/casino` for your own Casino panel.", ephemeral=True)
                 return
-            await interaction.response.send_modal(CasinoGameModal(self.values[0]))
+            game=self.values[0]
+            if game in {'blackjack','coinflip','slot'}:
+                await interaction.response.edit_message(view=CasinoBetView(self.owner_id,game))
+            else:
+                await interaction.response.send_modal(CasinoGameModal(game))
 
     class CasinoHubButton(discord.ui.Button):
         def __init__(self, owner_id: int, action: str, label: str, emoji: str, style=discord.ButtonStyle.secondary):
@@ -560,6 +691,7 @@ def register_commands(bot, db, create_player) -> None:
                 button.label=label
                 quick.add_item(button)
             container.add_item(quick)
+            container.add_item(discord.ui.ActionRow(FreeGameButton(owner_id)))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay('### 📊 Records & Membership\nYour results and available benefits.'))
             container.add_item(discord.ui.ActionRow(
@@ -746,11 +878,8 @@ def register_commands(bot, db, create_player) -> None:
         async def _play_action(self, interaction, action):
             if self.finished:
                 if action == "again":
-                    _replay_game_names[interaction.id] = "blackjack"
-                    try:
-                        await blackjack.callback(interaction, self.bet)
-                    finally:
-                        _replay_game_names.pop(interaction.id,None)
+                    await interaction.response.edit_message(view=CasinoConfirmView(
+                        self.owner_id,"blackjack",blackjack,(self.bet,),self.bet))
                     return
                 await interaction.response.send_message("This Blackjack hand is already finished.", ephemeral=True)
                 return

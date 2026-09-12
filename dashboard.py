@@ -31,6 +31,7 @@ import tier7
 import tier8
 import economy_settings_admin as settings_admin
 import dashboard_ui
+import casual_games
 
 load_dotenv()
 DATABASE_PATH = Path(__file__).resolve().parent / "xwar.db"
@@ -112,6 +113,7 @@ with get_db() as startup_db:
     tier6.initialise(startup_db)
     tier7.initialise(startup_db)
     tier8.initialise(startup_db)
+    casual_games.initialise(startup_db)
     startup_db.execute("""CREATE TABLE IF NOT EXISTS dashboard_role_access(
         role_id TEXT PRIMARY KEY, access_level TEXT NOT NULL,
         label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
@@ -968,6 +970,8 @@ def delete_player_data(user_id):
         ("tier6_contract_claims", "user_id"), ("tier6_production_queue", "user_id"),
         ("tier7_defence_profiles", "user_id"), ("tier7_territory_defence", "owner_user_id"),
         ("tier8_research_jobs", "user_id"), ("tier8_levels", "user_id"), ("tier8_preferences", "user_id"),
+        ("casual_game_sessions", "user_id"), ("casual_game_completions", "user_id"),
+        ("casual_game_progress", "user_id"), ("casual_collectibles", "user_id"),
     )
     for table, column in one_user_tables:
         db.execute(f"DELETE FROM {table} WHERE {column}=?", (user_id,))
@@ -1528,7 +1532,7 @@ def casino_control():
         action = request.form.get("action", "toggle")
         if action == "save-game":
             return save_economy_form((), "casino_control", game=request.form.get("game", ""))
-        allowed = settings_admin.VIP_KEYS if action == "save-vip" else ("casino_enabled",)
+        allowed = settings_admin.VIP_KEYS if action == "save-vip" else settings_admin.FREE_GAME_KEYS if action == "save-free-games" else ("casino_enabled",)
         return save_economy_form(allowed, "casino_control")
     db = get_db()
     totals = db.execute("""SELECT COALESCE(SUM(games_played),0) games,COALESCE(SUM(total_wagered),0) wagered,
@@ -1539,18 +1543,30 @@ def casino_control():
     activity = db.execute("""SELECT l.*,COALESCE(NULLIF(p.display_name,''),p.nation_name,CAST(l.user_id AS TEXT)) display_name FROM economy_logs l LEFT JOIN players p ON p.user_id=l.user_id WHERE action LIKE 'casino_%' OR action LIKE 'lottery_%' ORDER BY l.id DESC LIMIT 25""").fetchall()
     casino_enabled = db.execute("SELECT value FROM economy_settings WHERE key='casino_enabled'").fetchone()['value']
     game_rows = db.execute("SELECT * FROM casino_game_settings ORDER BY game").fetchall()
-    casino_values = {row['key']: row['value'] for row in db.execute("SELECT key,value FROM economy_settings") if row['key'] in settings_admin.VIP_KEYS}
+    casino_values = {row['key']: row['value'] for row in db.execute("SELECT key,value FROM economy_settings") if row['key'] in settings_admin.VIP_KEYS + settings_admin.FREE_GAME_KEYS}
+    memory_totals = db.execute("""SELECT COUNT(*) games,COALESCE(SUM(reward_xc),0) rewards,
+        COUNT(DISTINCT user_id) players FROM casual_game_completions""").fetchone()
+    memory_today = db.execute("""SELECT COUNT(*) games,COALESCE(SUM(reward_xc),0) rewards
+        FROM casual_game_completions WHERE day=?""", (casual_games.game_day(),)).fetchone()
+    memory_sessions = db.execute("""SELECT COUNT(*) started,
+        SUM(CASE WHEN status='abandoned' THEN 1 ELSE 0 END) abandoned,
+        SUM(CASE WHEN status='expired' THEN 1 ELSE 0 END) expired
+        FROM casual_game_sessions""").fetchone()
+    memory_returning = db.execute("""SELECT COUNT(*) FROM (
+        SELECT user_id FROM casual_game_completions WHERE day>=date('now','localtime','-6 days')
+        GROUP BY user_id HAVING COUNT(DISTINCT day)>=2)""").fetchone()[0]
     db.close()
     body = """<div class="grid"><div class="card"><small>Casino Games</small><strong>{{totals['games']}}</strong></div><div class="card"><small>XC Wagered</small><strong>{{totals['wagered']}}</strong></div><div class="card"><small>XC Paid Out</small><strong>{{totals['paid']}}</strong></div><div class="card"><small>Casino Players</small><strong>{{totals['players']}}</strong></div></div><section class="panel"><h2>💎 Casino VIP & Cooldowns</h2><div class="notice">Casino VIP costs XC for a temporary Discord Role and shorter Casino command cooldowns. It does not change game odds.</div><form class="fields" method="post"><input type="hidden" name="action" value="save-vip"><div class="fields-grid"><label>Standard Game Cooldown (seconds)<input type="number" min="0" name="casino_cooldown_seconds" value="{{casino_values.get('casino_cooldown_seconds','45')}}"></label><label>Casino VIP Price (XC)<input type="number" min="0" name="casino_vip_daily_cost" value="{{casino_values.get('casino_vip_daily_cost','100')}}"></label><label>VIP Duration (seconds)<input type="number" min="60" name="casino_vip_duration_seconds" value="{{casino_values.get('casino_vip_duration_seconds','86400')}}"></label><label>VIP Cooldown Reduction %<input type="number" min="0" max="95" name="casino_vip_cooldown_percent" value="{{casino_values.get('casino_vip_cooldown_percent','50')}}"></label></div><button>Save Casino VIP</button></form></section><section class="panel"><h2>🎰 Individual Game Control</h2><div class="notice">Set 0 for a game minimum or maximum bet to inherit the global Casino limit. Set a game's cooldown to 0 for no cooldown; otherwise it uses that game's own number of seconds.</div><div class="library">{% for game in games %}<article class="library-card"><h3>🎲 /{{game['game']}}</h3><form class="fields" method="post"><input type="hidden" name="action" value="save-game"><input type="hidden" name="game" value="{{game['game']}}"><label>Status<select name="enabled"><option value="1" {% if game['enabled'] %}selected{% endif %}>Open</option><option value="0" {% if not game['enabled'] %}selected{% endif %}>Closed</option></select></label><div class="fields-grid"><label>Min Bet (0 = global)<input type="number" min="0" name="min_bet" value="{{game['min_bet']}}"></label><label>Max Bet (0 = global)<input type="number" min="0" name="max_bet" value="{{game['max_bet']}}"></label><label>Cooldown Seconds (0 = none)<input type="number" min="0" name="cooldown_seconds" value="{{game['cooldown_seconds']}}"><small>Seconds · 0 or more. This game only; 0 = no cooldown.</small></label></div><button>Save /{{game['game']}}</button></form></article>{% endfor %}</div></section><section class="panel"><h2>Active Lottery</h2><div class="pad">{% if round %}<b>Round #{{round['id']}}</b><br>Prize pool: <b>{{round['prize_pool']}} XC</b><br>Tickets entered: <b>{{tickets}}</b><p class="muted">Use <code>/lottery_draw</code> in Discord as a server administrator to draw this round.</p>{% else %}<span class="muted">The first /lottery command creates a round.</span>{% endif %}</div></section><section class="panel"><h2>Casino Leaderboard</h2><table><tr><th>Player</th><th>Games</th><th>Wagered</th><th>Paid Out</th><th>Net</th><th>Biggest Payout</th></tr>{% for r in leaders %}<tr><td><b>{{r['display_name']}}</b><br><span class="muted">{{r['user_id']}}</span></td><td>{{r['games_played']}}</td><td>{{r['total_won']}} XC</td><td>{{r['total_won']}} XC</td><td>{{r['total_won']-r['total_wagered']}} XC</td><td>{{r['biggest_payout']}} XC</td></tr>{% else %}<tr><td colspan="6">No casino activity yet.</td></tr>{% endfor %}</table></section><section class="panel"><h2>Recent Casino Activity</h2><table><tr><th>User</th><th>Game</th><th>Detail</th></tr>{% for r in activity %}<tr><td>{{r['display_name']}}</td><td>{{r['action']}}</td><td>{{r['detail']}}</td></tr>{% else %}<tr><td colspan="3">No activity yet.</td></tr>{% endfor %}</table></section>"""
     control = """<section class="panel"><h2>Casino Master Control</h2><form class="fields" method="post"><input type="hidden" name="casino_enabled" value="{{0 if enabled=='1' else 1}}"><p class="{{'ok' if enabled=='1' else 'bad'}}">Casino is currently {{'OPEN' if enabled=='1' else 'CLOSED'}}.</p><div class="actions"><button class="{{'danger' if enabled=='1' else 'teal'}}">{{'Close Casino' if enabled=='1' else 'Open Casino'}}</button></div></form></section>"""
     svip = """<section class="panel"><h2>🪙 Server Very Important Person (SVIP)</h2><div class="notice">SVIP uses the permanent Discord role <code>Server Very Important Person (SVIP)</code>. It is the top Casino VIP and replaces the paid Casino VIP benefit; the two reductions never stack.</div><form class="fields" method="post"><input type="hidden" name="action" value="save-vip"><div class="fields-grid"><label>SVIP Casino Cooldown Reduction %<input type="number" min="0" max="95" name="server_svip_cooldown_percent" value="{{casino_values.get('server_svip_cooldown_percent','75')}}"></label></div><button>Save SVIP Benefit</button></form></section>"""
     svip_fields="""<label>SVIP Extra Production Slots<input type="number" min="0" max="25" name="server_svip_production_slots" value="{{casino_values.get('server_svip_production_slots','2')}}"><small>0–25 extra active orders; new orders only.</small></label><label>SVIP Extra Market Listings<input type="number" min="0" max="100" name="server_svip_market_listings" value="{{casino_values.get('server_svip_market_listings','5')}}"><small>0–100 extra listings; existing listings are retained on role loss.</small></label><label>SVIP Production Time Reduction %<input type="number" min="0" max="95" name="server_svip_production_percent" value="{{casino_values.get('server_svip_production_percent','10')}}"><small>0–95%; after existing discounts, minimum 30 seconds. New jobs only. No Casino odds change.</small></label>"""
     svip=svip.replace('</div><button>Save SVIP Benefit',svip_fields+'</div><button>Save SVIP Benefit')
-    body = control + svip + body
+    free_games = """<section class="panel"><h2>🧠 Free Games</h2><div class="notice">Memory Match never requires a bet. Rewarded games share one daily XC limit; players may continue in Practice mode after reaching it.</div><div class="grid pad"><div class="card"><small>Started</small><strong>{{memory_sessions['started']}}</strong></div><div class="card"><small>Completed</small><strong>{{memory_totals['games']}}</strong></div><div class="card"><small>Exited / Expired</small><strong>{{memory_sessions['abandoned'] or 0}} / {{memory_sessions['expired'] or 0}}</strong></div><div class="card"><small>Players</small><strong>{{memory_totals['players']}}</strong></div><div class="card"><small>XC Awarded</small><strong>{{memory_totals['rewards']}}</strong></div><div class="card"><small>Today</small><strong>{{memory_today['games']}} games · {{memory_today['rewards']}} XC</strong></div><div class="card"><small>7-day Returning</small><strong>{{memory_returning}}</strong></div></div><form class="fields" method="post"><input type="hidden" name="action" value="save-free-games"><div class="fields-grid"><label>Free Games<select name="free_games_enabled"><option value="1" {% if casino_values.get('free_games_enabled','1')=='1' %}selected{% endif %}>Open</option><option value="0" {% if casino_values.get('free_games_enabled','1')=='0' %}selected{% endif %}>Closed</option></select><small>Applies at the next game start and reward settlement.</small></label><label>Rewarded Games / Day<input type="number" min="0" max="10" name="memory_daily_reward_games" value="{{casino_values.get('memory_daily_reward_games','3')}}"><small>0–10. Practice remains available while Free Games are open.</small></label><label>Daily Memory XC Limit<input type="number" min="0" max="100" name="memory_daily_xc_limit" value="{{casino_values.get('memory_daily_xc_limit','25')}}"><small>0–100 XC per player per server-local day.</small></label></div><button>Save Free Game Settings</button></form></section>"""
+    body = control + svip + free_games + body
     body = body.replace('<label>VIP Cooldown Reduction %<input type="number" min="0" max="95" name="casino_vip_cooldown_percent" value="{{casino_values.get(\'casino_vip_cooldown_percent\',\'50\')}}"></label>', '<label>VIP Cooldown Reduction %<input type="number" min="0" max="95" name="casino_vip_cooldown_percent" value="{{casino_values.get(\'casino_vip_cooldown_percent\',\'50\')}}"></label><label>Crash Daily Net Win Limit (XC, 0 = off)<input type="number" min="0" name="crash_daily_net_win_limit" value="{{casino_values.get(\'crash_daily_net_win_limit\',\'2500\')}}"></label>')
     body = body.replace("<td>{{r['user_id']}}</td>", "<td><b>{{r['display_name']}}</b><br><span class='muted'>{{r['user_id']}}</span></td>")
     body = body.replace("<td>{{r['total_won']}} XC</td><td>{{r['total_won']}} XC</td>", "<td>{{r['total_wagered']}} XC</td><td>{{r['total_won']}} XC</td>")
-    return admin_page("Casino", body, totals=totals, leaders=leaders, round=round_row, tickets=tickets, activity=activity, enabled=casino_enabled, games=game_rows, casino_values=casino_values)
+    return admin_page("Casino", body, totals=totals, leaders=leaders, round=round_row, tickets=tickets, activity=activity, enabled=casino_enabled, games=game_rows, casino_values=casino_values, memory_totals=memory_totals, memory_today=memory_today, memory_sessions=memory_sessions, memory_returning=memory_returning)
 
 
 @app.route("/market", methods=["GET", "POST"])

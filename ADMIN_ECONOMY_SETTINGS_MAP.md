@@ -1,12 +1,12 @@
 # Admin / Dashboard Economy Settings Map
 
-Updated: 2026-09-10. The existing SQLite database is the only editable source. `economy_settings_admin.py` contains validation and display metadata, not a second configuration store.
+Updated: 2026-09-12. The existing SQLite database is the only editable source. `economy_settings_admin.py` contains validation and display metadata, not a second configuration store.
 
 ## Save contract
 
 Dashboard settings saves use one dedicated connection and one `BEGIN IMMEDIATE` transaction. Validation, all submitted changes and the existing `dashboard_audit_logs` record succeed together or roll back together. Audit records contain actor ID/name/role, endpoint, field names, and before/after values. Passwords, tokens and CSRF values are not included. Existing role policy remains unchanged. Discord Admin displays these settings read-only.
 
-The table covers 72 unique settings keys. All rows use `economy_settings(key,value)`; the field key is the database key. Bounds are inclusive integers; “or more” is bounded by SQLite signed 64-bit maximum (9223372036854775807), not floating-point rounding. Paired transfer, market and casino minimum/maximum settings are also validated together. Casino global limits are checked against individual games that inherit them.
+The table covers 75 unique settings keys. All rows use `economy_settings(key,value)`; the field key is the database key. Bounds are inclusive integers; “or more” is bounded by SQLite signed 64-bit maximum (9223372036854775807), not floating-point rounding. Paired transfer, market and casino minimum/maximum settings are also validated together. Casino global limits are checked against individual games that inherit them.
 
 ## War
 
@@ -87,9 +87,12 @@ The table covers 72 unique settings keys. All rows use `economy_settings(key,val
 | Casino / VIP | `casino_vip_daily_cost` | `casino.setting` | XC; 0 or more | New VIP purchases; existing expiry dates stay unchanged. |
 | Casino / VIP | `casino_vip_duration_seconds` | `casino.setting` | seconds; 60 or more | New VIP purchases; existing expiry dates stay unchanged. |
 | Casino / VIP | `crash_daily_net_win_limit` | `casino.setting` | XC; 0 or more | Next action / refresh. |
+| Casino / Free Games | `free_games_enabled` | `casual_games.setting` | 0 = off · 1 = on; 0–1 | Next game start or completion. |
 | Settings | `lottery_prize_ratio` | `casino.setting` | %; 0–100 | Next action / refresh. |
 | Settings | `lottery_starting_prize` | `casino.setting` | XC; 0 or more | New Lottery rounds; existing prize pools stay unchanged. |
 | Settings | `lottery_ticket_price` | `casino.setting` | XC; 1 or more | Next action / refresh. |
+| Casino / Free Games | `memory_daily_reward_games` | `casual_games.setting` | games / day; 0–10 | Next game start or completion. |
+| Casino / Free Games | `memory_daily_xc_limit` | `casual_games.setting` | XC / day; 0–100 | Next game start or completion. |
 | Casino / VIP | `server_svip_cooldown_percent` | `casino.setting` | %; 0–95 | Next action / refresh. |
 
 ## Production / Research

@@ -9,10 +9,11 @@ PURPOSE
 This file is the starting point for a maintainer or AI that cannot see the
 previous conversation. Read it before changing the project.
 
-The current product goal is simple: a new player should understand the game,
-find the next useful action, and complete the Economy loop without guessing
-commands. The principal loop is Mine -> Craft -> Sell -> Upgrade. Warfront and
-Casino are optional. XC and War Credits are separate currencies.
+The current product goal is simple: a new player should begin a fun activity in
+under one minute and always understand the next action. Main Menu now prioritizes
+Play -> free Memory Match / Casino -> Collection titles. Economy remains the
+Mine -> Craft -> Sell -> Upgrade loop. Warfront is optional. XC and War Credits
+are separate currencies.
 
 OWNER PREFERENCES AND NON-NEGOTIABLE RULES
 ==========================================
@@ -78,8 +79,14 @@ Overview compatibility details:
 
 CURRENT PLAYER EXPERIENCE
 =========================
-- Main Menu: Profile, Economy, Warfront (optional) and Missions. Help and Close
-  appear only at the bottom of this menu.
+- Main Menu: Play, Economy, Profile and Missions, plus optional Warfront. Help and
+  Close appear only at the bottom of this menu.
+- Play contains a persistent free Memory Match, Casino link, daily reward allowance
+  and Collection progress. casual_games.py owns its schema, settlement and panels.
+- Memory rewards default to three games sharing 25 XC (9/8/8). Later games are
+  Practice. Four cosmetic titles can be equipped on Profile.
+- Panel-launched Casino rounds now use a review step. Blackjack, Coinflip and Slots
+  have mobile bet presets; blocked rounds offer Free Game.
 - Economy Centre groups Finance, Earn, Market and Casino-related destinations.
 - My Overview shows the current goal, next upgrade and selected live summaries.
 - Workshop shows recipe count/readiness, a recipe selector and a direct recommended
@@ -125,6 +132,7 @@ staff_panel.py                 Main Discord Admin panel
 staff_sections.py              Admin secondary pages and forms
 staff_tools.py                 Admin operations and permission checks
 casino.py / svip.py            Casino and membership logic
+casual_games.py                 Free Memory Match, capped rewards and Collection titles
 tier4.py ... tier8.py          Later Economy, mission, production, stock and war tiers
 phone_start.sh                 Existing Termux supervisor for Bot and Dashboard
 xwar.db                        Production database; never use it for destructive tests
@@ -151,11 +159,11 @@ Use the repository virtual environment:
   .venv\Scripts\python.exe
 
 The established full regression command is:
-  .venv\Scripts\python.exe -m unittest test_admin_dashboard test_staff_tools test_tier6 test_tier7 test_tier8 test_economy_journey test_economy_transactions test_svip test_player_overview test_overview_image -q
+  .venv\Scripts\python.exe -m unittest test_admin_dashboard test_staff_tools test_tier6 test_tier7 test_tier8 test_economy_journey test_economy_transactions test_svip test_player_overview test_overview_image test_casual_games -q
 
-At commit 7ff6770 this suite passed 109 tests. Known DeprecationWarning messages
-from discord.py do not currently fail the suite. Import order above matters because
-some Dashboard fixtures and module caches are shared.
+The Casual Play release passed 114 tests before push. Known DeprecationWarning
+messages from discord.py do not currently fail the suite. Import order above matters
+because some Dashboard fixtures and module caches are shared.
 
 Before committing:
 1. Use temporary SQLite databases and independent connections for transaction tests.
@@ -181,7 +189,8 @@ where the current code already treats them as optional.
 
 NEXT WORK IN PRIORITY ORDER
 ===========================
-1. Obtain and review a fresh phone screenshot of /overview after commit 7ff6770.
+1. Obtain and review fresh phone screenshots of Play, Memory Match, completion,
+   Collection, Casino review and /overview.
    Check wrapping, information density and whether each three-button row clearly
    corresponds to the three summary lines above it.
 2. If the summary lines wrap, shorten labels/status values before adding styling.

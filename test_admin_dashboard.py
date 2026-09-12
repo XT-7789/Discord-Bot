@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import discord
 import casino
+import casual_games
 import economy_extra
 import economy_settings_admin as settings
 import staff_panel
@@ -133,6 +134,12 @@ class AdminDashboardTests(unittest.TestCase):
         self.assertFalse(self.db.execute("SELECT 1 FROM dashboard_audit_logs WHERE detail LIKE '%do-not-log-this-secret%'").fetchone())
 
     def test_casino_and_research_readback(self):
+        casino_page=self.client.get('/casino')
+        self.assertIn(b'Free Games',casino_page.data)
+        self.client.post('/casino',data={'action':'save-free-games','free_games_enabled':'1',
+            'memory_daily_reward_games':'4','memory_daily_xc_limit':'30'})
+        self.assertEqual(4,casual_games.setting(self.db,'memory_daily_reward_games'))
+        self.assertEqual(30,casual_games.setting(self.db,'memory_daily_xc_limit'))
         self.client.post('/casino', data={'action': 'save-game', 'game': 'dice', 'enabled': '1',
             'min_bet': '10', 'max_bet': '100', 'cooldown_seconds': '12'})
         self.assertEqual(12, casino.cooldown_info(self.db, SimpleNamespace(id=990088, roles=[]), 'dice')['seconds'])

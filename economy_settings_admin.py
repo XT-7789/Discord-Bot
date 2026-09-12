@@ -14,6 +14,7 @@ import tier6
 import tier8
 import advanced_systems
 import svip
+import casual_games
 
 GENERAL_KEYS = tuple(('starting_xc work_cooldown collect_cooldown land_income_per_land '
     'work_crystal_chance mine_cooldown mine_crystal_chance exchange_xc_to_war_percent '
@@ -27,15 +28,17 @@ TIER6_KEYS = tuple(tier6.DEFAULTS) + ('daily_reward', 'daily_cooldown', 'transfe
     'market_enabled', 'market_fee_percent', 'market_min_price', 'market_max_price')
 VIP_KEYS = ('casino_vip_daily_cost', 'casino_vip_duration_seconds', 'casino_vip_cooldown_percent',
     'server_svip_cooldown_percent', 'casino_cooldown_seconds', 'crash_daily_net_win_limit') + tuple(svip.DEFAULTS)
+FREE_GAME_KEYS = ('free_games_enabled', 'memory_daily_reward_games', 'memory_daily_xc_limit')
 RESEARCH_KEYS = ('tier8_enabled', 'tier8_queue_limit')
 MINING_KEYS = ('mining_energy_enabled', 'mining_max_energy', 'mining_energy_regen_amount',
     'mining_energy_regen_seconds', 'mining_starter_pickaxe_enabled', 'mining_collection_xc_reward', 'mining_collection_xcrystal_reward')
 TOGGLE_KEYS = ('casino_enabled', 'market_enabled', 'auction_enabled', 'recipes_enabled',
     'bills_enabled', 'income_enabled', 'role_shop_enabled', 'economy_shop_enabled')
-KEYS = set(GENERAL_KEYS + TIER6_KEYS + VIP_KEYS + RESEARCH_KEYS + MINING_KEYS + TOGGLE_KEYS)
+KEYS = set(GENERAL_KEYS + TIER6_KEYS + VIP_KEYS + FREE_GAME_KEYS + RESEARCH_KEYS + MINING_KEYS + TOGGLE_KEYS)
 LEGACY_KEYS = {'collect_cooldown', 'land_income_per_land', 'mine_cooldown', 'mine_crystal_chance'}
 # Fallbacks are the Bot's existing definitions, never a second editable store.
-DEFAULTS = {**economy.DEFAULT_SETTINGS, **economy_extra.DEFAULTS, **casino.CASINO_DEFAULTS, **tier6.DEFAULTS, **advanced_systems.DEFAULTS}
+DEFAULTS = {**economy.DEFAULT_SETTINGS, **economy_extra.DEFAULTS, **casino.CASINO_DEFAULTS, **casual_games.DEFAULTS,
+    'memory_daily_xc_limit': '25', **tier6.DEFAULTS, **advanced_systems.DEFAULTS}
 
 
 def bounds(key):
@@ -51,7 +54,8 @@ def bounds(key):
         'mining_energy_regen_seconds': (10, 9223372036854775807),
         'tier6_industrial_speed_cap_percent': (0, 95), 'casino_vip_cooldown_percent': (0, 95),
         'server_svip_cooldown_percent': (0, 95), 'server_svip_production_slots':(0,25),
-        'server_svip_market_listings':(0,100),'server_svip_production_percent':(0,95)}
+        'server_svip_market_listings':(0,100),'server_svip_production_percent':(0,95),
+        'memory_daily_reward_games':(0,10),'memory_daily_xc_limit':(0,100)}
     if key in special:
         return special[key]
     if 'percent' in key or key.endswith('_chance') or key in {'lottery_prize_ratio', 'tier6_stock_price_impact'}:
@@ -75,7 +79,7 @@ def integer(raw, label, low, high):
 def metadata(key):
     if key not in KEYS:
         return None
-    if key.startswith(('casino_', 'server_svip_', 'lottery_', 'crash_')):
+    if key.startswith(('casino_', 'server_svip_', 'lottery_', 'crash_', 'memory_', 'free_games_')):
         group, reader = 'Casino / VIP', 'casino.setting'
     elif key == 'recipes_enabled':
         group, reader = 'Production / Research', 'advanced_systems.setting'
@@ -124,6 +128,10 @@ def metadata(key):
         reader='svip.benefits → tier6.start_production / economy_transactions.quote'
         timing='Next confirmed order; existing jobs and listings remain unchanged. Verified server SVIP only.'
         unit='%' if key.endswith('_percent') else 'extra slots' if key.endswith('_slots') else 'extra listings'
+    if key in FREE_GAME_KEYS:
+        reader='casual_games.setting'
+        timing='Next game start or completion.'
+        unit='0 = off · 1 = on' if key.endswith('_enabled') else 'games / day' if key.endswith('_games') else 'XC / day'
     return dict(group=group, reader=reader, unit=unit, minimum=lo, maximum=str(hi),
         range=f'{lo} or more' if hi == 9223372036854775807 else f'{lo}–{hi}',
         impact=key.replace('tier6_', '').replace('tier8_', '').replace('_', ' ').capitalize(),
@@ -173,7 +181,7 @@ def status_sections(db):
     groups = [('Features', ('tier6_economy_enabled', 'tier6_contracts_enabled', 'bills_enabled', 'income_enabled')),
         ('Daily', ('daily_reward', 'daily_cooldown')),
         ('Market', ('market_enabled', 'tier6_stock_enabled', 'economy_shop_enabled', 'auction_enabled', 'role_shop_enabled')),
-        ('Casino', ('casino_enabled', 'casino_cooldown_seconds')),
+        ('Casino', ('casino_enabled', 'casino_cooldown_seconds', 'free_games_enabled', 'memory_daily_xc_limit')),
         ('Production / Research', ('recipes_enabled', 'tier6_production_enabled', 'tier6_production_queue_limit', 'tier8_enabled', 'tier8_queue_limit'))]
     for title, keys in groups:
         lines = []

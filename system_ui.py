@@ -14,12 +14,15 @@ from pathlib import Path
 from contextvars import ContextVar
 import svip
 import player_overview
+import casual_games
 
 GUIDE_IMAGE=Path(__file__).parent/'assets'/'ui'/'navigation-guide.png'
 HELP_TOPICS={
-    'start':('I am new. What should I do first?','Economy > Your next step','Start with mining, gather the materials shown in your recipe, craft one product, then review its sale. Follow the next-step button in Economy. XC is your economy currency; War Credits are separate and used for your nation. War and Casino are optional. Opening a trade preview does not spend anything.','economy'),
+    'start':('I am new. What should I do first?','Play > Memory Match','Start with a free Memory Match. You can earn a small amount of XC, then explore Casino or Economy. Every result shows a next step.','play'),
+    'free':('Can I play without XC?','Play > Free Games','Memory Match needs no bet. The first rewarded games each day can earn XC; after that you can keep playing in Practice mode.','play'),
     'earn':('How do I earn XC?','Economy > Earn','Collect Daily rewards and complete Contracts. Mining materials can also be sold for XC.','earn_menu'),
-    'casino':('Where can I play Casino games?','Economy > Casino','Choose a game, review its bet range, then submit one round. XC is fictional currency; you can lose your stake.','casino'),
+        'casino':('Where can I play Casino games?','Play > Casino','Choose a game, review its bet and cooldown, then confirm one round. XC is fictional currency; you can lose your stake.','casino'),
+    'collection':('Where are my titles?','Profile > Collection','Complete Memory Match challenges to unlock display titles. Titles are cosmetic and can be changed at any time.','collection'),
     'items':('Where are my items?','Profile > Backpack','Select an item to see its quantity and available Use, Equip or Sell actions.','inventory'),
     'cities':('How do I build or upgrade Cities?','Warfront > Cities','Open Build or Upgrade. Choose one or several Cities or available locations and review the cost before confirming.','city'),
     'rewards':('Where do I claim mission rewards?','Missions > Starter / Daily / Weekly','Choose a category and press Claim Ready after completing its goals. Weekly missions unlock at Nation Level 2.','missions'),
@@ -62,16 +65,17 @@ def register(bot, db, create_player):
         'reports':bot.xbot_tier7_reports_builder,
     })
     sections={
-        'menu':('MAIN MENU','Select a system.', [('👤 Profile','profile'),('💰 Economy','economy'),('⚔️ Warfront','war'),('🎯 Missions','missions')]),
+        'menu':('MAIN MENU','Select a system.', [('🎮 Play','play'),('💰 Economy','economy'),('👤 Profile','profile'),('🎯 Missions','missions')]),
         'economy':('ECONOMY','Earn, trade and play.', [('💳 Finance','finance'),('💼 Earn','earn_menu'),('📊 Market','market_menu'),('⛏️ Mines','mining'),('🎰 Casino','casino'),('🏆 Rankings','rankings')]),
         'finance':('FINANCE','Your wallet and savings.', [('💰 Wallet','wallet'),('🏦 Bank','bank'),('📋 Assets','assets'),('💱 Exchange','exchange')]),
         'earn_menu':('EARN','Collect rewards or make something.', [('🎁 Daily','daily'),('💼 Contracts','contracts'),('⛏️ Mines','mining'),('🛠️ Craft','craft'),('🏭 Production','production'),('🔬 Research','research')]),
         'market_menu':('MARKET','Browse before you spend.', [('🛒 Shop','shop'),('🤝 Player Market','market'),('📈 Stocks','stock'),('🎒 Backpack','inventory')]),
         'war':('WARFRONT','Your nation and armed forces.', [('🏙️ Cities','city'),('🪖 Army','army'),('➕ Recruit','recruit'),('🕊️ Diplomacy','diplomacy'),('⚔️ Attack','attack'),('🛡️ Defence','defence'),('📋 Reports','reports'),('🗺️ Overview','war_overview')]),
-        'profile':('PROFILE','', [('🎒 Backpack','inventory'),('📋 Assets','assets'),('🎯 Missions','missions')]),
+        'profile':('PROFILE','', [('🏆 Collection','collection'),('🎒 Backpack','inventory'),('📋 Assets','assets'),('🎯 Missions','missions')]),
         'missions':('MISSIONS','Choose your goals.', [('🌱 Starter','mission_starter'),('☀️ Daily','mission_daily'),('📅 Weekly','mission_weekly')]),
     }
     parents={'menu':'menu','profile':'menu','economy':'menu','war':'menu','missions':'menu',
+             'play':'menu','memory':'play','collection':'profile',
              'finance':'economy','earn_menu':'economy','market_menu':'economy','rankings':'economy',
              'daily':'earn_menu','wallet':'finance','bank':'finance','assets':'profile','exchange':'finance',
              'inventory':'profile','contracts':'earn_menu','mining':'economy','craft':'earn_menu',
@@ -151,7 +155,7 @@ def register(bot, db, create_player):
             align_economy_tabs(view,owner,key)
             if key in {'menu','economy'}:
                 # Overview colour emphasises system entry points, not banking.
-                main_routes={'profile','economy','war','missions'} if key=='menu' else {'finance','market_menu','casino','earn_menu'}
+                main_routes={'play','profile','economy','missions'} if key=='menu' else {'finance','market_menu','casino','earn_menu'}
                 for child in view.walk_children():
                     if isinstance(child,discord.ui.Button):
                         if getattr(child,'action',None) in {'deposit','withdraw'}:
@@ -254,7 +258,6 @@ def register(bot, db, create_player):
         if key=='help':
             view=Shell(owner,'HELP / QUICK FIND','What would you like to do?\nChoose a question for directions and a direct link.')
             view.box.add_item(discord.ui.ActionRow(HelpSelect(owner)))
-            view.box.add_item(discord.ui.ActionRow(Nav(owner,'▧ Visual Guide','help_map')))
             footer(view,owner,key)
             return view
         if key.startswith('help:') and key[5:] in HELP_TOPICS:
@@ -313,20 +316,22 @@ def register(bot, db, create_player):
                 xp=profile['xp']-profile['current_floor']
                 span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
                 xp_text=f"{progress_bar(xp,span)} {xp:,} / {span:,} XP" if profile['next_threshold'] else 'MAX LEVEL'
-                view=Shell(owner,'MAIN MENU','New here? Open Economy and follow Your next step.\nMine → Craft → Sell · War and Casino are optional.',notice)
+                view=Shell(owner,'MAIN MENU','New here? Start with a free game. Earn XC, collect titles and explore at your own pace.',notice)
                 def block(text,buttons):
                     view.box.add_item(discord.ui.Separator())
                     view.box.add_item(discord.ui.TextDisplay(text))
                     view.box.add_item(discord.ui.ActionRow(*buttons))
-                block(f"### 👤 Profile\nLevel **{profile['level']}** · Backpack, progress and VIP\n{xp_text}",[Nav(owner,'Profile','profile'),Nav(owner,'My Overview','overview')])
+                casual=casual_games.progress(db,owner)
+                reward=casual_games.reward_status(db,owner)
+                block(f"### 🎮 Play\n**Memory Match** · No bet required\nReward games left **{reward['rewarded_left']}** · Collection **{len(casual['unlocked'])}/{len(casual_games.COLLECTIBLES)}**",[Nav(owner,'Play','play')])
                 block(f"### 💰 Economy\nWallet **{player['xc']:,} XC** · Bank **{player['bank_xc']:,} XC**\nEarn, craft, trade and play.",[Nav(owner,'Economy','economy')])
+                block(f"### 👤 Profile\nLevel **{profile['level']}** · Title **{casual['title'] or 'None'}**\n{xp_text}",[Nav(owner,'Profile','profile'),Nav(owner,'My Overview','overview')])
                 cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(owner,)).fetchone()[0]
                 lands=db.execute('SELECT COUNT(*) FROM map_territories WHERE owner_user_id=?',(owner,)).fetchone()[0]
                 units=db.execute('SELECT COALESCE(SUM(quantity),0) FROM player_war_units WHERE user_id=?',(owner,)).fetchone()[0]
                 state=db.execute('SELECT last_collect FROM player_city_state WHERE user_id=?',(owner,)).fetchone()
                 ready_at=(int(state['last_collect']) if state else 0)+war_tier.setting(db,'city_collect_cooldown')
                 production='Production ready' if ready_at<=int(time.time()) else f'Production <t:{ready_at}:R>'
-                block(f"### ⚔️ Warfront · Optional\nCities **{cities}** · Units **{units}**\nWar Credits **{player['money']:,}** · Separate from XC",[Nav(owner,'Warfront','war')])
                 pending=[(category,m) for category in ('daily','starter') for m in tier5.missions_for(db,owner,category)[1] if not m['claimed']]
                 ready=next(((c,m) for c,m in pending if m['progress']>=m['target']),None)
                 chosen=ready or next(((c,m) for c,m in pending if m['destination'] in ('mining','economy','city')),None)
@@ -340,6 +345,7 @@ def register(bot, db, create_player):
                     text='### 🎯 Missions\nAll featured goals complete. Explore at your own pace.'
                     actions=[Nav(owner,'Missions','missions')]
                 block(text,actions)
+                block(f"### ⚔️ Warfront · Optional\nCities **{cities}** · Units **{units}**\nWar Credits **{player['money']:,}** · Separate from XC",[Nav(owner,'Warfront','war')])
                 footer(view,owner,key)
                 return prepare(view,owner,key,force=True)
             if key in {'economy','profile','war','missions','earn_menu','market_menu'}:
@@ -379,7 +385,7 @@ def register(bot, db, create_player):
                     span=(profile['next_threshold'] or profile['xp'])-profile['current_floor']
                     xp=profile['xp']-profile['current_floor']
                     status=f'{progress_bar(xp,span)} {xp}/{span} XP' if profile['next_threshold'] else 'MAX LEVEL'
-                    block('👤 Player',f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{profile['rank']}\n{status}"+('\n'+svip.summary(db,owner) if svip.summary(db,owner) else ''),navs(('Missions','missions')))
+                    block('👤 Player',f"**{discord.utils.escape_markdown(player['nation_name'])}** · Lv {profile['level']}\n{profile['rank']}\n{status}\n{casual_games.profile_line(db,owner)}"+('\n'+svip.summary(db,owner) if svip.summary(db,owner) else ''),navs(('Collection','collection'),('Missions','missions')))
                     block('💰 Accounts',funds()+f"\nWar Credits **{player['money']:,}** · XCrystals **{player['xcrystals']:,}**",navs(('Finance','finance'),('VIP Status','vip')))
                     count=db.execute('SELECT COALESCE(SUM(quantity),0) FROM inventories WHERE user_id=?',(owner,)).fetchone()[0]
                     block('🎒 Collection',f'Backpack **{count:,} items**',navs(('Backpack','inventory'),('Assets','assets')))
@@ -666,7 +672,7 @@ def register(bot, db, create_player):
         bot.tree.remove_command(name,**kwargs)
         entry.system_ui_wrapped=True
         bot.tree.command(name=name,description=description,**kwargs)(entry)
-    add_entry('menu','menu','Open X SYSTEM: Profile, Economy, Warfront and Missions')
+    add_entry('menu','menu','Open X SYSTEM: Play, Economy, Profile and Missions')
     add_entry('warfront','war','Open your Cities, Army, Diplomacy and Battles')
     add_entry('profile','profile','View your profile, progress, Backpack and assets')
     add_entry('overview','overview','Open your personal overview and choose which sections to display')
