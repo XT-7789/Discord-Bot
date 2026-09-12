@@ -271,6 +271,7 @@ class Button(discord.ui.Button):
     def __init__(self,view,label,action,style=discord.ButtonStyle.secondary,disabled=False):
         super().__init__(label=label[:80],style=style,disabled=disabled)
         self.owner_view=view; self.action=action
+        self.key=action[1] if action[0]=='nav' else action[0]
 
     async def callback(self,interaction):
         v=self.owner_view
@@ -286,6 +287,7 @@ class Select(discord.ui.Select):
 
 
 class JourneyView(discord.ui.LayoutView):
+    xbot_managed_navigation=True
     def __init__(self,bot,db,uid,page='recipes',rid=None,iid=None,material=None,offset=0,back=None,notice='',operation=None,amount=1,product_ids=None):
         super().__init__(timeout=600)
         self.bot,self.db,self.uid=bot,db,uid
@@ -299,7 +301,7 @@ class JourneyView(discord.ui.LayoutView):
         if notice: self.text(notice)
         try: self.build()
         except ValueError as e: self.text(str(e))
-        self.row(('‹ Back',('back',)),('Economy',('nav','economy')))
+        self.row(('‹ Back',('back',)),('⌂ Menu',('nav','menu')),('× Close',('close',)))
 
     def text(self,text): self.box.add_item(discord.ui.TextDisplay(text[:3900]))
     def row(self,*items): self.box.add_item(discord.ui.ActionRow(*[Button(self,label,action,discord.ButtonStyle.primary if n==0 else discord.ButtonStyle.secondary) for n,(label,action) in enumerate(items)]))
@@ -330,10 +332,13 @@ class JourneyView(discord.ui.LayoutView):
             self.row(('Workshop',('all',)),('Mines',('nav','mining')),('Refresh',('activity',)))
         elif self.page=='recipes':
             qs=quotes(db,uid,self.material)
-            self.text('Choose a recipe. Ready-to-craft options appear first. War support is optional.')
+            ready=sum(q['craftable'] for q in qs)
+            self.text(f'**{len(qs)} recipes available · {ready} ready now**\nChoose a recipe below. Nothing is crafted until you review and confirm. War support is optional.')
             options=[discord.SelectOption(label=q['recipe']['name'][:100],value=str(q['recipe']['id']),description=('Ready · ' if q['craftable'] else 'Needs materials / XC · ')+('Profit route' if q['recommended'] else 'Optional recipe'),default=q['recipe']['id']==self.rid) for q in qs[self.offset:self.offset+25]]
             if options:self.box.add_item(discord.ui.ActionRow(Select(self,options,'recipe','Choose a recipe…')))
             else:self.text('No enabled recipe uses these materials.')
+            suggested=next((q for q in qs if q['recommended']),next(iter(qs),None))
+            if suggested:self.row((('Open Recommended · ' if suggested['recommended'] else 'Open First Recipe · ')+suggested['recipe']['name'],('recipe',suggested['recipe']['id'])))
             self.pager(len(qs))
             if self.material:self.row(('All recipes',('all',)))
         elif self.page=='detail':
@@ -476,6 +481,9 @@ class JourneyView(discord.ui.LayoutView):
             await i.response.edit_message(view=target);return
         if key=='source':
             await i.response.edit_message(view=self.fresh());return
+        if key=='close':
+            self.stop();target=discord.ui.LayoutView();target.add_item(discord.ui.TextDisplay('Economy panel closed. Open /menu to return.'))
+            await i.response.edit_message(view=target);return
         if key in {'max','preset'}:
             operation=action[1]
             try:

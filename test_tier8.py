@@ -283,7 +283,7 @@ class ResearchTests(unittest.TestCase):
                         self.assertIn('Close',str(current.to_components()),key)
                         first_text=next(x for x in current.walk_children() if isinstance(x,discord.ui.TextDisplay))
                         self.assertTrue(first_text.content.startswith('-# ✦ X SYSTEM'),key)
-                        footer_row=current.children[-1]
+                        footer_row=current.box.children[-1] if getattr(current,'xbot_managed_navigation',False) and hasattr(current,'box') else current.children[-1]
                         self.assertIsInstance(footer_row,discord.ui.ActionRow)
                         self.assertEqual(['help','close'] if key=='menu' else ['back','menu','close'],[getattr(x,'key',None) for x in footer_row.children])
                         if key!='menu':

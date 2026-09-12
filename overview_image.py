@@ -24,7 +24,7 @@ def render(snapshot):
     image=Image.new('RGB',(960,400+rows*180),'#101820');draw=ImageDraw.Draw(image)
     bitmap=None
     try:
-        fonts={size:ImageFont.truetype(str(FONT),size) for size in (18,22,26,34,42)}
+        fonts={size:ImageFont.truetype(str(FONT),size) for size in (18,20,22,24,26,34,38,42)}
     except (ImportError,OSError):
         # Termux may ship Pillow without _imagingft. This embedded bitmap font
         # uses only _imaging, not FreeType or a phone-installed font.
@@ -58,11 +58,11 @@ def render(snapshot):
         accent='#61dbab' if ready else '#41d9d0'
         draw.rounded_rectangle((x+16,y+18,x+42,y+44),radius=7,outline=accent,width=2)
         text(x+23,y+19,str(index+1),18,accent,width=18)
-        text(x+52,y+20,tile[0].upper(),18,'#adc2cf',width=212)
-        text(x+16,y+64,tile[1],34,width=244)
+        text(x+52,y+17,tile[0].upper(),24,'#adc2cf',width=212)
+        text(x+16,y+60,tile[1],38,width=244)
         auxiliary='' if tile[2] in ('View recipes','View perks') else tile[2]
-        text(x+16,y+114,auxiliary,22,'#adc2cf',width=244)
-    text(48,350+rows*180,'Energy: last recorded. Open panels for exact totals.',18,'#8ea8ba')
+        text(x+16,y+113,auxiliary,24,'#adc2cf',width=244)
+    text(48,350+rows*180,'Energy: last recorded. Open panels for exact totals.',20,'#8ea8ba')
     output=io.BytesIO();image.save(output,format='PNG',optimize=True);data=output.getvalue()
     with LOCK:
         CACHE[key]=(time.monotonic(),data);CACHE.move_to_end(key)

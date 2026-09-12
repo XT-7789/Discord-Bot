@@ -10,6 +10,17 @@ import player_overview as overview
 import test_economy_transactions as fixtures
 
 class OverviewTests(unittest.TestCase):
+    def test_workshop_has_one_navigation_row_and_direct_recommendation(self):
+        import economy_journey as journey
+        view=journey.JourneyView(SimpleNamespace(xbot_player_panel_builders={}),self.db,self.uid)
+        labels=[getattr(x,'label',None) for x in view.walk_children()]
+        self.assertEqual(1,labels.count('‹ Back'))
+        self.assertEqual(1,labels.count('⌂ Menu'))
+        self.assertEqual(1,labels.count('× Close'))
+        self.assertTrue(any((label or '').startswith('Open Recommended · ') for label in labels))
+        self.assertIn('recipes available',str(view.to_components()))
+        self.assertTrue(view.xbot_managed_navigation)
+
     def test_mines_navigation_returns_to_live_recipe_without_spending(self):
         import economy_journey as journey
         async def run():
