@@ -21,7 +21,7 @@ This supersedes the earlier four-sections-per-page overview layout.
 
 ## Readability polish
 
-- Bold uppercase tile headings, preserved spacing and normal-text `•` separators keep three items per line without pretending proportional text can form continuous vertical rules.
+- Each tile is one compact line (`NAME · primary value · status`). This keeps three tiles per group while avoiding fake columns that drift in Discord's proportional mobile font.
 - Primary values are bold, supporting values stay lighter, and each group has a native separator so rows do not visually run together.
 - Craft and VIP supporting lines now report useful state rather than repeating button instructions.
 - Upgrade name and affordability/level status now use two separate lines instead of a long paragraph. Budget readiness does not imply the mining level requirement is met.

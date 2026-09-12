@@ -18,7 +18,7 @@ class TextOverviewTests(unittest.TestCase):
             self.assertEqual(3,len(grids))
             self.assertTrue(all(len(grid.content.splitlines())==3 for grid in grids))
             self.assertTrue(all('```' not in grid.content for grid in grids))
-            self.assertTrue(all(all(line.count('•')==2 for line in grid.content.splitlines()) for grid in grids))
+            self.assertTrue(all(all(line.count('·')==2 for line in grid.content.splitlines()) for grid in grids))
             self.assertTrue(all('│' not in grid.content for grid in grids))
             self.assertFalse(any(isinstance(x,discord.ui.MediaGallery) for x in view.walk_children()))
             result=await overview.image_options({'view':view})

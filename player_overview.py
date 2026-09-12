@@ -24,12 +24,11 @@ def compact_number(value):
     return str(value)
 
 def tile_text(tiles):
-    """Three normal-text columns; figure spaces survive Discord markdown."""
-    def cell(value,bold=False):
-        value=str(value)[:12]
-        padded=value+'\u2007'*(12-len(value))
-        return f'**{value}**'+'\u2007'*(12-len(value)) if bold else padded
-    return '\n'.join(('\u2007•\u2007').join(cell(tile[row].upper() if row==0 else tile[row],row<2) for tile in tiles).rstrip('\u2007') for row in range(3))
+    """One stable summary line per tile for Discord's proportional mobile font."""
+    return '\n'.join(
+        f'**{str(title).upper()[:12]}** · **{str(primary)[:18]}** · {str(secondary)[:18]}'
+        for title,primary,secondary,*_ in tiles
+    )
 
 def layout(db,uid):
     row=db.execute("SELECT detail FROM economy_logs WHERE user_id=? AND action='overview_layout' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
