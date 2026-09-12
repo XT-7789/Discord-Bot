@@ -5,8 +5,8 @@
 - Goal actions share one row; Customize, Refresh, Menu and Close share the footer.
 - Saved selections, live reads, ownership checks and preview-only navigation are unchanged.
 - No prices, rewards, VIP benefits or assets changed.
-- Discord controls text wrapping and button width; this is not a fixed three-column text-card layout. Long values can wrap on phones.
-- Mobile Discord screenshot acceptance remains pending. After pulling and restarting the existing bot, open a fresh /overview and check all sections and shortcuts.
+- Discord controls button width. Status columns use bounded monospace text so they remain aligned on phones.
+- The image dashboard was removed after actual phone review showed its text was too small.
 
 This supersedes the earlier four-sections-per-page overview layout.
 
@@ -16,12 +16,12 @@ This supersedes the earlier four-sections-per-page overview layout.
 - With all sections selected: Wallet / Mines / Production, Market / Nation / Missions, Craft / Stocks / VIP.
 - Saved section choices still apply. Production includes Craft; Market includes Stocks.
 - Each column shows a title and two short status lines. Large totals are abbreviated; destination panels retain full details.
-- These are monospace text columns, not native cards. Discord still controls button widths and narrow-screen code-block rendering. Exact button-to-column alignment is not guaranteed.
-- Mobile screenshot acceptance remains pending for this revision.
+- These are monospace text columns, not native cards. Each three-column status row is immediately followed by its matching three-button row.
+- Actual phone screenshots confirmed the image alternative was harder to read; the text grid is now the supported overview.
 
 ## Readability polish
 
-- Uppercase tile headings and vertical column separators make each three-column group easier to scan without widening the 40-character grid.
+- Uppercase tile headings and whitespace separate the columns without visual divider noise.
 - Upgrade name and affordability/level status now use two separate lines instead of a long paragraph. Budget readiness does not imply the mining level requirement is met.
 - Saved-layout notice uses subdued text. One primary Continue action remains; shortcuts stay neutral.
-- Real phone visual acceptance is still pending for this polish; button widths are controlled by Discord.
+- Button widths are controlled by Discord, but their order exactly follows the text columns.

@@ -1,8 +1,5 @@
 """Personal, persisted overview. Opening/customizing never settles assets."""
 import json
-import asyncio
-import io
-import logging
 import sqlite3
 import time
 import discord
@@ -14,32 +11,9 @@ BLOCKS={'wallet':'Wallet & Bank','mining':'Mines','production':'Craft & Producti
 DEFAULT=('wallet','production','missions')
 
 async def image_options(options, sending=False):
+    """Keep the shared output hook, but Overview is now native text-only."""
     view=options.get('view')
-    if not isinstance(view,OverviewView) or view.editing:return options
-    try:
-        import overview_image
-        data=await asyncio.to_thread(overview_image.render,view.snapshot)
-    except Exception:
-        logging.getLogger(__name__).exception('Overview image failed; serving text fallback (OV-IMG-2)')
-        if not getattr(view,'fallback_notice',False):
-            view.text('-# Image unavailable · Text mode (OV-IMG-2). You can still use every button. Try Refresh; if this persists, ask staff to check the bot log.')
-            view.fallback_notice=True
-        options['attachments' if not sending else 'files']=[]
-        return options
-    if not getattr(view,'image_ready',False):
-        rows=[child for child in view.box.children if isinstance(child,discord.ui.ActionRow)]
-        view.box.clear_items()
-        view.box.add_item(discord.ui.MediaGallery(discord.MediaGalleryItem('attachment://overview.png',description=('X SYSTEM personal overview. '+view.snapshot['goal'])[:1000])))
-        number=0
-        for row in rows:
-            for button in row.children:
-                if getattr(button,'action',('',))[0]=='nav':
-                    number+=1
-                    button.label=f'{number} · {button.label}'
-        for row in rows:view.box.add_item(row)
-        view.image_ready=True
-    options.pop('attachments',None)
-    options['files' if sending else 'attachments']=[discord.File(io.BytesIO(data),filename='overview.png')]
+    if isinstance(view,OverviewView) and not sending:options['attachments']=[]
     return options
 
 def compact_number(value):
@@ -51,7 +25,7 @@ def compact_number(value):
 
 def tile_text(tiles):
     """Bounded ASCII columns; real action buttons are rendered separately."""
-    lines=[' |'.join((str(tile[row]).upper() if row==0 else str(tile[row]))[:12].ljust(12) for tile in tiles).rstrip() for row in range(3)]
+    lines=['  '.join((str(tile[row]).upper() if row==0 else str(tile[row]))[:12].ljust(12) for tile in tiles).rstrip() for row in range(3)]
     return '```\n'+'\n'.join(lines)+'\n```'
 
 def layout(db,uid):
@@ -78,7 +52,7 @@ class OverviewView(discord.ui.LayoutView):
         self.selected=tuple(draft) if draft is not None else layout(db,owner)
         self.pages=1;self.page=0
         self.box=discord.ui.Container(accent_colour=0x41D9D0);self.add_item(self.box)
-        self.text('-# ✦ X SYSTEM · OV-IMG-2\n# '+('CUSTOMIZE OVERVIEW' if editing else 'MY OVERVIEW'))
+        self.text('-# ✦ X SYSTEM\n# '+('CUSTOMIZE OVERVIEW' if editing else 'MY OVERVIEW'))
         if notice:self.text('-# '+notice)
         if editing:
             self.text('Choose your stats and shortcuts. All selected sections fit on one overview. Changes apply only after Save.')
