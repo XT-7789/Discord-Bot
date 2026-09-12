@@ -29,7 +29,7 @@ def tile_text(tiles):
         value=str(value)[:12]
         padded=value+'\u2007'*(12-len(value))
         return f'**{value}**'+'\u2007'*(12-len(value)) if bold else padded
-    return '\n'.join(('\u2007│\u2007').join(cell(tile[row].upper() if row==0 else tile[row],row<2) for tile in tiles).rstrip('\u2007') for row in range(3))
+    return '\n'.join(('\u2007•\u2007').join(cell(tile[row].upper() if row==0 else tile[row],row<2) for tile in tiles).rstrip('\u2007') for row in range(3))
 
 def layout(db,uid):
     row=db.execute("SELECT detail FROM economy_logs WHERE user_id=? AND action='overview_layout' ORDER BY id DESC LIMIT 1",(uid,)).fetchone()
@@ -117,7 +117,7 @@ class OverviewView(discord.ui.LayoutView):
             count=db.execute('SELECT COUNT(*) FROM market_listings WHERE seller_id=? AND active=1 AND quantity>0 AND created_at>?',(uid,cutoff)).fetchone()[0]
             shares=db.execute('SELECT COALESCE(SUM(quantity),0) FROM tier6_stock_holdings WHERE user_id=?',(uid,)).fetchone()[0]
             result.append(('Market','Listings '+n(count),'Limit '+n(svip.market_limit(db,uid)),'My Listings','market_mine'))
-            extra.append(('Stocks','Shares '+n(shares),'Virtual market','Stocks','stock'))
+            extra.append(('Stocks','Shares '+n(shares),'Virtual only','Stocks','stock'))
         if 'nation' in self.selected:
             cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(uid,)).fetchone()[0]
             result.append(('Nation','Cities '+n(cities),n(p['money'])+' WC','Warfront','war'))
