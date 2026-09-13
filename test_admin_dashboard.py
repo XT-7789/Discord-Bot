@@ -100,6 +100,15 @@ class AdminDashboardTests(unittest.TestCase):
         self.assertNotIn('const enhancePicker', log_html)
         self.assertIn('dashboard-forms.js', log_html)
 
+    def test_save_feedback_is_focusable_and_errors_are_alerts(self):
+        with self.client.session_transaction() as session:
+            session['_flashes'] = [('success', 'Saved test settings.'), ('error', 'Test validation error.')]
+        html = self.client.get('/tier6-economy').get_data(as_text=True)
+        self.assertIn('role="status" tabindex="-1" class="flash success">Saved test settings.', html)
+        self.assertIn('role="alert" tabindex="-1" class="flash error">Test validation error.', html)
+        self.assertIn('if (!feedback) requestAnimationFrame', html)
+        self.assertIn('feedback.focus({preventScroll: true})', html)
+
     def test_svip_settings_fields_atomic_validation_and_permissions(self):
         self.assertIn(b'SVIP Extra Production Slots',self.client.get('/casino').data)
         response=self.client.post('/casino',data={'action':'save-vip','server_svip_production_slots':'3','server_svip_market_listings':'6','server_svip_production_percent':'10'})

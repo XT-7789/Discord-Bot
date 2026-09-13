@@ -17,6 +17,14 @@
   banner.hidden = true;
   const main = document.getElementById('main-content');
   if (!main) return;
+  // Let native validation reveal and focus required fields in any disclosure.
+  main.addEventListener('invalid', event => {
+    let parent = event.target.parentElement;
+    while (parent && parent !== main) {
+      if (parent.matches('details')) parent.open = true;
+      parent = parent.parentElement;
+    }
+  }, true);
   main.querySelector('.page-heading')?.after(banner);
   const dialog = document.createElement('dialog');
   dialog.className = 'save-confirm-dialog';

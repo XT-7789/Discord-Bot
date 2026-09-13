@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{% block title %}Overview{% endblock %} · X BOT</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin-system.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-components.css', v='3.0.4') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-components.css', v='3.0.5') }}">
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -84,7 +84,7 @@
 
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, message in messages %}
-            <div role="status" class="flash {{ category }}">{{ message }}</div>
+            <div role="{{ 'alert' if category == 'error' else 'status' }}" tabindex="-1" class="flash {{ category }}">{{ message }}</div>
         {% endfor %}
     {% endwith %}
 
@@ -106,13 +106,18 @@
     });
     // Keep scroll position on form submits/reloads
     const scrollKey = `xbot-scroll:${location.pathname}`;
+    const feedback = document.querySelector('#main-content .flash.error') || document.querySelector('#main-content .flash');
     try {
         const savedScroll = sessionStorage.getItem(scrollKey);
         if (savedScroll !== null) {
             sessionStorage.removeItem(scrollKey);
-            requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
+            if (!feedback) requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
         }
     } catch { /* Navigation remains available when browser storage is blocked. */ }
+    if (feedback) requestAnimationFrame(() => {
+        feedback.focus({preventScroll: true});
+        feedback.scrollIntoView({block: 'center'});
+    });
     const rememberScroll = () => {
         try { sessionStorage.setItem(scrollKey, String(window.scrollY)); } catch {}
     };
@@ -192,6 +197,6 @@
 })();
 </script>
 {% block scripts %}{% endblock %}
-<script src="{{ url_for('static', filename='dashboard-forms.js', v='3.0.3') }}"></script>
+<script src="{{ url_for('static', filename='dashboard-forms.js', v='3.0.5') }}"></script>
 </body>
 </html>
