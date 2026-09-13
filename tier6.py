@@ -591,7 +591,7 @@ def health_report(db):
         OR available_shares != total_shares-COALESCE((SELECT SUM(quantity) FROM tier6_stock_holdings h WHERE h.company_id=c.id),0)""").fetchone()[0])
     broken_queue = int(db.execute("SELECT COUNT(*) FROM tier6_production_queue WHERE quantity<=0 OR status NOT IN ('working','claimed','cancelled')").fetchone()[0])
     status = "✅ Healthy" if integrity == "ok" and not (negative_players or invalid_holdings or invalid_companies or broken_queue) else "⚠️ Needs repair"
-    return f"Tier 6: {status} · Negative balances {negative_players} · Invalid stocks {invalid_holdings + invalid_companies} · Invalid production {broken_queue} · DB {integrity}"
+    return f"Economy: {status} · Negative balances {negative_players} · Invalid stocks {invalid_holdings + invalid_companies} · Invalid production {broken_queue} · DB {integrity}"
 
 
 def repair(db):
@@ -605,7 +605,7 @@ def repair(db):
         db.execute("UPDATE tier6_stock_companies SET total_shares=?,available_shares=? WHERE id=?", (total, total - held, company["id"]))
     db.execute("UPDATE tier6_production_queue SET status='cancelled' WHERE quantity<=0 OR status NOT IN ('working','claimed','cancelled')")
     db.commit()
-    return "✅ Tier 6 Economy repair completed. Balances, Stocks, and Production Queue were normalised."
+    return "✅ Economy repair completed. Balances, Stocks, and Production Queue were normalised."
 
 
 def register_commands(bot, db, create_player):
@@ -685,7 +685,7 @@ def register_commands(bot, db, create_player):
                 container = discord.ui.Container(accent_color=discord.Color.orange())
                 container.add_item(discord.ui.TextDisplay(
                     "## 💰 Economy Centre Temporarily Closed\n"
-                    "Tier 6 Economy maintenance is in progress. Daily rewards and your existing Wallet remain available."
+                    "Economy maintenance is in progress. Daily rewards and your existing Wallet remain available."
                 ))
                 container.add_item(discord.ui.ActionRow(
                     EconomyNavButton(owner_id, "legacy_economy", "Wallet & Daily", "🎁", style=discord.ButtonStyle.primary),
@@ -697,7 +697,7 @@ def register_commands(bot, db, create_player):
             player = data["player"]
             container = discord.ui.Container(accent_color=discord.Color.gold())
             container.add_item(discord.ui.TextDisplay(
-                f"## 💰 X BOT Economy Centre · Tier 6\n"
+                f"## 💰 X BOT Economy Centre · V3.0\n"
                 f"🪙 Wallet **{player['xc']:,} XC** · 🏦 Bank **{player['bank_xc']:,} XC**\n"
                 f"⚔️ **{player['money']:,} War Credits** · 💎 **{player['xcrystals']:,} XCrystals**\n"
                 f"📈 Stocks **{data['stock_value']:,} XC** · 🎒 Items **{data['inventory_value']:,} XC**\n"

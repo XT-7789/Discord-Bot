@@ -12,7 +12,7 @@
 <header>
     <div class="header-brand">
         <h1>X SYSTEM</h1>
-        <span class="version">V2 · Tier 7 · {{ session.get('discord_name', 'Owner') }} ({{ session.get('dashboard_role', 'owner') }})</span>
+        <span class="version" aria-label="X BOT version 3.0">V3.0</span>
     </div>
     <button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button>
 </header>
@@ -39,7 +39,7 @@
     <section class="nav-group">
         <h2>Economy</h2>
         <a href="{{ url_for('settings') }}">Settings</a>
-        <a href="{{ url_for('tier6_economy_control') }}">Tier 6 Economy</a>
+        <a href="{{ url_for('tier6_economy_control') }}">Economy Control</a>
         <a href="{{ url_for('mining_control') }}">Mining</a>
         <a href="{{ url_for('items') }}">Items & Categories</a>
         <a href="{{ url_for('item_shop_control') }}">Item Shop</a>
@@ -68,6 +68,7 @@
         <a href="{{ url_for('logs') }}">Logs</a>
         <a class="secondary" href="{{ url_for('logout') }}">Log out</a>
     </section>
+    <p id="page-search-empty" class="nav-search-empty" hidden>No matching pages.</p>
 </nav>
 
 <main id="main-content">
@@ -120,15 +121,34 @@
     }
     
     // Page search in sidebar
+    const navigationLinks = [...document.querySelectorAll('#dashboard-nav a')];
+    const currentPath = location.pathname.replace(/\/$/, '') || '/';
+    navigationLinks.forEach(link => {
+        const linkPath = new URL(link.href, location.href).pathname.replace(/\/$/, '') || '/';
+        if (!link.classList.contains('secondary') && linkPath === currentPath) {
+            link.classList.add('active');
+            link.setAttribute('aria-current', 'page');
+        }
+    });
+
     const search = document.querySelector('#page-search');
     if (search) {
         search.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            document.querySelectorAll('nav a').forEach(link => {
+            const query = e.target.value.trim().toLowerCase();
+            let visibleCount = 0;
+            document.querySelectorAll('#dashboard-nav .nav-group').forEach(group => {
+                let groupMatches = 0;
+                group.querySelectorAll('a').forEach(link => {
                 if(link.classList.contains('secondary')) return;
                 const match = link.textContent.toLowerCase().includes(query);
                 link.style.display = match ? 'flex' : 'none';
+                    if (match) groupMatches += 1;
+                });
+                group.hidden = groupMatches === 0;
+                visibleCount += groupMatches;
             });
+            const empty = document.querySelector('#page-search-empty');
+            if (empty) empty.hidden = visibleCount !== 0;
         });
     }
 })();

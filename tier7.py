@@ -798,7 +798,7 @@ def resolve_plan(db, plan_id: int, get_active_war, get_alliance_for_user, *, see
         report = db.execute("SELECT * FROM tier7_battle_reports WHERE plan_id=?", (plan_id,)).fetchone()
         if report is not None:
             return True, report, []
-        return False, None, ["This battle is saved in history, but its detailed report is missing. Ask an administrator to run Tier 7 Repair."]
+        return False, None, ["This battle is saved in history, but its detailed report is missing. Ask an administrator to run Warfront Repair."]
     if plan is None:
         return False, None, ["This battle plan no longer exists."]
 
@@ -823,7 +823,7 @@ def resolve_plan(db, plan_id: int, get_active_war, get_alliance_for_user, *, see
             db.commit()
             if report is not None:
                 return True, report, []
-            return False, None, ["This battle is saved in history, but its detailed report is missing. Ask an administrator to run Tier 7 Repair."]
+            return False, None, ["This battle is saved in history, but its detailed report is missing. Ask an administrator to run Warfront Repair."]
         if plan is not None and plan["status"] == "draft":
             set_plan_units(db, plan_id, _selected_unit_ids(db, plan_id), commit=False)
         errors, metadata = validate_plan(db, plan, get_active_war, get_alliance_for_user)
@@ -929,7 +929,7 @@ def resolve_plan(db, plan_id: int, get_active_war, get_alliance_for_user, *, see
         db.execute("UPDATE players SET last_attack=? WHERE user_id=?", (int(time.time()), plan["attacker_id"]))
         conflict = metadata["conflict"] or {}
         outcome = (
-            f"Tier 7 {mode['label']} · {'Attacker victory' if attacker_won else 'Defender victory'}"
+            f"Warfront {mode['label']} · {'Attacker victory' if attacker_won else 'Defender victory'}"
             f" · Air {snapshot['fronts']['air']} · Navy {snapshot['fronts']['navy']}"
         )
         war_tier.log_battle(
@@ -1181,7 +1181,7 @@ def repair(db) -> str:
     health = health_report(db)
     db.commit()
     return (
-        f"Tier 7 repair complete: {expired} expired plan(s) closed; {failed} interrupted plan(s) recovered; "
+        f"Warfront repair complete: {expired} expired plan(s) closed; {failed} interrupted plan(s) recovered; "
         f"{missing} missing-report plan(s) quarantined; {health['territories']} territory defence record(s) verified."
     )
 

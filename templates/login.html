@@ -4,16 +4,14 @@
 {% block body_class %}login{% endblock %}
 
 {% block content %}
-<style>
-    /* Add basic login center styling override */
-    #dashboard-nav, header .mobile-menu { display: none; }
-    header { padding-left: 24px; justify-content: center; }
-    main { margin: 10vh auto; max-width: 400px; }
-</style>
-
-<div class="panel" style="padding: 24px;">
-    <h2 style="justify-content: center;">⚔️ X BOT V2</h2>
-    <p class="muted" style="text-align: center; margin-bottom: 24px;">Tier 4 Multi-Admin Dashboard</p>
+<div class="panel login-card">
+    <div class="login-brand">
+        <span class="login-mark" aria-hidden="true">X</span>
+        <div>
+            <h2>X BOT <span>V3.0</span></h2>
+            <p>Administration Dashboard</p>
+        </div>
+    </div>
 
     {% if oauth_configured %}
         <a class="btn purple" style="display:flex; width: 100%; margin-bottom: 24px;" href="{{ url_for('discord_login') }}">Login with Discord</a>

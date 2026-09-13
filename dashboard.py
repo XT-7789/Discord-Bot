@@ -1,4 +1,4 @@
-"""X BOT V2 Tier 7 administration dashboard."""
+"""X BOT V3.0 administration dashboard."""
 import hashlib
 import hmac
 import json
@@ -1403,8 +1403,8 @@ def tier6_economy_control():
     health = tier6.health_report(db)
     db.close()
     body = """
-    <section class="panel"><h2>💰 Tier 6 Economy Control Centre</h2><div class="pad">
-      <div class="notice">Every Tier 6 rule is stored in the shared Bot database. Changes apply after the next panel refresh; no code edit is required.</div>
+    <section class="panel"><h2>💰 Economy Control Centre</h2><div class="pad">
+      <div class="notice">Every economy rule is stored in the shared Bot database. Changes apply after the next panel refresh; no code edit is required.</div>
       <div class="grid">
         <div class="card"><small>Players</small><strong>{{totals['players']}}</strong></div>
         <div class="card"><small>Wallet + Bank XC</small><strong>{{totals['wallet']+totals['bank']}}</strong></div>
@@ -1414,7 +1414,7 @@ def tier6_economy_control():
       <p class="notice">{{health}}</p>
       <div class="actions">
         <form method="post" action="{{url_for('tier6_force_stock_update')}}"><button class="purple">Update Stock Prices Now</button></form>
-        <form method="post" action="{{url_for('tier6_repair')}}" onsubmit="return confirm('Run safe Tier 6 Economy repair?')"><button class="teal">Health Check & Repair</button></form>
+        <form method="post" action="{{url_for('tier6_repair')}}" onsubmit="return confirm('Run a safe Economy repair?')"><button class="teal">Health Check & Repair</button></form>
       </div>
     </div></section>
 
@@ -1474,7 +1474,7 @@ def tier6_economy_control():
     <section class="panel"><h2>🏷️ Recent Player Market Trades</h2><table><tr><th>Buyer</th><th>Seller</th><th>Item</th><th>Quantity</th><th>Price</th><th>Fee</th><th>Time</th></tr>{% for t in market_trades %}<tr><td>{{t['buyer_name']}}</td><td>{{t['seller_name']}}</td><td>{{t['item_emoji']}} {{t['item_name']}}</td><td>{{t['quantity']}}</td><td>{{t['price_each']}} XC</td><td>{{t['fee']}}</td><td>{{t['created_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="7">No player market trades.</td></tr>{% endfor %}</table></section>
     <section class="panel"><h2>🏭 Production Queue</h2><table><tr><th>Player</th><th>Recipe</th><th>Quantity</th><th>Status</th><th>Ready</th></tr>{% for q in production %}<tr><td>{{q['player_name']}}</td><td>{{q['recipe_name']}}</td><td>{{q['quantity']}}</td><td>{{q['status']}}</td><td>{{q['ready_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="5">No production jobs.</td></tr>{% endfor %}</table></section>
     """
-    return admin_page("Tier 6 Economy", body, settings=settings, totals=totals, stock_value=stock_value,
+    return admin_page("Economy Control", body, settings=settings, totals=totals, stock_value=stock_value,
                       companies=companies, contracts=contracts, items=items, recent_trades=recent_trades,
                       market_trades=market_trades, production=production, activity=activity, health=health,
                       setting_values=settings, setting_groups=setting_groups(settings_admin.TIER6_KEYS),
@@ -1810,8 +1810,8 @@ def war_control():
         ORDER BY r.id DESC LIMIT 100""").fetchall()
     tier7_events = db.execute("SELECT * FROM tier7_events ORDER BY id DESC LIMIT 100").fetchall()
     db.close()
-    tier7_panel = """<details class="creator" id="tier7-control"><summary class="btn purple">⚔️ Tier 7 · Warfront 2.0</summary>
-    <section class="panel"><h2>🩺 Tier 7 Health & Safety</h2><div class="grid pad">
+    tier7_panel = """<details class="creator" id="tier7-control"><summary class="btn purple">⚔️ Advanced Warfront</summary>
+    <section class="panel"><h2>🩺 Warfront Health & Safety</h2><div class="grid pad">
       <div class="card"><small>Status</small><strong class="{{'ok' if tier7_health['healthy'] else 'bad'}}">{{'Healthy' if tier7_health['healthy'] else 'Needs repair'}}</strong></div>
       <div class="card"><small>Battle Reports</small><strong>{{tier7_health['reports']}}</strong></div>
       <div class="card"><small>Open Plans</small><strong>{{tier7_health['draft_plans']}}</strong></div>
@@ -1822,10 +1822,10 @@ def war_control():
       <div class="card"><small>Ownership Problems</small><strong class="{{'bad' if tier7_health['orphan_defence'] else 'ok'}}">{{tier7_health['orphan_defence']}}</strong></div>
     </div><div class="top-actions"><form method="post" action="{{url_for('tier7_repair_dashboard')}}"><button class="teal">Health Check & Safe Repair</button></form></div></section>
 
-    <section class="panel"><h2>⚙️ Complete Tier 7 Balance</h2><div class="notice">These values control Attack Planner modes, cooldowns, terrain, fortifications, reports and defence automation. Changes apply to new previews and battles immediately.</div>
+    <section class="panel"><h2>⚙️ Advanced Warfront Balance</h2><div class="notice">These values control Attack Planner modes, cooldowns, terrain, fortifications, reports and defence automation. Changes apply to new previews and battles immediately.</div>
       <form class="fields" method="post" action="{{url_for('tier7_save_settings')}}"><div class="fields-grid">
       {% for field in tier7_setting_fields %}<label>{{field['label']}}<input type="number" name="{{field['key']}}" min="{{field['min']}}" max="{{field['max']}}" value="{{tier7_settings.get(field['key'],tier7_defaults[field['key']])}}" required></label>{% endfor %}
-      </div><button>Save All Tier 7 Settings</button></form></section>
+      </div><button>Save All Warfront Settings</button></form></section>
 
     <section class="panel"><h2>🛡️ Nation Defence Profiles</h2><div class="library">
       {% for row in tier7_profiles %}<article class="library-card"><h3>🏳️ {{row['player_name']}}</h3><form class="fields" method="post" action="{{url_for('tier7_save_profile')}}"><input type="hidden" name="user_id" value="{{row['user_id']}}"><div class="fields-grid">
@@ -1843,12 +1843,12 @@ def war_control():
       {% for row in tier7_plans %}<tr><td>#{{row['id']}}</td><td>{{row['attacker_name']}}</td><td>{{row['defender_name']}}<br><span class="muted">{{row['territory_name']}}</span></td><td>{{row['mode']|title}}</td><td class="{{'ok' if row['status']=='resolved' else 'bad' if row['status']=='failed' else ''}}">{{row['status']|title}}</td><td>{% if row['status']=='draft' %}<form method="post" action="{{url_for('tier7_cancel_plan',plan_id=row['id'])}}"><button class="danger">Cancel Draft</button></form>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="6">No attack plans yet.</td></tr>{% endfor %}
     </table></section>
 
-    <section class="panel"><h2>📜 Tier 7 Battle Audit</h2><table><tr><th>Battle</th><th>Sides</th><th>Objective</th><th>Power</th><th>Winner</th><th>Result</th></tr>
-      {% for row in tier7_reports %}<tr><td>#{{row['battle_id']}}<br><span class="muted">{{row['created_at']|timestamp}}</span></td><td>{{row['attacker_name']}} → {{row['defender_name']}}</td><td>{{row['territory_name']}}<br><span class="muted">{{row['terrain']|title}} · {{row['mode']|title}}</span></td><td>{{row['attacker_score']}} vs {{row['defender_score']}}</td><td>{{row['winner_name']}}</td><td>{{row['land_captured']}} Land · {{row['capital_damage']}} HP · {{row['credits_captured']}} WC</td></tr>{% else %}<tr><td colspan="6">No Tier 7 battles yet.</td></tr>{% endfor %}
+    <section class="panel"><h2>📜 Battle Audit</h2><table><tr><th>Battle</th><th>Sides</th><th>Objective</th><th>Power</th><th>Winner</th><th>Result</th></tr>
+      {% for row in tier7_reports %}<tr><td>#{{row['battle_id']}}<br><span class="muted">{{row['created_at']|timestamp}}</span></td><td>{{row['attacker_name']}} → {{row['defender_name']}}</td><td>{{row['territory_name']}}<br><span class="muted">{{row['terrain']|title}} · {{row['mode']|title}}</span></td><td>{{row['attacker_score']}} vs {{row['defender_score']}}</td><td>{{row['winner_name']}}</td><td>{{row['land_captured']}} Land · {{row['capital_damage']}} HP · {{row['credits_captured']}} WC</td></tr>{% else %}<tr><td colspan="6">No advanced battles yet.</td></tr>{% endfor %}
     </table></section>
 
-    <section class="panel"><h2>🧾 Recent Tier 7 Events</h2><table><tr><th>Time</th><th>Event</th><th>User</th><th>Plan</th><th>Safe Detail</th></tr>
-      {% for row in tier7_events %}<tr><td>{{row['created_at']|timestamp}}</td><td>{{row['event_type'].replace('_',' ')|title}}</td><td>{{row['user_id'] or 'System'}}</td><td>{{('#' ~ row['plan_id']) if row['plan_id'] else '—'}}</td><td><code>{{row['detail_json'][:180]}}</code></td></tr>{% else %}<tr><td colspan="5">No Tier 7 events yet.</td></tr>{% endfor %}
+    <section class="panel"><h2>🧾 Recent Warfront Events</h2><table><tr><th>Time</th><th>Event</th><th>User</th><th>Plan</th><th>Safe Detail</th></tr>
+      {% for row in tier7_events %}<tr><td>{{row['created_at']|timestamp}}</td><td>{{row['event_type'].replace('_',' ')|title}}</td><td>{{row['user_id'] or 'System'}}</td><td>{{('#' ~ row['plan_id']) if row['plan_id'] else '—'}}</td><td><code>{{row['detail_json'][:180]}}</code></td></tr>{% else %}<tr><td colspan="5">No recent Warfront events.</td></tr>{% endfor %}
     </table></section></details>"""
     body = """<section class="panel"><h2>Alliance War Control</h2><div class="pad">{% if active %}<p class="bad"><b>War #{{active['id']}} is active.</b></p><form class="fields-grid" method="post" action="{{url_for('end_war_dashboard')}}"><label>Winner (optional)<select name="winner"><option value="">No winner</option>{% for a in alliances %}{% if a['id'] in [active['attacker_alliance_id'],active['defender_alliance_id']] %}<option value="{{a['id']}}">[{{a['tag']}}] {{a['name']}}</option>{% endif %}{% endfor %}</select></label><div class="actions"><button>End War</button></div></form>{% else %}<p class="ok">No active war.</p><form class="fields-grid" method="post" action="{{url_for('start_war_dashboard')}}"><label>Attacker<select name="attacker" required>{% for a in alliances %}<option value="{{a['id']}}">[{{a['tag']}}] {{a['name']}}</option>{% endfor %}</select></label><label>Defender<select name="defender" required>{% for a in alliances %}<option value="{{a['id']}}">[{{a['tag']}}] {{a['name']}}</option>{% endfor %}</select></label><div class="actions"><button>Start War</button></div></form>{% endif %}</div></section><section class="panel"><h2>Alliance Management</h2><table><tr><th>Alliance</th><th>Leader Discord ID</th><th>Save</th></tr>{% for a in alliances %}<tr><form method="post" action="{{url_for('save_alliance',alliance_id=a['id'])}}"><td><div class="inline"><input name="tag" value="{{a['tag']}}" maxlength="5" required><input name="name" value="{{a['name']}}" maxlength="30" required></div></td><td><input name="leader_id" type="number" value="{{a['leader_id']}}" required></td><td><button>Save</button></td></form></tr>{% else %}<tr><td colspan="3">No Alliances. Players can use /alliance_create.</td></tr>{% endfor %}</table></section>"""
     units_panel = """<details class="creator" {% if edit_unit or creating %}open{% endif %}><summary class="btn">＋ Create New War Unit / Tank Model</summary><section class="panel"><h2>{{'Edit' if edit_unit else 'Create'}} War Unit Model</h2><div class="notice">Categories control the menus in <code>/army_recruit</code>. Branch controls whether the unit appears in <code>/army</code>, <code>/navy</code> or <code>/airforce</code>. Multi-emoji names remain visible in text; buttons automatically use a safe single emoji.</div><form class="fields" method="post" action="{{url_for('save_war_unit')}}"><input type="hidden" name="id" value="{{edit_unit['id'] if edit_unit else ''}}"><div class="fields-grid"><label>Internal Code<input name="code" value="{{edit_unit['code'] if edit_unit else ''}}" placeholder="m1a2_abrams" required></label><label>Model Name<input name="name" value="{{edit_unit['name'] if edit_unit else ''}}" placeholder="M1A2 Abrams" required></label><label>Emoji<input name="emoji" value="{{edit_unit['emoji'] if edit_unit else '🪖'}}"></label><label>Recruit Category<select name="category_id">{% for category in categories %}<option value="{{category['id']}}" {% if edit_unit and edit_unit['category_id']==category['id'] %}selected{% endif %}>{{category['emoji']}} {{category['label']}}</option>{% endfor %}</select></label><label>Service Branch<select name="branch">{% for branch in ['land','tank','air','navy','special'] %}<option {% if edit_unit and edit_unit['branch']==branch %}selected{% endif %}>{{branch}}</option>{% endfor %}</select></label><label>Recruit Cost (War Credits)<input type="number" min="0" name="cost" value="{{edit_unit['cost'] if edit_unit else 100}}" required></label><label>Power per Unit<input type="number" min="0" name="power" value="{{edit_unit['power'] if edit_unit else 1}}" required></label><label>Display Order<input type="number" min="0" name="position" value="{{edit_unit['position'] if edit_unit else 10}}"></label><label>Enabled<select name="enabled"><option value="1" {% if not edit_unit or edit_unit['enabled'] %}selected{% endif %}>Yes</option><option value="0" {% if edit_unit and not edit_unit['enabled'] %}selected{% endif %}>No</option></select></label><label>Description<textarea name="description">{{edit_unit['description'] if edit_unit else ''}}</textarea></label></div><div class="actions"><button>Save War Unit</button></div></form></section></details><section class="panel"><h2>War Unit & Tank Model Library</h2><div class="notice">The library below now uses the same saved default sorting as <code>/army_recruit</code>: <b>{{default_recruit_sort.replace('_',' ').title()}}</b>.</div><div class="library">{% for u in units %}<article class="library-card"><h3>{{u['emoji']}} {{u['name']}}</h3><span class="badge">{{u['category_emoji'] or '⚔️'}} {{u['category_label'] or 'Uncategorised'}} · {{u['branch']|upper}}</span><p>{{u['description']}}</p><div class="statline">Code: {{u['code']}}<br>⚔️ Cost: {{u['cost']}} War Credits<br>💥 Power: {{u['power']}} each<br>📊 Cost / Power: {{u['cost_per_power']}}<br>Order: {{u['position']}}<br><span class="{{'ok' if u['enabled'] else 'bad'}}">{{'Enabled' if u['enabled'] else 'Disabled'}}</span></div><div class="actions"><a class="btn" href="{{url_for('war_control',edit_unit=u['id'])}}">Edit Model</a><form method="post" action="{{url_for('toggle_war_unit',unit_id=u['id'])}}"><button class="{{'danger' if u['enabled'] else 'secondary'}}">{{'Disable' if u['enabled'] else 'Enable'}}</button></form></div></article>{% endfor %}</div></section>"""
@@ -2006,10 +2006,10 @@ def tier7_save_settings():
             )
             changed += 1
         db.commit()
-        flash(f"Saved {changed} Tier 7 Warfront setting(s).")
+        flash(f"Saved {changed} Warfront setting(s).")
     except (TypeError, ValueError) as error:
         db.rollback()
-        flash(f"Tier 7 settings were not saved: {error}")
+        flash(f"Warfront settings were not saved: {error}")
     db.close()
     return redirect(url_for("war_control") + "#tier7-control")
 
@@ -2061,7 +2061,7 @@ def tier7_save_profile():
             capital_priority=int(request.form.get("capital_priority", 1)),
             auto_reinforce=int(request.form.get("auto_reinforce", 0)),
         )
-        flash("Tier 7 defence profile saved.")
+        flash("Warfront defence profile saved.")
     except (TypeError, ValueError) as error:
         db.rollback()
         flash(f"Defence profile was not saved: {error}")
@@ -2886,7 +2886,7 @@ def research_control():
         <label>{{label}}<input type="number" name="{{key}}" min="{{technology_limits(r.code)[key][0]}}" max="{{technology_limits(r.code)[key][1]}}" value="{{r[key]}}" required><small class="setting-hint">{{technology_limits(r.code)[key][0]}}–{{technology_limits(r.code)[key][1]}} · {{r.name}}. Existing order costs and times stay unchanged.</small></label>{% endfor %}<button>Save technology</button></form></article>{% endfor %}</div></section>
         <section class="panel"><h2>Recent research orders</h2><table><tr><th>Nation</th><th>Research</th><th>Paid XC</th><th>Status</th><th>Ready</th></tr>
         {% for j in jobs %}<tr><td>{{j.nation_name}}</td><td>{{j.name}} · Lv {{j.level}}</td><td>{{j.paid}}</td><td>{{'active benefit' if j.status == 'queued' and j.ready_at <= now else j.status}}</td><td>{{j.ready_at|timestamp}}</td></tr>{% endfor %}</table></section>'''
-        return admin_page('Tier 8 Research', body, rows=rows, jobs=jobs, settings=settings, now=int(time.time()), technology_limits=settings_admin.technology_limits)
+        return admin_page('Research', body, rows=rows, jobs=jobs, settings=settings, now=int(time.time()), technology_limits=settings_admin.technology_limits)
     finally:
         db.close()
 
