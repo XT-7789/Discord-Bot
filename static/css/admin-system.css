@@ -1200,6 +1200,94 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   font-size: 13px;
 }
 
+/* Section controls are disclosures, with clear open and closed states. */
+.war-control-page > details.creator,
+.metric-group {
+  margin: 0 0 14px;
+  border: 1px solid var(--line-light);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.war-control-page > details.creator > summary.btn,
+.metric-group > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 58px;
+  padding: 16px 20px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 0;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.5;
+  cursor: pointer;
+  list-style: none;
+  text-align: left;
+}
+
+.war-control-page > details.creator > summary::-webkit-details-marker,
+.metric-group > summary::-webkit-details-marker { display: none; }
+
+.war-control-page > details.creator > summary::after,
+.metric-group > summary::after {
+  content: '+';
+  flex: 0 0 24px;
+  text-align: center;
+  color: var(--cyan);
+  font-size: 22px;
+}
+
+.war-control-page > details.creator[open] > summary::after,
+.metric-group[open] > summary::after { content: '−'; }
+
+.war-control-page > details.creator > summary:hover,
+.metric-group > summary:hover {
+  background: var(--surface-hover);
+  transform: none;
+  filter: none;
+  box-shadow: none;
+}
+
+.war-control-page > details.creator[open] > summary,
+.metric-group[open] > summary {
+  color: var(--cyan-bright);
+  border-bottom: 1px solid var(--line-light);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.war-control-page > details.creator > .panel {
+  margin: 16px;
+  box-shadow: none;
+}
+
+.priority-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 20px; }
+.priority-item { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-card); }
+.priority-item strong { display: block; color: var(--text); font-size: 16px; }
+.priority-item span { display: block; margin-top: 8px; color: var(--text-muted); font-size: 13px; }
+.overview-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 0 20px 20px; }
+.overview-primary { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0 0 24px; }
+.overview-metrics { margin-bottom: 28px; }
+.metric-group .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.systems-compact .system-tag { flex-wrap: wrap; }
+.system-tag span:last-child:not(.system-dot) { font-size: 11px; font-weight: 500; }
+
+@media (max-width: 640px) {
+  .priority-grid { grid-template-columns: 1fr; padding: 14px; gap: 8px; }
+  .priority-item { padding: 12px; }
+  .overview-shortcuts { grid-template-columns: 1fr 1fr; padding: 0 14px 14px; }
+  .overview-primary.stats-grid { grid-template-columns: 1fr 1fr; padding: 0 0 20px; }
+  .metric-group .stats-grid { grid-template-columns: 1fr; }
+  .war-control-page > details.creator > summary.btn { padding: 14px; font-size: 14px; }
+  .war-control-page > details.creator > .panel { margin: 10px; }
+}
+
 /* --- LOGIN --- */
 body.login #dashboard-nav,
 body.login header .mobile-menu {

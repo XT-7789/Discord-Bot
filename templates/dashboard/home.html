@@ -1,36 +1,52 @@
 {% import "dashboard/_components.html" as comps %}
 
-<section class="workspace-launcher" aria-label="Workspaces">
-  {{ comps.workspace_tile('casino_control', '01 / PLAY', 'Casino & Free Games', 'Game availability, limits and play statistics.', 'Open game controls →', '🎰') }}
-  {{ comps.workspace_tile('settings', '02 / ECONOMY', 'Economy Settings', 'Account rules, earning and market configuration.', 'Manage economy →', '💰') }}
-  {{ comps.workspace_tile('applications_control', '03 / COMMUNITY', 'Staff Workspace', pending_applications ~ ' pending applications · review community requests.', 'Review applications →', '👥') }}
+<section class="panel overview-priorities" aria-label="Administration overview">
+  <h2>Today at a glance</h2>
+  <div class="priority-grid">
+    <a class="priority-item" href="{{ url_for('applications_control') }}"><strong>{{ pending_applications }} pending applications</strong><span>{{ 'Review community requests →' if pending_applications else 'No applications waiting for review' }}</span></a>
+    <a class="priority-item" href="#system-status"><strong>Disabled systems: {{ systems|rejectattr('enabled')|list|length }}</strong><span>Review availability · disabled may be intentional →</span></a>
+    <a class="priority-item" href="{{ url_for('war_control') }}"><strong>{{ 'Alliance war active' if war else 'No active alliance war' }}</strong><span>{{ 'Open War Control →' if war else 'All alliances are at peace' }}</span></a>
+  </div>
+  <div class="overview-shortcuts">
+    <a class="quick-btn" href="{{ url_for('players') }}">Search Players →</a>
+    <a class="quick-btn" href="{{ url_for('logs') }}">View Logs →</a>
+    <a class="quick-btn" href="{{ url_for('casino_control') }}">Games →</a>
+    <a class="quick-btn" href="{{ url_for('settings') }}">Economy Settings →</a>
+  </div>
 </section>
 
-<div class="grid stats-grid">
-  {{ comps.stat_card_icon('🌍', 'Nations', s['nations'], 'cyan') }}
+<div class="grid stats-grid overview-primary">
+  {{ comps.stat_card_icon('🌍', 'Players / Nations', s['nations'], 'cyan') }}
+  {{ comps.stat_card_icon('📈', 'Active Today', engagement['active_today'] if engagement else '—', 'green') }}
   {{ comps.stat_card_icon('💰', 'Wallet XC', s['xc'], 'gold') }}
   {{ comps.stat_card_icon('🏦', 'Bank XC', s['bank_xc'], 'purple') }}
-  {{ comps.stat_card_icon('⚔️', 'War Credits', s['war_credits'], 'red') }}
+</div>
+
+<div class="overview-metrics">
+<details class="metric-group"><summary>Economy details</summary><div class="grid stats-grid">
   {{ comps.stat_card_icon('💎', 'XCrystals', s['crystals'], 'cyan') }}
-  {{ comps.stat_card_icon('🛡️', 'Military Power', s['power'], 'gold') }}
   {{ comps.stat_card_icon('📦', 'Active Items / Jobs', s['items'] ~ ' / ' ~ s['jobs'], 'green') }}
   {{ comps.stat_card_icon('🏪', 'Market Listings', s['listings'], 'purple') }}
+</div></details>
+<details class="metric-group"><summary>War details</summary><div class="grid stats-grid">
+  {{ comps.stat_card_icon('⚔️', 'War Credits', s['war_credits'], 'red') }}
+  {{ comps.stat_card_icon('🛡️', 'Military Power', s['power'], 'gold') }}
   {{ comps.stat_card_icon('⚡', 'Battles Recorded', s['battles'], 'red') }}
-</div>
+</div></details>
 
 <!-- Engagement Stats Bar -->
 {% if engagement %}
-<div class="grid stats-grid engagement-bar">
-  {{ comps.stat_card_icon('📈', 'Active Today', engagement['active_today'], 'green') }}
-  {{ comps.stat_card_icon('💬', 'XP Earned Today', engagement['xp_today'], 'cyan') }}
+<details class="metric-group"><summary>Engagement details</summary><div class="grid stats-grid engagement-bar">
+  {{ comps.stat_card_icon('💬', 'Weekly XP · Today’s Active Members', engagement['xp_today'], 'cyan') }}
   {{ comps.stat_card_icon('🎮', 'Games Played Today', engagement['games_today'], 'purple') }}
   {{ comps.stat_card_icon('🔥', 'Active Streaks', engagement['active_streaks'], 'gold') }}
-</div>
+</div></details>
 {% endif %}
+</div>
 
 <div class="dashboard-two-col">
   <!-- Left column: System Control -->
-  <section class="panel">
+  <section class="panel" id="system-status">
     <h2>🩺 System Control Center</h2>
     <div class="pad">
       <div class="notice">Live settings are read directly from X BOT's database. Click a system to configure it.</div>
@@ -39,6 +55,7 @@
           <a class="system-tag {{ 'on' if system['enabled'] else 'off' }}" href="{{ url_for(system['endpoint']) }}">
             <span class="system-dot"></span>
             {{ system['label'] }}
+            <span>{{ 'Enabled' if system['enabled'] else 'Disabled' }}</span>
           </a>
         {% endfor %}
       </div>
