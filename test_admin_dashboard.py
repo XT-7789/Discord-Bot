@@ -79,6 +79,23 @@ class AdminDashboardTests(unittest.TestCase):
     def values(self):
         return dict(self.db.execute('SELECT key,value FROM economy_settings'))
 
+    def test_dashboard_shared_assets_and_economy_sections(self):
+        response = self.client.get('/tier6-economy')
+        self.assertEqual(200, response.status_code)
+        html = response.get_data(as_text=True)
+        for section in ('rules', 'stocks', 'contracts', 'trades', 'production'):
+            self.assertEqual(1, html.count(f'id="economy-{section}"'))
+            self.assertIn(f'href="#economy-{section}"', html)
+        for asset in ('css/dashboard-components.css', 'dashboard-forms.js', 'economy-tabs.js'):
+            self.assertIn(asset, html)
+            with closing(self.client.get('/static/' + asset)) as asset_response:
+                self.assertEqual(200, asset_response.status_code)
+        self.assertIn('id="company-create"', html)
+        self.assertIn('id="contract-create"', html)
+        log_html = self.client.get('/log-settings').get_data(as_text=True)
+        self.assertNotIn('const enhancePicker', log_html)
+        self.assertIn('dashboard-forms.js', log_html)
+
     def test_svip_settings_fields_atomic_validation_and_permissions(self):
         self.assertIn(b'SVIP Extra Production Slots',self.client.get('/casino').data)
         response=self.client.post('/casino',data={'action':'save-vip','server_svip_production_slots':'3','server_svip_market_listings':'6','server_svip_production_percent':'10'})

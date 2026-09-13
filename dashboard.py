@@ -1418,6 +1418,10 @@ def tier6_economy_control():
       </div>
     </div></section>
 
+    <nav class="economy-tabs" aria-label="Economy sections">
+      <a href="#economy-rules">Rules</a><a href="#economy-stocks">Stocks</a><a href="#economy-contracts">Contracts</a><a href="#economy-trades">Transactions</a><a href="#economy-production">Production</a>
+    </nav>
+    <div class="economy-tab-panel" id="economy-rules">
     """ + dashboard_ui.SETTINGS_PANEL + """
 
     <section class="panel"><h2>🔗 Detailed Economy Editors</h2><div class="library">
@@ -1428,7 +1432,8 @@ def tier6_economy_control():
       <a class="library-card" href="{{url_for('finance_control')}}"><h3>🏦 Bills & Income</h3><p>Recurring XC sources and optional currency sinks.</p></a>
     </div></section>
 
-    <details class="creator"><summary class="btn purple">＋ Create Stock Company</summary><section class="panel"><h2>New Virtual Company</h2>
+    </div><div class="economy-tab-panel" id="economy-stocks">
+    <details class="creator" id="company-create"><summary class="btn purple">＋ Create Stock Company</summary><section class="panel"><h2>New Virtual Company</h2>
       <form class="fields" method="post" action="{{url_for('tier6_save_company')}}"><div class="fields-grid">
         <label>Symbol<input name="symbol" maxlength="8" required></label><label>Name<input name="name" required></label>
         <label>Emoji<input name="emoji" value="📈"></label><label>Industry<input name="industry" value="Industry" required></label>
@@ -1438,18 +1443,20 @@ def tier6_economy_control():
         <label>Trend % per Update<input type="number" min="-20" max="20" name="trend" value="0"></label><label>Status<select name="enabled"><option value="1">Open</option><option value="0">Paused</option></select></label>
       </div><button>Create Company</button></form></section></details>
 
-    <section class="panel"><h2>📈 Virtual Stock Companies</h2><div class="library">{% for c in companies %}<article class="library-card"><form class="fields" method="post" action="{{url_for('tier6_save_company')}}">
+    <section class="panel"><h2>📈 Virtual Stock Companies</h2><div class="library">{% for c in companies %}<article class="library-card economy-record"><form class="fields" method="post" action="{{url_for('tier6_save_company')}}">
       <input type="hidden" name="id" value="{{c['id']}}"><h3>{{c['emoji']}} {{c['symbol']}} · {{c['name']}}</h3>
       <div class="statline">Price {{c['price']}} XC · Previous {{c['previous_price']}}<br>Held {{c['held']}} / {{c['total_shares']}} · Trades {{c['trades']}}</div>
+      <span class="record-status">{{ 'Open' if c['enabled'] else 'Paused' }}</span><details class="creator record-editor" id="company-{{c['id']}}"><summary class="btn">Edit Company</summary><div class="record-fields">
       <div class="fields-grid"><label>Symbol<input name="symbol" value="{{c['symbol']}}" required></label><label>Name<input name="name" value="{{c['name']}}" required></label>
       <label>Emoji<input name="emoji" value="{{c['emoji']}}"></label><label>Industry<input name="industry" value="{{c['industry']}}"></label>
       <label>Description<textarea name="description">{{c['description']}}</textarea></label><label>Current Price<input type="number" min="1" name="price" value="{{c['price']}}"></label>
       <label>Minimum<input type="number" min="1" name="min_price" value="{{c['min_price']}}"></label><label>Maximum<input type="number" min="1" name="max_price" value="{{c['max_price']}}"></label>
       <label>Total Shares<input type="number" min="1" name="total_shares" value="{{c['total_shares']}}"></label><label>Volatility %<input type="number" min="1" max="50" name="volatility" value="{{c['volatility']}}"></label>
       <label>Trend<input type="number" min="-20" max="20" name="trend" value="{{c['trend']}}"></label><label>Status<select name="enabled"><option value="1" {% if c['enabled'] %}selected{% endif %}>Open</option><option value="0" {% if not c['enabled'] %}selected{% endif %}>Paused</option></select></label></div>
-      <button>Save Company</button></form></article>{% endfor %}</div></section>
+      <button>Save Company</button></div></details></form></article>{% endfor %}</div></section>
 
-    <details class="creator"><summary class="btn teal">＋ Create Contract</summary><section class="panel"><h2>New Economy Contract</h2>
+    </div><div class="economy-tab-panel" id="economy-contracts">
+    <details class="creator" id="contract-create"><summary class="btn teal">＋ Create Contract</summary><section class="panel"><h2>New Economy Contract</h2>
       <form class="fields" method="post" action="{{url_for('tier6_save_contract')}}"><div class="fields-grid">
         <label>Unique Key<input name="contract_key" required></label><label>Title<input name="title" required></label><label>Emoji<input name="emoji" value="📋"></label>
         <label>Description<textarea name="description"></textarea></label><label>Action<select name="action_type">{% for a in ['mine','sell','collect','develop','trade','recruit','craft','stock_trade'] %}<option>{{a}}</option>{% endfor %}</select></label>
@@ -1459,21 +1466,25 @@ def tier6_economy_control():
         <label>Minimum Nation Level<input type="number" min="1" max="10" name="minimum_level" value="1"></label><label>Status<select name="enabled"><option value="1">Open</option><option value="0">Closed</option></select></label>
       </div><button>Create Contract</button></form></section></details>
 
-    <section class="panel"><h2>📋 Contracts</h2><div class="library">{% for c in contracts %}<article class="library-card"><form class="fields" method="post" action="{{url_for('tier6_save_contract')}}">
+    <section class="panel"><h2>📋 Contracts</h2><div class="library">{% for c in contracts %}<article class="library-card economy-record"><form class="fields" method="post" action="{{url_for('tier6_save_contract')}}">
       <input type="hidden" name="id" value="{{c['id']}}"><h3>{{c['emoji']}} {{c['title']}}</h3><div class="statline">{{c['period']}} · {{c['action_type']}} ×{{c['target']}} · {{c['claims']}} claims</div>
+      <span class="record-status">{{ 'Open' if c['enabled'] else 'Closed' }}</span><details class="creator record-editor" id="contract-{{c['id']}}"><summary class="btn">Edit Contract</summary><div class="record-fields">
       <div class="fields-grid"><label>Unique Key<input name="contract_key" value="{{c['contract_key']}}"></label><label>Title<input name="title" value="{{c['title']}}"></label><label>Emoji<input name="emoji" value="{{c['emoji']}}"></label>
       <label>Description<textarea name="description">{{c['description']}}</textarea></label><label>Action<select name="action_type">{% for a in ['mine','sell','collect','develop','trade','recruit','craft','stock_trade'] %}<option {% if c['action_type']==a %}selected{% endif %}>{{a}}</option>{% endfor %}</select></label>
       <label>Target<input type="number" min="1" name="target" value="{{c['target']}}"></label><label>Reward XC<input type="number" min="0" name="reward_xc" value="{{c['reward_xc']}}"></label>
       <label>Reward WC<input type="number" min="0" name="reward_war_credits" value="{{c['reward_war_credits']}}"></label><label>Reward Item<select name="reward_item_id"><option value="">None</option>{% for i in items %}<option value="{{i['id']}}" {% if c['reward_item_id']==i['id'] %}selected{% endif %}>{{i['emoji']}} {{i['name']}}</option>{% endfor %}</select></label>
       <label>Item Quantity<input type="number" min="0" name="reward_item_quantity" value="{{c['reward_item_quantity']}}"></label><label>Period<select name="period">{% for p in ['daily','weekly','once'] %}<option {% if c['period']==p %}selected{% endif %}>{{p}}</option>{% endfor %}</select></label>
       <label>Minimum Level<input type="number" min="1" max="10" name="minimum_level" value="{{c['minimum_level']}}"></label><label>Status<select name="enabled"><option value="1" {% if c['enabled'] %}selected{% endif %}>Open</option><option value="0" {% if not c['enabled'] %}selected{% endif %}>Closed</option></select></label></div>
-      <button>Save Contract</button></form></article>{% endfor %}</div></section>
+      <button>Save Contract</button></div></details></form></article>{% endfor %}</div></section>
 
+    </div><div class="economy-tab-panel" id="economy-trades">
     <section class="panel"><h2>📊 Last 24 Hours Activity</h2><table><tr><th>Action</th><th>Count</th></tr>{% for a in activity %}<tr><td>{{a['action']}}</td><td>{{a['count']}}</td></tr>{% else %}<tr><td colspan="2">No Economy activity.</td></tr>{% endfor %}</table></section>
     <section class="panel"><h2>💹 Recent Stock Trades</h2><table><tr><th>Player</th><th>Company</th><th>Side</th><th>Quantity</th><th>Price</th><th>Fee</th><th>Time</th></tr>{% for t in recent_trades %}<tr><td>{{t['player_name']}}</td><td>{{t['symbol']}}</td><td>{{t['side']}}</td><td>{{t['quantity']}}</td><td>{{t['price']}} XC</td><td>{{t['fee']}}</td><td>{{t['created_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="7">No trades.</td></tr>{% endfor %}</table></section>
     <section class="panel"><h2>🏷️ Recent Player Market Trades</h2><table><tr><th>Buyer</th><th>Seller</th><th>Item</th><th>Quantity</th><th>Price</th><th>Fee</th><th>Time</th></tr>{% for t in market_trades %}<tr><td>{{t['buyer_name']}}</td><td>{{t['seller_name']}}</td><td>{{t['item_emoji']}} {{t['item_name']}}</td><td>{{t['quantity']}}</td><td>{{t['price_each']}} XC</td><td>{{t['fee']}}</td><td>{{t['created_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="7">No player market trades.</td></tr>{% endfor %}</table></section>
+    </div><div class="economy-tab-panel" id="economy-production">
     <section class="panel"><h2>🏭 Production Queue</h2><table><tr><th>Player</th><th>Recipe</th><th>Quantity</th><th>Status</th><th>Ready</th></tr>{% for q in production %}<tr><td>{{q['player_name']}}</td><td>{{q['recipe_name']}}</td><td>{{q['quantity']}}</td><td>{{q['status']}}</td><td>{{q['ready_at']|timestamp}}</td></tr>{% else %}<tr><td colspan="5">No production jobs.</td></tr>{% endfor %}</table></section>
     """
+    body += '</div>'
     return admin_page("Economy Control", body, settings=settings, totals=totals, stock_value=stock_value,
                       companies=companies, contracts=contracts, items=items, recent_trades=recent_trades,
                       market_trades=market_trades, production=production, activity=activity, health=health,
@@ -1956,8 +1967,8 @@ def war_control():
  const matching=()=>{const q=search.value.trim().toLowerCase(),c=country.value.trim().toLowerCase();return original.filter(o=>o.kind===mode()&&(!c||o.label.toLowerCase().includes(', '+c))&&(!q||o.label.toLowerCase().includes(q)))};
  const renderOptions=()=>{const q=search.value.trim().toLowerCase(),c=country.value;destination.innerHTML='';destination.append(new Option(c||q?(mode()==='capital'?'Choose a capital city…':'Choose a province/state…'):'Choose a country or search first…',''));matching().slice(0,250).forEach(o=>{const option=new Option(o.label,o.value);option.dataset.kind=o.kind;destination.append(option)});if(selected&&[...destination.options].some(o=>o.value===selected))destination.value=selected};
  const selectCountry=name=>{country.value=name;selected='';fitCountry(name);renderOptions();renderCountryResults(false);renderSearchResults();draw();status.innerHTML='<span>Filtered to country/area</span><strong>'+name+'</strong>';search.focus()};
- const renderCountryResults=(showAll=true)=>{if(!countryResults)return;const q=country.value.trim().toLowerCase();countryResults.innerHTML='';if(!q&&!showAll)return;const rows=countries.filter(name=>!q||name.toLowerCase().includes(q));const count=document.createElement('span');count.className='muted';count.textContent=rows.length+' countr'+(rows.length===1?'y':'ies');countryResults.append(count);rows.slice(0,100).forEach(name=>{const button=document.createElement('button');button.type='button';button.className='territory-result';button.textContent=name;button.addEventListener('click',()=>selectCountry(name));countryResults.append(button)});if(!rows.length)countryResults.innerHTML='<span class="muted">No matching country or area.</span>'};
- const renderSearchResults=()=>{if(!results)return;const q=search.value.trim(),c=country.value.trim();results.innerHTML='';if(!q&&!c)return;const rows=matching();const count=document.createElement('span');count.className='muted';count.textContent=rows.length+' available result'+(rows.length===1?'':'s');results.append(count);rows.slice(0,100).forEach(o=>{const button=document.createElement('button');button.type='button';button.className='territory-result';button.textContent=o.label;button.addEventListener('click',()=>{const r=regions.find(x=>x.code===o.value);if(r)choose(r);else{selected=o.value;destination.value=o.value;status.innerHTML='<span>Selected destination</span><strong>'+o.label+'</strong>'}results.innerHTML=''});results.append(button)});if(!rows.length)results.innerHTML='<span class="muted">No matching available province/state. Try removing the country filter.</span>'};
+ const renderCountryResults=(showAll=true)=>{if(!countryResults)return;const q=country.value.trim().toLowerCase();countryResults.innerHTML='';if(!q&&!showAll)return;const rows=countries.filter(name=>!q||name.toLowerCase().includes(q));const count=document.createElement('span');count.className='muted';count.textContent=rows.length+' countr'+(rows.length===1?'y':'ies');countryResults.append(count);rows.forEach(name=>{const button=document.createElement('button');button.type='button';button.className='territory-result';button.textContent=name;button.addEventListener('click',()=>selectCountry(name));countryResults.append(button)});if(!rows.length)countryResults.innerHTML='<span class="muted">No matching country or area.</span>'};
+ const renderSearchResults=()=>{if(!results)return;const q=search.value.trim(),c=country.value.trim();results.innerHTML='';if(!q&&!c)return;const rows=matching();const count=document.createElement('span');count.className='muted';count.textContent=rows.length+' available result'+(rows.length===1?'':'s')+(rows.length>100?' · showing first 100; refine your search':'');results.append(count);rows.slice(0,100).forEach(o=>{const button=document.createElement('button');button.type='button';button.className='territory-result';button.textContent=o.label;button.addEventListener('click',()=>{const r=regions.find(x=>x.code===o.value);if(r)choose(r);else{selected=o.value;destination.value=o.value;status.innerHTML='<span>Selected destination</span><strong>'+o.label+'</strong>'}results.innerHTML=''});results.append(button)});if(!rows.length)results.innerHTML='<span class="muted">No matching available province/state. Try removing the country filter.</span>'};
  const choose=r=>{if(r.claimed){status.innerHTML='<span class="bad">Already claimed</span><strong>'+r.name+'</strong>';return}selected=r.code;country.value=r.country;fitCountry(r.country);renderOptions();destination.value=r.code;status.innerHTML='<span>Selected destination</span><strong>'+r.name+'</strong>';draw()};
  country.addEventListener('focus',()=>renderCountryResults(true));
  country.addEventListener('input',()=>{selected='';fitCountry(country.value);renderOptions();renderCountryResults(true);renderSearchResults();draw();status.innerHTML=country.value?'<span>Choose a country from the scrollable list</span><strong>'+country.value+'</strong>':'<span>Search globally or choose a country.</span>'});

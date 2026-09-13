@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{% block title %}Overview{% endblock %} · X BOT</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin-system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-components.css', v='3.0.2') }}">
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -91,6 +92,17 @@
 
 <script>
 (() => {
+    // Keep wide tables scrollable without clipping the page on phones.
+    document.querySelectorAll('#main-content table').forEach(table => {
+        if (table.parentElement.matches('.table-wrap, .table-scroll')) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-scroll';
+        wrapper.tabIndex = 0;
+        wrapper.setAttribute('role', 'region');
+        wrapper.setAttribute('aria-label', 'Scrollable data table');
+        table.before(wrapper);
+        wrapper.append(table);
+    });
     // Keep scroll position on form submits/reloads
     const scrollKey = `xbot-scroll:${location.pathname}`;
     const savedScroll = sessionStorage.getItem(scrollKey);
@@ -154,5 +166,6 @@
 })();
 </script>
 {% block scripts %}{% endblock %}
+<script src="{{ url_for('static', filename='dashboard-forms.js', v='3.0.3') }}"></script>
 </body>
 </html>
