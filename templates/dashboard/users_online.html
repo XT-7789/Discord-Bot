@@ -1,0 +1,39 @@
+<section class="panel">
+  <h2>🟢 Dashboard Users & Sessions</h2>
+  <div class="pad">
+    <div class="notice">Online means the Dashboard received activity during the last 5 minutes. Closing a browser without logging out changes to offline automatically after 5 minutes.</div>
+
+    {% if rows %}
+      <div class="online-summary">
+        <span class="stat-pill green">{{ rows|selectattr('active')|list|length }} online</span>
+        <span class="stat-pill muted">{{ rows|length }} total sessions (30 days)</span>
+      </div>
+    {% endif %}
+
+    <div class="user-grid">
+      {% for r in rows %}
+        <article class="user-card">
+          <div class="user-head">
+            <div class="avatar {{ 'avatar-online' if r['active'] and now - r['last_seen'] <= 300 else '' }}">{{ r['user_name'][0]|upper }}</div>
+            <div>
+              <b>{{ r['user_name'] }}</b>
+              <span class="role-tag">{{ r['access_level'] }}</span>
+            </div>
+          </div>
+          <div class="user-status-line">
+            <span class="{{ 'ok' if r['active'] and now - r['last_seen'] <= 300 else 'muted' }}">
+              {{ '● Online now' if r['active'] and now - r['last_seen'] <= 300 else '○ Offline' }}
+            </span>
+          </div>
+          <div class="user-meta-grid">
+            <div><small class="muted">Last page</small><strong>{{ r['last_endpoint'] }}</strong></div>
+            <div><small class="muted">Last seen</small><strong>{{ (now - r['last_seen']) // 60 }}m ago</strong></div>
+            <div><small class="muted">Login</small><strong>{{ r['login_at']|timestamp }}</strong></div>
+          </div>
+        </article>
+      {% else %}
+        <p class="notice">No Dashboard sessions recorded yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>

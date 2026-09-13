@@ -491,7 +491,7 @@ def dashboard_users():
         WHERE last_seen>=? ORDER BY active DESC,last_seen DESC""", (now - 30 * 86400,)).fetchall()
     db.close()
     rows = [row for row in rows if not is_automated_dashboard_session(row["user_id"], row["user_name"])]
-    body = """<section class="panel"><h2>🟢 Dashboard Users & Sessions</h2><div class="notice">Online means the Dashboard received activity during the last 5 minutes. Closing a browser without logging out changes to offline automatically after 5 minutes.</div><div class="user-grid">{% for r in rows %}<article class="user-card"><div class="user-head"><div class="avatar">{{r['user_name'][0]|upper}}</div><div><b>{{r['user_name']}}</b><br><span class="muted">{{r['access_level']}}</span></div></div><div class="statline"><span class="{{'ok' if r['active'] and now-r['last_seen']<=300 else 'muted'}}">{{'● Online now' if r['active'] and now-r['last_seen']<=300 else '○ Offline'}}</span><br>Last page: <b>{{r['last_endpoint']}}</b><br>Last seen: {{now-r['last_seen']}} seconds ago<br>Login time: {{r['login_at']}}</div></article>{% else %}<p class="notice">No Dashboard sessions recorded yet.</p>{% endfor %}</div></section>"""
+    body = render_template('dashboard/users_online.html', rows=rows, now=now)
     return admin_page("Dashboard Online", body, rows=rows, now=now)
 
 
@@ -536,11 +536,22 @@ def home():
     pending_applications = db.execute("SELECT COUNT(*) count FROM application_submissions WHERE status='pending'").fetchone()["count"]
     leaders = db.execute("""SELECT x.*,COALESCE(NULLIF(p.display_name,''),CAST(x.user_id AS TEXT)) display_name
         FROM xp_profiles x LEFT JOIN players p ON p.user_id=x.user_id ORDER BY x.total_xp DESC LIMIT 50""").fetchall()
+    # Engagement stats for today
+    today_start = int(time.time()) - (int(time.time()) % 86400)
+    try:
+        active_today = db.execute("SELECT COUNT(DISTINCT user_id) c FROM xp_profiles WHERE last_message_xp>=? OR last_voice_xp>=?", (today_start, today_start)).fetchone()["c"]
+        xp_today = db.execute("SELECT COALESCE(SUM(weekly_xp),0) c FROM xp_profiles WHERE last_message_xp>=?", (today_start,)).fetchone()["c"]
+        games_today = db.execute("SELECT COUNT(*) c FROM casual_game_completions WHERE completed_at>=?", (today_start,)).fetchone()["c"]
+        active_streaks = db.execute("SELECT COUNT(*) c FROM xp_profiles WHERE current_streak>0").fetchone()["c"]
+        engagement = {"active_today": active_today, "xp_today": xp_today, "games_today": games_today, "active_streaks": active_streaks}
+    except Exception:
+        engagement = None
     db.close()
     body = render_template('dashboard/home.html',
         s=stats, war=active_war, recent=recent, systems=systems,
         unused_items=unused_items, disabled_items=disabled_items,
-        pending_applications=pending_applications, top_players=leaders[:5])
+        pending_applications=pending_applications, top_players=leaders[:5],
+        engagement=engagement)
     return admin_page("Overview", body, s=stats, war=active_war, recent=recent, systems=systems, unused_items=unused_items, disabled_items=disabled_items, pending_applications=pending_applications)
 
 
@@ -637,7 +648,7 @@ def players():
         FROM players p LEFT JOIN jobs j ON j.id=p.job_id LEFT JOIN alliance_members am ON am.user_id=p.user_id LEFT JOIN alliances a ON a.id=am.alliance_id LEFT JOIN xp_profiles x ON x.user_id=p.user_id
         WHERE (?='' OR p.display_name LIKE ? OR p.nation_name LIKE ? OR CAST(p.user_id AS TEXT) LIKE ?) ORDER BY {order}""", (search, f"%{search}%", f"%{search}%", f"%{search}%")).fetchall()
     db.close()
-    body = """<section class="panel"><div class="top-actions"><h2 style="padding:0;border:0;margin-right:auto">👤 User Profiles ({{rows|length}})</h2><form><select name="sort"><option value="wallet" {% if sort=='wallet' %}selected{% endif %}>Sort: Wallet</option><option value="bank" {% if sort=='bank' %}selected{% endif %}>Sort: Bank</option><option value="crystals" {% if sort=='crystals' %}selected{% endif %}>Sort: XCrystals</option><option value="power" {% if sort=='power' %}selected{% endif %}>Sort: Military Power</option><option value="name" {% if sort=='name' %}selected{% endif %}>Sort: Name</option></select><input name="q" value="{{search}}" placeholder="Search users..."><button>Search</button></form></div><div class="user-grid">{% for p in rows %}<article class="user-card"><div class="user-head"><div class="avatar">{{(p['display_name'] or p['nation_name'])[0]|upper}}</div><div><b>👤 {{p['display_name'] or 'Unknown Discord User'}}</b><br><span class="muted">Discord ID: {{p['user_id']}}</span><br><small>🏳️ Nation: {{p['nation_name']}}</small></div></div><div class="user-stats"><div class="user-stat">🪙 {{p['xc']}} XC</div><div class="user-stat">🏦 {{p['bank_xc']}} XC</div><div class="user-stat">💎 {{p['xcrystals']}}</div><div class="user-stat">⚔️ {{p['power']}} Power</div></div><div class="user-meta"><span>🎒 {{p['inventory_count']}} items</span><span>🏷️ {{p['listing_count']}} listings</span></div><p class="muted">💼 {{p['job_name'] or 'No job'}} · 🤝 {% if p['alliance_name'] %}[{{p['alliance_tag']}}] {{p['alliance_name']}}{% else %}No alliance{% endif %}</p><div class="actions"><a class="btn" href="{{url_for('edit_player',user_id=p['user_id'])}}">✎ Edit User</a><form method="post" action="{{url_for('delete_player_data',user_id=p['user_id'])}}" onsubmit="return confirm('Delete all X BOT game data for {{p['display_name'] or p['user_id']}}? This cannot be undone. Their Discord account will NOT be deleted.')"><button class="danger">🗑 Delete X BOT Data</button></form></div></article>{% else %}<p class="notice">No matching users.</p>{% endfor %}</div></section>"""
+    body = render_template('dashboard/players.html', rows=rows, search=search, sort=sort)
     return admin_page("Users", body, rows=rows, search=search, sort=sort)
 
 

@@ -769,6 +769,213 @@ main#main-content {
   50% { opacity: 0.6; }
 }
 
+/* --- WORKSPACE ICONS --- */
+.workspace-icon {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  font-size: 36px;
+  opacity: 0.3;
+  filter: grayscale(0.3);
+  transition: opacity 0.2s;
+}
+
+.workspace-launcher > a:hover .workspace-icon {
+  opacity: 0.6;
+}
+
+/* --- ACTIVITY FEED TIMELINE --- */
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+
+.activity-item:hover {
+  background: var(--surface-card);
+}
+
+.activity-icon {
+  font-size: 22px;
+  min-width: 32px;
+  text-align: center;
+  padding-top: 2px;
+}
+
+.activity-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.activity-header strong {
+  font-size: 14px;
+  color: #fff;
+}
+
+.activity-user {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.activity-detail {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- ENGAGEMENT BAR --- */
+.engagement-bar {
+  margin-bottom: 8px;
+}
+
+/* --- ONLINE SUMMARY PILLS --- */
+.online-summary {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+}
+
+.stat-pill.green {
+  background: var(--green-bg);
+  border-color: var(--green-border);
+  color: var(--green);
+}
+
+/* --- USER CARD IMPROVEMENTS --- */
+.avatar-online {
+  box-shadow: 0 0 0 3px var(--green), 0 0 8px var(--green-glow);
+}
+
+.role-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(88, 101, 242, 0.15);
+  border: 1px solid rgba(88, 101, 242, 0.3);
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #8da4ff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 8px;
+}
+
+.user-status-line {
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+.user-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.user-meta-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-meta-grid small {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.user-meta-grid strong {
+  font-size: 14px;
+  color: #fff;
+}
+
+/* --- PLAYER SEARCH FORM --- */
+.player-search-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.player-search-form select,
+.player-search-form input {
+  padding: 8px 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 13px;
+}
+
+.player-search-form input {
+  width: 200px;
+}
+
+/* --- USER STATS GRID --- */
+.user-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.user-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--surface-card);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.user-stat strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.user-stat .muted {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* --- TABLE SCROLL --- */
+.table-scroll {
+  overflow-x: auto;
+}
+
 /* --- 3. PANELS & SURFACES --- */
 .panel {
   background: var(--surface);
@@ -1148,5 +1355,26 @@ button.purple, .btn.purple {
   
   .quick-actions {
     grid-template-columns: 1fr;
+  }
+  
+  .user-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  .user-meta-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .player-search-form {
+    flex-wrap: wrap;
+  }
+  
+  .player-search-form input {
+    width: 100%;
+  }
+  
+  .top-actions {
+    flex-direction: column;
+    gap: 12px;
   }
 }

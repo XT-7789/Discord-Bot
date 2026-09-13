@@ -1,6 +1,7 @@
-{% macro workspace_tile(endpoint, label, title, description, action_text) %}
+{% macro workspace_tile(endpoint, label, title, description, action_text, icon='') %}
   <a href="{{ url_for(endpoint) }}">
     <span>{{ label }}</span>
+    {% if icon %}<span class="workspace-icon">{{ icon }}</span>{% endif %}
     <h2>{{ title }}</h2>
     <p>{{ description }}</p>
     <b>{{ action_text }}</b>

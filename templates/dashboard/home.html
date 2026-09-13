@@ -1,9 +1,9 @@
 {% import "dashboard/_components.html" as comps %}
 
 <section class="workspace-launcher" aria-label="Workspaces">
-  {{ comps.workspace_tile('casino_control', '01 / PLAY', 'Casino & Free Games', 'Game availability, limits and play statistics.', 'Open game controls →') }}
-  {{ comps.workspace_tile('settings', '02 / ECONOMY', 'Economy Settings', 'Account rules, earning and market configuration.', 'Manage economy →') }}
-  {{ comps.workspace_tile('applications_control', '03 / COMMUNITY', 'Staff Workspace', pending_applications ~ ' pending applications · review community requests.', 'Review applications →') }}
+  {{ comps.workspace_tile('casino_control', '01 / PLAY', 'Casino & Free Games', 'Game availability, limits and play statistics.', 'Open game controls →', '🎰') }}
+  {{ comps.workspace_tile('settings', '02 / ECONOMY', 'Economy Settings', 'Account rules, earning and market configuration.', 'Manage economy →', '💰') }}
+  {{ comps.workspace_tile('applications_control', '03 / COMMUNITY', 'Staff Workspace', pending_applications ~ ' pending applications · review community requests.', 'Review applications →', '👥') }}
 </section>
 
 <div class="grid stats-grid">
@@ -17,6 +17,16 @@
   {{ comps.stat_card_icon('🏪', 'Market Listings', s['listings'], 'purple') }}
   {{ comps.stat_card_icon('⚡', 'Battles Recorded', s['battles'], 'red') }}
 </div>
+
+<!-- Engagement Stats Bar -->
+{% if engagement %}
+<div class="grid stats-grid engagement-bar">
+  {{ comps.stat_card_icon('📈', 'Active Today', engagement['active_today'], 'green') }}
+  {{ comps.stat_card_icon('💬', 'XP Earned Today', engagement['xp_today'], 'cyan') }}
+  {{ comps.stat_card_icon('🎮', 'Games Played Today', engagement['games_today'], 'purple') }}
+  {{ comps.stat_card_icon('🔥', 'Active Streaks', engagement['active_streaks'], 'gold') }}
+</div>
+{% endif %}
 
 <div class="dashboard-two-col">
   <!-- Left column: System Control -->
@@ -101,16 +111,38 @@
   </section>
 </div>
 
+<!-- Activity Feed Timeline -->
 <section class="panel">
   <h2>📊 Recent Economy Activity</h2>
-  <div class="pad table-scroll">
-    <table>
-      <tr><th>User ID</th><th>Action</th><th>Detail</th></tr>
-      {% for row in recent %}
-        <tr><td>{{ row['user_id'] }}</td><td>{{ row['action'] }}</td><td>{{ row['detail'] }}</td></tr>
-      {% else %}
-        <tr><td colspan="3" class="muted">No economy activity yet.</td></tr>
-      {% endfor %}
-    </table>
+  <div class="pad">
+    {% if recent %}
+      <div class="activity-feed">
+        {% for row in recent %}
+          <div class="activity-item">
+            <span class="activity-icon">
+              {%- if 'buy' in (row['action']|lower) or 'shop' in (row['action']|lower) -%}🛒
+              {%- elif 'sell' in (row['action']|lower) or 'market' in (row['action']|lower) -%}🏪
+              {%- elif 'casino' in (row['action']|lower) or 'gamble' in (row['action']|lower) or 'bet' in (row['action']|lower) -%}🎰
+              {%- elif 'war' in (row['action']|lower) or 'attack' in (row['action']|lower) or 'battle' in (row['action']|lower) -%}⚔️
+              {%- elif 'transfer' in (row['action']|lower) or 'pay' in (row['action']|lower) -%}💸
+              {%- elif 'mine' in (row['action']|lower) -%}⛏️
+              {%- elif 'xp' in (row['action']|lower) or 'level' in (row['action']|lower) -%}⭐
+              {%- elif 'collect' in (row['action']|lower) or 'income' in (row['action']|lower) -%}💰
+              {%- else -%}📋
+              {%- endif -%}
+            </span>
+            <div class="activity-body">
+              <div class="activity-header">
+                <strong>{{ row['action'] }}</strong>
+                <span class="activity-user muted">{{ row['user_id'] }}</span>
+              </div>
+              <p class="activity-detail">{{ row['detail'] }}</p>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No economy activity yet.</p>
+    {% endif %}
   </div>
 </section>

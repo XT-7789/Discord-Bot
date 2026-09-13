@@ -1,0 +1,58 @@
+<section class="panel">
+  <div class="top-actions">
+    <h2 style="padding:0;border:0;margin-right:auto">👤 User Profiles ({{ rows|length }})</h2>
+    <form class="player-search-form">
+      <select name="sort">
+        <option value="wallet" {{ 'selected' if sort=='wallet' }}>Sort: Wallet</option>
+        <option value="bank" {{ 'selected' if sort=='bank' }}>Sort: Bank</option>
+        <option value="crystals" {{ 'selected' if sort=='crystals' }}>Sort: XCrystals</option>
+        <option value="power" {{ 'selected' if sort=='power' }}>Sort: Military Power</option>
+        <option value="name" {{ 'selected' if sort=='name' }}>Sort: Name</option>
+      </select>
+      <input name="q" value="{{ search }}" placeholder="Search users...">
+      <button>Search</button>
+    </form>
+  </div>
+
+  <div class="user-grid">
+    {% for p in rows %}
+      <article class="user-card">
+        <div class="user-head">
+          <div class="avatar">{{ (p['display_name'] or p['nation_name'] or '?')[0]|upper }}</div>
+          <div>
+            <b>{{ p['display_name'] or 'Unknown Discord User' }}</b>
+            <br><span class="muted" style="font-size:12px">{{ p['user_id'] }}</span>
+            <br><small>🏳️ {{ p['nation_name'] }}</small>
+          </div>
+        </div>
+
+        <div class="user-stats">
+          <div class="user-stat"><span class="muted">Wallet</span><strong class="text-gold">{{ p['xc'] }}</strong></div>
+          <div class="user-stat"><span class="muted">Bank</span><strong class="text-purple">{{ p['bank_xc'] }}</strong></div>
+          <div class="user-stat"><span class="muted">XCrystals</span><strong class="text-cyan">{{ p['xcrystals'] }}</strong></div>
+          <div class="user-stat"><span class="muted">Power</span><strong class="text-danger">{{ p['power'] }}</strong></div>
+        </div>
+
+        <div class="user-meta">
+          <span>🎒 {{ p['inventory_count'] }} items</span>
+          <span>🏷️ {{ p['listing_count'] }} listings</span>
+          <span>⭐ Lv.{{ p['activity_level'] }}</span>
+        </div>
+
+        <p class="muted" style="margin:8px 0 0;font-size:13px">
+          💼 {{ p['job_name'] or 'No job' }} ·
+          🤝 {% if p['alliance_name'] %}[{{ p['alliance_tag'] }}] {{ p['alliance_name'] }}{% else %}No alliance{% endif %}
+        </p>
+
+        <div class="actions" style="margin-top:12px">
+          <a class="btn" href="{{ url_for('edit_player', user_id=p['user_id']) }}">✎ Edit</a>
+          <form method="post" action="{{ url_for('delete_player_data', user_id=p['user_id']) }}" onsubmit="return confirm('Delete all X BOT game data for {{ p['display_name'] or p['user_id'] }}? This cannot be undone.')">
+            <button class="danger">🗑 Delete</button>
+          </form>
+        </div>
+      </article>
+    {% else %}
+      <p class="notice">No matching users.</p>
+    {% endfor %}
+  </div>
+</section>
