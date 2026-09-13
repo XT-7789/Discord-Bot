@@ -1,5 +1,9 @@
 /* Shared layouts for every administration page. */
 :root { color-scheme: dark; }
+.skip-link { position: fixed; top: 8px; left: 12px; z-index: 1000; padding: 12px 18px; border-radius: 8px; background: #00cbe6; color: #071019; transform: translateY(-160%); font-weight: 700; }
+.skip-link:focus { transform: translateY(0); }
+#main-content:focus { outline: none; }
+#dashboard-nav a:focus-visible, #mobile-menu:focus-visible, #page-search:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .unsaved-banner { padding: 12px 16px; margin-bottom: 20px; border: 1px solid #726035; border-radius: 9px; background: #292310; color: #f4d58a; font-size: 14px; }
 .form-save-state { display: block; padding: 6px 0; color: #f4d58a; font-size: 13px; font-weight: 600; }
 .form-dirty .record-editor > summary.btn { color: #f4d58a; }

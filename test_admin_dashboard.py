@@ -83,6 +83,10 @@ class AdminDashboardTests(unittest.TestCase):
         response = self.client.get('/tier6-economy')
         self.assertEqual(200, response.status_code)
         html = response.get_data(as_text=True)
+        self.assertIn('class="skip-link" href="#main-content"', html)
+        self.assertIn('aria-label="Open navigation"', html)
+        self.assertIn('aria-label="Search pages or groups"', html)
+        self.assertIn('<main id="main-content" tabindex="-1">', html)
         for section in ('rules', 'stocks', 'contracts', 'trades', 'production'):
             self.assertEqual(1, html.count(f'id="economy-{section}"'))
             self.assertIn(f'href="#economy-{section}"', html)

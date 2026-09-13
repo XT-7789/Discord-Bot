@@ -5,24 +5,25 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{% block title %}Overview{% endblock %} · X BOT</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin-system.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-components.css', v='3.0.2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-components.css', v='3.0.4') }}">
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
+<a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
     <div class="header-brand">
         <h1>X SYSTEM</h1>
         <span class="version" aria-label="X BOT version 3.0">V3.0</span>
     </div>
-    <button class="mobile-menu" id="mobile-menu" type="button" aria-expanded="false" aria-controls="dashboard-nav">☰</button>
+    <button class="mobile-menu" id="mobile-menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="dashboard-nav">☰</button>
 </header>
 
 <nav id="dashboard-nav" aria-label="Administration navigation">
     <div class="nav-brand">X CONTROL</div>
     
     <label class="nav-search">
-        <input type="search" id="page-search" placeholder="Search pages..." autocomplete="off">
+        <input type="search" id="page-search" aria-label="Search pages or groups" placeholder="Search pages or groups..." autocomplete="off">
     </label>
 
     <section class="nav-group">
@@ -69,10 +70,10 @@
         <a href="{{ url_for('logs') }}">Logs</a>
         <a class="secondary" href="{{ url_for('logout') }}">Log out</a>
     </section>
-    <p id="page-search-empty" class="nav-search-empty" hidden>No matching pages.</p>
+    <p id="page-search-empty" class="nav-search-empty" role="status" hidden>No matching pages. Try another page or group name.</p>
 </nav>
 
-<main id="main-content">
+<main id="main-content" tabindex="-1">
     <div class="page-heading">
         <div>
             <span>X SYSTEM / CONTROL CENTRE</span>
@@ -105,29 +106,53 @@
     });
     // Keep scroll position on form submits/reloads
     const scrollKey = `xbot-scroll:${location.pathname}`;
-    const savedScroll = sessionStorage.getItem(scrollKey);
-    if (savedScroll !== null) {
-        sessionStorage.removeItem(scrollKey);
-        requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
-    }
-    const rememberScroll = () => sessionStorage.setItem(scrollKey, String(window.scrollY));
+    try {
+        const savedScroll = sessionStorage.getItem(scrollKey);
+        if (savedScroll !== null) {
+            sessionStorage.removeItem(scrollKey);
+            requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
+        }
+    } catch { /* Navigation remains available when browser storage is blocked. */ }
+    const rememberScroll = () => {
+        try { sessionStorage.setItem(scrollKey, String(window.scrollY)); } catch {}
+    };
     document.querySelectorAll('form').forEach(form => form.addEventListener('submit', rememberScroll));
 
     // Mobile menu toggle
     const mobileMenu = document.querySelector('#mobile-menu');
     const dashboardNav = document.querySelector('#dashboard-nav');
     if (mobileMenu && dashboardNav) {
+        const mobileViewport = matchMedia('(max-width: 1024px)');
+        const setMenu = (open, returnFocus = false) => {
+            open = open && mobileViewport.matches;
+            dashboardNav.classList.toggle('mobile-open', open);
+            dashboardNav.inert = mobileViewport.matches && !open;
+            mobileMenu.setAttribute('aria-expanded', String(open));
+            mobileMenu.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+            mobileMenu.textContent = open ? '✕' : '☰';
+            if (open) document.querySelector('#page-search')?.focus();
+            else if (returnFocus) mobileMenu.focus();
+        };
+        setMenu(false);
+        mobileViewport.addEventListener('change', () => {
+            const focusInNav = dashboardNav.contains(document.activeElement);
+            const focusOnToggle = document.activeElement === mobileMenu;
+            setMenu(false, mobileViewport.matches && focusInNav);
+            if (!mobileViewport.matches && focusOnToggle) document.querySelector('#page-search')?.focus();
+        });
         mobileMenu.addEventListener('click', event => {
             event.stopPropagation();
-            const open = dashboardNav.classList.toggle('mobile-open');
-            mobileMenu.setAttribute('aria-expanded', String(open));
-            mobileMenu.textContent = open ? '✕' : '☰';
+            setMenu(!dashboardNav.classList.contains('mobile-open'));
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && dashboardNav.classList.contains('mobile-open')) {
+                event.preventDefault();
+                setMenu(false, true);
+            }
         });
         document.addEventListener('click', event => {
             if (!dashboardNav.contains(event.target) && event.target !== mobileMenu) {
-                dashboardNav.classList.remove('mobile-open'); 
-                mobileMenu.setAttribute('aria-expanded','false'); 
-                mobileMenu.textContent='☰';
+                setMenu(false);
             }
         });
     }
@@ -150,9 +175,10 @@
             let visibleCount = 0;
             document.querySelectorAll('#dashboard-nav .nav-group').forEach(group => {
                 let groupMatches = 0;
+                const matchesGroup = group.querySelector('h2').textContent.toLowerCase().includes(query);
                 group.querySelectorAll('a').forEach(link => {
                 if(link.classList.contains('secondary')) return;
-                const match = link.textContent.toLowerCase().includes(query);
+                const match = matchesGroup || link.textContent.toLowerCase().includes(query);
                 link.style.display = match ? 'flex' : 'none';
                     if (match) groupMatches += 1;
                 });
