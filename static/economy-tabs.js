@@ -5,6 +5,7 @@
   const panels = tabs.map(tab => document.getElementById(tab.hash.slice(1)));
   const storageKey = 'xbot-economy-view';
   const pendingKey = 'xbot-economy-submitted-editor';
+  let submitAttempts = [];
   const read = key => { try { return sessionStorage.getItem(key); } catch { return null; } };
   const write = (key, value) => { try { sessionStorage.setItem(key, value); } catch {} };
   const panelFor = id => {
@@ -61,10 +62,12 @@
     }
   });
   panels.forEach(panel => panel.querySelectorAll('form').forEach(form => {
-    form.addEventListener('submit', () => {
-      const editor = form.querySelector('details.record-editor') || form.closest('details');
-      write(pendingKey, editor?.id || panel.id);
-      write(storageKey, panel.id);
+    form.addEventListener('submit', event => {
+      // Keep the original events: even a microtask can run before a later
+      // listener cancels them. A canceled duplicate must not replace the first
+      // accepted attempt while that request is navigating.
+      submitAttempts = submitAttempts.filter(attempt => !attempt.event.defaultPrevented);
+      submitAttempts.push({event, form, panel});
     });
     // Native validation must be able to focus a field in a collapsed editor.
     form.addEventListener('invalid', event => {
@@ -76,4 +79,12 @@
       }
     }, true);
   }));
+  window.addEventListener('beforeunload', () => {
+    const attempt = [...submitAttempts].reverse().find(item => !item.event.defaultPrevented);
+    if (!attempt) return;
+    const editor = attempt.form.querySelector('details.record-editor') || attempt.form.closest('details');
+    write(pendingKey, editor?.id || attempt.panel.id);
+    write(storageKey, attempt.panel.id);
+  });
+  window.addEventListener('pageshow', () => { submitAttempts = []; });
 })();

@@ -3,6 +3,6 @@
 {% block page_heading %}{{ title }}{% endblock %}
 {% block content %}{{ body | safe }}{% endblock %}
 {% block scripts %}
-{% if title == 'Economy Control' %}<script src="{{ url_for('static', filename='economy-tabs.js', v='3.0.2') }}"></script>{% endif %}
+{% if title == 'Economy Control' %}<script src="{{ url_for('static', filename='economy-tabs.js', v='3.0.6') }}"></script>{% endif %}
 <script id="setting-metadata" type="application/json">{{ setting_metadata|tojson|safe if setting_metadata else "{}" }}</script>
 {% endblock %}

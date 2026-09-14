@@ -1,6 +1,8 @@
 """Admin UI and settings integration. All writes use disposable databases."""
 import asyncio
 from contextlib import closing
+from collections import Counter
+from html.parser import HTMLParser
 import importlib
 import json
 import os
@@ -11,6 +13,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
+from urllib.parse import urlsplit
 
 import discord
 import casino
@@ -21,6 +24,64 @@ import staff_panel
 import tester_feedback
 import tier6
 import tier8
+
+
+class DashboardMarkup(HTMLParser):
+    """Small, dependency-free checks for server-rendered dashboard structure."""
+
+    def __init__(self, html):
+        super().__init__(convert_charrefs=True)
+        self.ids = Counter()
+        self.navigation_links = []
+        self.version_text = []
+        self.visible_text = []
+        self._skip_text = False
+        self.errors = []
+        self.forms = []
+        self._form_depth = 0
+        self._in_navigation = False
+        self._version_tag = None
+        self.feed(html)
+        self.close()
+        if self._form_depth:
+            self.errors.append('Unclosed form')
+
+    def handle_starttag(self, tag, attributes):
+        attrs = dict(attributes)
+        if tag in ('script', 'style'):
+            self._skip_text = True
+        if attrs.get('id'):
+            self.ids[attrs['id']] += 1
+        if tag == 'nav' and attrs.get('id') == 'dashboard-nav':
+            self._in_navigation = True
+        if tag == 'a' and self._in_navigation and 'secondary' not in attrs.get('class', '').split():
+            self.navigation_links.append(attrs.get('href', ''))
+        if 'version' in attrs.get('class', '').split():
+            self._version_tag = tag
+        if tag == 'form':
+            if self._form_depth:
+                self.errors.append('Nested form')
+            self._form_depth += 1
+            self.forms.append(attrs)
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style'):
+            self._skip_text = False
+        if tag == 'nav':
+            self._in_navigation = False
+        if tag == self._version_tag:
+            self._version_tag = None
+        if tag == 'form':
+            if not self._form_depth:
+                self.errors.append('Unmatched closing form')
+            else:
+                self._form_depth -= 1
+
+    def handle_data(self, data):
+        if not self._skip_text:
+            self.visible_text.append(data)
+        if self._version_tag:
+            self.version_text.append(data)
 
 
 class AdminDashboardTests(unittest.TestCase):
@@ -240,10 +301,109 @@ class AdminDashboardTests(unittest.TestCase):
         self.assertIn('busy', self.flashes()[-1][1])
 
     def test_all_dashboard_navigation_destinations_render(self):
-        with self.client:
-            self.client.post('/login', data={'password': 'test_admin_password'})
-            response = self.client.get('/')
-            self.assertEqual(200, response.status_code)
+        home = self.client.get('/')
+        self.assertEqual(200, home.status_code)
+        destinations = DashboardMarkup(home.get_data(as_text=True)).navigation_links
+        # A real navigation crawl, not a root-page-only smoke test. New sidebar
+        # entries automatically join the regression suite.
+        self.assertGreaterEqual(len(destinations), 24)
+        self.assertEqual(len(destinations), len(set(destinations)))
+        for destination in destinations:
+            with self.subTest(destination=destination):
+                self.assertFalse(urlsplit(destination).netloc)
+                response = self.client.get(destination)
+                self.assertEqual(200, response.status_code)
+                self.assertTrue(response.content_type.startswith('text/html'))
+                html = response.get_data(as_text=True)
+                markup = DashboardMarkup(html)
+                self.assertEqual([], markup.errors)
+                self.assertEqual([], [key for key, count in markup.ids.items() if count > 1])
+                self.assertEqual(1, markup.ids['main-content'])
+                self.assertEqual(1, markup.ids['dashboard-nav'])
+                self.assertEqual('V3.0', ''.join(markup.version_text).strip())
+                self.assertIn('css/dashboard-components.css', html)
+                self.assertIn('dashboard-forms.js', html)
+
+    def test_unauthenticated_login_and_protected_dashboard_routes(self):
+        destinations = DashboardMarkup(self.client.get('/').get_data(as_text=True)).navigation_links
+        with self.client.session_transaction() as session:
+            session.clear()
+        for destination in destinations:
+            with self.subTest(destination=destination):
+                response = self.client.get(destination)
+                self.assertEqual(302, response.status_code)
+                self.assertEqual('/login', urlsplit(response.location).path)
+        response = self.client.get('/login')
+        self.assertEqual(200, response.status_code)
+        html = response.get_data(as_text=True)
+        markup = DashboardMarkup(html)
+        self.assertEqual([], markup.errors)
+        self.assertEqual([], [key for key, count in markup.ids.items() if count > 1])
+        self.assertIn('V3.0', html)
+        self.assertNotRegex(' '.join(markup.visible_text), r'(?i)\b(?:Tier\s*[1-9]|T[67]/[67]|X BOT V2)\b')
+        self.assertTrue(any(form.get('method', '').lower() == 'post' for form in markup.forms))
+        self.assertIn('name="password"', html)
+        self.assertIn('name="access_code"', html)
+
+    def test_empty_administration_lists_keep_usable_create_controls(self):
+        # Only this test's disposable database is changed.
+        for table in ('application_answers', 'application_submissions', 'application_questions',
+                      'application_forms', 'reward_code_redemptions', 'reward_codes'):
+            self.db.execute(f'DELETE FROM {table}')
+        self.db.commit()
+        cases = (
+            ('/applications', 'No application forms yet.', 'save_application_form'),
+            ('/reward-codes', 'No reward codes yet.', 'save_reward_code'),
+        )
+        with self.dashboard.app.test_request_context():
+            from flask import url_for
+            for route, empty_message, create_endpoint in cases:
+                with self.subTest(route=route):
+                    response = self.client.get(route)
+                    self.assertEqual(200, response.status_code)
+                    html = response.get_data(as_text=True)
+                    markup = DashboardMarkup(html)
+                    self.assertEqual([], markup.errors)
+                    self.assertIn(empty_message, html)
+                    self.assertTrue(any(form.get('action') == url_for(create_endpoint)
+                                        and form.get('method', '').lower() == 'post'
+                                        for form in markup.forms))
+
+    def test_item_creation_filter_and_command_search_controls(self):
+        html = self.client.get('/items').get_data(as_text=True)
+        markup = DashboardMarkup(html)
+        self.assertEqual(1, markup.ids['item-editor'])
+        self.assertEqual(1, markup.ids['category-manager'])
+        toolbar = re.search(r'<form class="item-toolbar".*?</form>', html, re.S).group()
+        self.assertIn('type="submit">Filter', toolbar)
+        self.assertIn("getElementById('item-editor')", toolbar)
+        self.assertNotIn("querySelector('details.creator')", toolbar)
+        item_id = self.db.execute('SELECT id FROM items LIMIT 1').fetchone()[0]
+        editor = self.client.get(f'/items?edit={item_id}').get_data(as_text=True)
+        self.assertIn('href="/items#item-editor"', editor)
+        self.assertNotIn("Permanently delete {{", html)
+        commands = self.client.get('/command-access').get_data(as_text=True)
+        command_markup = DashboardMarkup(commands)
+        self.assertEqual(1, command_markup.ids['command-search-empty'])
+        self.assertIn('aria-label="Search commands"', commands)
+        self.assertIn("search.addEventListener('input', filter)", commands)
+        self.assertNotRegex(' '.join(command_markup.visible_text), r'Command Access [23]\.0')
+
+    def test_alliance_table_uses_valid_form_ownership(self):
+        alliance_id = self.db.execute(
+            'INSERT INTO alliances(name,tag,leader_id,created_at) VALUES(?,?,?,?)',
+            ('UI Form Fixture', 'UITST', 990088, 0)).lastrowid
+        self.db.commit()
+        html = self.client.get('/war').get_data(as_text=True)
+        markup = DashboardMarkup(html)
+        form_id = f'alliance-{alliance_id}'
+        self.assertEqual(1, markup.ids[form_id])
+        self.assertTrue(any(form.get('id') == form_id for form in markup.forms))
+        self.assertEqual(2, html.count(f'form="{form_id}"'))
+        self.assertNotIn('<tr><form', html)
+        self.assertIn('aria-label="Alliance tag"', html)
+        self.assertIn('aria-label="Leader Discord ID"', html)
+
     def seed_admin(self):
         self.db.execute('DELETE FROM application_submissions')
         self.db.execute('DELETE FROM tester_feedback')

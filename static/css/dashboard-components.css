@@ -45,6 +45,9 @@ form.fields > button { justify-self: start; }
 .library-card { padding: 20px; background: var(--surface-card); border: 1px solid var(--line-light); border-radius: 12px; }
 .library-card h3 { margin: 0 0 12px; }
 .library-card form { display: grid; gap: 14px; }
+.item-toolbar > label { flex: 1 1 180px; }
+.mining-drop-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px 0; border-bottom: 1px solid var(--line-light); }
+.mining-drop-fields > span { grid-column: 1 / -1; font-weight: 600; }
 .library-card .fields-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 .statline { background: #0d1520; border-radius: 8px; padding: 12px; margin: 12px 0; overflow-wrap: anywhere; }
 .table-wrap, .table-scroll { overflow-x: auto; max-width: 100%; overscroll-behavior-inline: contain; }

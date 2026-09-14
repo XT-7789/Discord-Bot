@@ -2,14 +2,14 @@
   <div class="top-actions">
     <h2 style="padding:0;border:0;margin-right:auto">👤 User Profiles ({{ rows|length }})</h2>
     <form class="player-search-form">
-      <select name="sort">
+      <select name="sort" aria-label="Sort users">
         <option value="wallet" {{ 'selected' if sort=='wallet' }}>Sort: Wallet</option>
         <option value="bank" {{ 'selected' if sort=='bank' }}>Sort: Bank</option>
         <option value="crystals" {{ 'selected' if sort=='crystals' }}>Sort: XCrystals</option>
         <option value="power" {{ 'selected' if sort=='power' }}>Sort: Military Power</option>
         <option value="name" {{ 'selected' if sort=='name' }}>Sort: Name</option>
       </select>
-      <input name="q" value="{{ search }}" placeholder="Search users...">
+      <input type="search" name="q" value="{{ search }}" aria-label="Search users" placeholder="Search users...">
       <button>Search</button>
     </form>
   </div>
@@ -46,7 +46,7 @@
 
         <div class="actions" style="margin-top:12px">
           <a class="btn" href="{{ url_for('edit_player', user_id=p['user_id']) }}">✎ Edit</a>
-          <form method="post" action="{{ url_for('delete_player_data', user_id=p['user_id']) }}" onsubmit="return confirm('Delete all X BOT game data for {{ p['display_name'] or p['user_id'] }}? This cannot be undone.')">
+          <form method="post" action="{{ url_for('delete_player_data', user_id=p['user_id']) }}" onsubmit="return confirm('Delete all X BOT game data for this user? This cannot be undone.')">
             <button class="danger">🗑 Delete</button>
           </form>
         </div>
