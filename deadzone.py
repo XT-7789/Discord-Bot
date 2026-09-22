@@ -130,7 +130,6 @@ async def demote_to_deadzone(bot, db, member: discord.Member, reason: str = "Ina
         return False
 
     deadzone_role_id = int(setting(db, "deadzone_role_id") or 0)
-    guest_role_id = int(setting(db, "deadzone_guest_role_id") or 0)
 
     privilege_role_ids = _get_privilege_role_ids(db)
     roles_to_remove = [r for r in member.roles if r.id in privilege_role_ids]
@@ -141,11 +140,6 @@ async def demote_to_deadzone(bot, db, member: discord.Member, reason: str = "Ina
         dz_role = member.guild.get_role(deadzone_role_id)
         if dz_role and dz_role not in member.roles:
             roles_to_add.append(dz_role)
-
-    if guest_role_id:
-        g_role = member.guild.get_role(guest_role_id)
-        if g_role and g_role not in member.roles:
-            roles_to_add.append(g_role)
 
     try:
         if roles_to_remove:
@@ -176,7 +170,7 @@ async def demote_to_deadzone(bot, db, member: discord.Member, reason: str = "Ina
                 f"**Operative:** {member.mention}\n"
                 f"**Status:** Cryo-Stasis / Demoted to Deadzone\n"
                 f"**Reason:** {reason}\n"
-                f"⚠️ *Member, Music, and Rank perks revoked. Assigned Guest status.*\n\n"
+                f"⚠️ *Member, Music, and Rank perks revoked. Assigned Deadzone status.*\n\n"
                 f"*\"May they rest in peace... until they shatter their coffin.\"*"
             ),
             color=0x4A4D52,
@@ -270,7 +264,7 @@ def build_deadzone_board_embed():
             "**Demotion Penalties Applied:**\n"
             "• **Member** & **Music** perks are temporarily revoked.\n"
             "• All **Level rank tags** (`Active`, `Elite`, `Senior`, etc.) are hidden.\n"
-            "• Status reduced to **Guest**.\n\n"
+            "• Tag assigned: **Deadzone**.\n\n"
             "───\n\n"
             "### ⚡ HOW TO RESURRECT & RESTORE PERKS:\n"
             "1. Click the green **`[ ⚡ Break Out of Coffin ]`** button below.\n"
@@ -402,7 +396,7 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         now = int(time.time())
         inactive_hours = (now - my_status["last_active_at"]) // 3600
 
-        state_text = "💀 In Deadzone (Demoted to Guest)" if my_status["is_in_deadzone"] else "🟢 Alive & Active"
+        state_text = "💀 In Deadzone" if my_status["is_in_deadzone"] else "🟢 Alive & Active"
 
         embed = discord.Embed(
             title="💀 [DEADZONE CRYPT STATUS]",

@@ -134,9 +134,9 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(music_role, member.roles)
         self.assertNotIn(active_role, member.roles)
 
-        # Deadzone and Guest roles should be added
+        # Deadzone role added, guest role is NOT added
         self.assertIn(dz_role, member.roles)
-        self.assertIn(guest_role, member.roles)
+        self.assertNotIn(guest_role, member.roles)
 
         # Database record should reflect deadzone status
         status = deadzone.member_status(self.db, 12345)
