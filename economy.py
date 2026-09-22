@@ -27,8 +27,8 @@ DEFAULT_SETTINGS = {
     "transfer_min": "1",
     "transfer_max": "10000",
     "transfer_tax_percent": "0",
-    "exchange_xc_to_war_percent": "100",
-    "exchange_war_to_xc_percent": "100",
+    "exchange_xc_to_war_percent": "10000",
+    "exchange_war_to_xc_percent": "1",
     "economy_shop_enabled": "1",
     "job_drop_base_chance": "6",
     "job_drop_tenure_multiplier": "1",
@@ -234,6 +234,8 @@ def initialise(db: sqlite3.Connection) -> None:
     db.execute(
         "INSERT INTO economy_settings(key,value) VALUES('version','Beta 1.4B') ON CONFLICT(key) DO UPDATE SET value='Beta 1.4B'"
     )
+    db.execute("UPDATE economy_settings SET value='10000' WHERE key='exchange_xc_to_war_percent' AND value='100'")
+    db.execute("UPDATE economy_settings SET value='1' WHERE key='exchange_war_to_xc_percent' AND value='100'")
     categories = [
         ("Work & Career", "💼", 1, 0), ("Consumable", "🎟️", 2, 0),
         ("Utility & Protection", "🧰", 3, 0), ("Materials & Resources", "⛏️", 4, 0),
@@ -1925,10 +1927,13 @@ def register_commands(bot, db, create_player) -> None:
             if player[source_column] < amount:
                 await interaction.response.send_message(f"You do not have enough **{source_name}**.", ephemeral=True)
                 return
-            db.execute(f"UPDATE players SET {source_column}={source_column}-?, {target_column}={target_column}+? WHERE user_id=?", (amount, received, interaction.user.id))
-            log(db, interaction.user.id, "exchange", f"{amount} {source_name} -> {received} {target_name}")
+            spent = amount
+            if self.direction == "war_to_xc" and rate > 0:
+                spent = received * 100 // rate
+            db.execute(f"UPDATE players SET {source_column}={source_column}-?, {target_column}={target_column}+? WHERE user_id=?", (spent, received, interaction.user.id))
+            log(db, interaction.user.id, "exchange", f"{spent} {source_name} -> {received} {target_name}")
             db.commit()
-            await interaction.response.send_message(view=xbot_ui.success("🔄 Exchange Complete", f"**{amount:,} {source_name}** → **{received:,} {target_name}**"), ephemeral=True)
+            await interaction.response.send_message(view=xbot_ui.success("🔄 Exchange Complete", f"**{spent:,} {source_name}** → **{received:,} {target_name}**"), ephemeral=True)
 
     class ExchangeButton(discord.ui.Button):
         def __init__(self, direction: str):
@@ -1949,7 +1954,7 @@ def register_commands(bot, db, create_player) -> None:
             container = discord.ui.Container(accent_color=discord.Color.gold())
             container.add_item(discord.ui.TextDisplay(f"## 🔄 X BOT Currency Exchange\n🪙 XC: **{player['xc']:,}**\n⚔️ War Credits: **{player['money']:,}**"))
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n100 XC → **{xc_rate} War Credits**\n100 War Credits → **{war_rate} XC**"))
+            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n🪙 1 XC → **{max(1, xc_rate // 100):,} War Credits**\n⚔️ 100 War Credits → **{war_rate} XC**"))
             container.add_item(discord.ui.ActionRow(ExchangeButton("xc_to_war"), ExchangeButton("war_to_xc"), EconomyCentreButton(owner_id, "Economy")))
             container.add_item(discord.ui.TextDisplay("-# XCrystals cannot be exchanged."))
             self.add_item(container)

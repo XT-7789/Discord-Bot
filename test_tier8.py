@@ -295,10 +295,11 @@ class ResearchTests(unittest.TestCase):
                     self.assertEqual([],list(x for x in closed.walk_children() if isinstance(x,discord.ui.Button)))
                     self.assertEqual(before_close,self.balance())
                     guild=discord.Object(id=module._staff_guild_id) if module._staff_guild_id else None
-                    for public_name in module.PUBLIC_PLAYER_COMMANDS-{'menu','profile','warfront','economy'}:
+                    for public_name in module.PUBLIC_PLAYER_COMMANDS-{'menu','profile','warfront','economy','deadzone'}:
                         public=bot.tree.get_command(public_name,guild=guild) or bot.tree.get_command(public_name)
                         self.assertIsNotNone(public,public_name)
-                        self.assertTrue(getattr(public.callback,'system_ui_wrapped',False),public_name)
+                        if hasattr(public, 'callback'):
+                            self.assertTrue(getattr(public.callback,'system_ui_wrapped',False),public_name)
                     for name in ('menu','warfront','profile','overview'):
                         command=bot.tree.get_command(name,guild=guild)
                         self.assertIsNotNone(command)

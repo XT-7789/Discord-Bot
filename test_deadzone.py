@@ -12,7 +12,7 @@ import leveling
 import staff_tools
 
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 def make_role(role_id, name):
@@ -84,17 +84,6 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
             action TEXT NOT NULL,
             detail TEXT NOT NULL DEFAULT '',
             created_at INTEGER NOT NULL
-        )""")
-        self.db.execute("""CREATE TABLE items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1
-        )""")
-        self.db.execute("""CREATE TABLE inventories (
-            user_id INTEGER NOT NULL,
-            item_id INTEGER NOT NULL,
-            quantity INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (user_id, item_id)
         )""")
         leveling.initialise(self.db)
         deadzone.initialise(self.db)
@@ -193,6 +182,66 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
 
         status = deadzone.member_status(self.db, 777)
         self.assertEqual(status["is_in_deadzone"], 1)
+
+    async def test_one_plus_two_respawn_protocol(self):
+        """Test Condition 1 (5 messages thaw) + Condition 2 (friend rescue)."""
+        # Setup sleeper (user 888) and rescuer (user 999)
+        self.db.execute("INSERT OR IGNORE INTO players(user_id, nation_name, capital_name, xc) VALUES(?,?,?,?)", (888, "Sleeper", "SleeperCity", 50))
+        self.db.execute("INSERT OR IGNORE INTO players(user_id, nation_name, capital_name, xc) VALUES(?,?,?,?)", (999, "Rescuer", "RescuerCity", 100))
+        self.db.execute("INSERT OR IGNORE INTO xp_profiles(user_id, level, total_xp) VALUES(?,?,?)", (888, 5, 500))
+        self.db.commit()
+
+        member_role = self.guild.get_role(1505437941647015986)
+        dz_role = self.guild.get_role(1551839505168859196)
+        sleeper = make_member(888, self.guild, roles=[member_role])
+        rescuer = make_member(999, self.guild, roles=[member_role])
+        dummy_bot = SimpleNamespace(get_channel=lambda *a: None)
+
+        # 1. Demote sleeper to deadzone
+        await deadzone.demote_to_deadzone(dummy_bot, self.db, sleeper)
+        status = deadzone.member_status(self.db, 888)
+        self.assertEqual(status["is_in_deadzone"], 1)
+        self.assertEqual(status["thaw_count"], 0)
+
+        # 2. Condition 1: Sleeper sends messages to thaw
+        dummy_channel = MagicMock(spec=discord.TextChannel)
+        dummy_channel.send = AsyncMock()
+        for msg_num in range(1, 6):
+            dummy_msg = SimpleNamespace(
+                guild=self.guild,
+                author=sleeper,
+                channel=dummy_channel,
+                add_reaction=AsyncMock(),
+            )
+            await deadzone.handle_message(dummy_bot, self.db, dummy_msg)
+            status = deadzone.member_status(self.db, 888)
+            self.assertEqual(status["thaw_count"], min(5, msg_num))
+
+        # Still in deadzone after 5 messages (waiting for friend rescue!)
+        self.assertEqual(status["is_in_deadzone"], 1)
+
+        # 3. Condition 2: Friend rescue succeeds
+        revived = await deadzone.revive_member(dummy_bot, self.db, sleeper, triggered_by="rescued_by_999")
+        self.assertTrue(revived)
+        # Rescuer reward
+        self.db.execute("UPDATE players SET xc=xc+50 WHERE user_id=?", (999,))
+        self.db.commit()
+
+        # Verify sleeper restored
+        status = deadzone.member_status(self.db, 888)
+        self.assertEqual(status["is_in_deadzone"], 0)
+        self.assertEqual(status["thaw_count"], 0)
+        self.assertIn(member_role, sleeper.roles)
+
+        # Verify rescuer got 50 XC reward (100 + 50 = 150)
+        rescuer_xc = self.db.execute("SELECT xc FROM players WHERE user_id=?", (999,)).fetchone()["xc"]
+        self.assertEqual(rescuer_xc, 150)
+
+    def test_exchange_rates_configuration(self):
+        """Test 1 XC = 100 War Credits configuration."""
+        import economy
+        self.assertEqual(economy.DEFAULT_SETTINGS["exchange_xc_to_war_percent"], "10000")
+        self.assertEqual(economy.DEFAULT_SETTINGS["exchange_war_to_xc_percent"], "1")
 
 
 if __name__ == "__main__":

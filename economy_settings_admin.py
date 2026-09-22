@@ -55,7 +55,8 @@ def bounds(key):
         'tier6_industrial_speed_cap_percent': (0, 95), 'casino_vip_cooldown_percent': (0, 95),
         'server_svip_cooldown_percent': (0, 95), 'server_svip_production_slots':(0,25),
         'server_svip_market_listings':(0,100),'server_svip_production_percent':(0,95),
-        'memory_daily_reward_games':(0,10),'memory_daily_xc_limit':(0,100)}
+        'memory_daily_reward_games':(0,10),'memory_daily_xc_limit':(0,100),
+        'exchange_xc_to_war_percent': (1, 1000000)}
     if key in special:
         return special[key]
     if 'percent' in key or key.endswith('_chance') or key in {'lottery_prize_ratio', 'tier6_stock_price_impact'}:

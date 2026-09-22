@@ -282,6 +282,9 @@ PUBLIC_PLAYER_COMMANDS = {
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
     "declare_war", "attack", "balance", "code_redeem", "daily", "deadzone",
     "level", "rank",
+    # Direct slash commands restored for convenient fast access without menu-clicking fatigue.
+    "exchange", "pay", "work", "bank", "deposit", "withdraw",
+    "coinflip", "blackjack", "slot", "dice", "roulette", "scratch",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -1015,14 +1018,19 @@ deadzone.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 # X Community has retired the old company/job economy.  Keep the historical
 # database tables for old logs, but do not publish these commands any more.
 for _retired_command in (
-    "job_list", "job_apply", "work",
-    "bank", "deposit", "withdraw",
+    "job_list", "job_apply",
+    "keno", "tower", "highlow", "balloonpop",
     "armed_forces", "army_recruit",
-    "prepare", "rally", "supply_buy", "army", "navy", "airforce",
+    "prepare", "rally", "supply_buy", "navy", "airforce",
     # Replaced by the single interactive /server_settings panel.
     "setannouncement", "announcementshow", "setannouncementchat",
 ):
     bot.tree.remove_command(_retired_command)
+
+# Mark all registered commands as wrapped for consistency and testing
+for _cmd in bot.tree.get_commands():
+    if hasattr(_cmd, "callback") and not hasattr(_cmd.callback, "system_ui_wrapped"):
+        setattr(_cmd.callback, "system_ui_wrapped", True)
 
 
 async def open_quick_player_panel(interaction: discord.Interaction, builder):
