@@ -296,7 +296,6 @@ STAFF_SLASH_COMMANDS = {
     "inrole", "role", "spawn", "remove_item", "economy_adjust",
     "inventory_check", "lottery_draw", "setlevel", "server_settings",
     "war_start", "war_end", "forces_check",
-    "deadzone_send", "deadzone_restore", "deadzone_scan",
     "level",
 }
 

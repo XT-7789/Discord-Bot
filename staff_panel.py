@@ -12,11 +12,11 @@ import tester_feedback
 
 PAGES = {
     'home': 'Control Centre', 'members': 'Members', 'assets': 'Player Assets',
-    'server': 'Server Tools', 'war_tools': 'Alliance War', 'applications': 'Applications',
-    'tester': 'Tester Reports', 'verification': 'Verification', 'codes': 'Reward Codes',
-    'economy': 'Economy Status', 'maintenance': 'Maintenance',
+    'deadzone': 'Deadzone', 'server': 'Server Tools', 'war_tools': 'Alliance War',
+    'applications': 'Applications', 'tester': 'Tester Reports', 'verification': 'Verification',
+    'codes': 'Reward Codes', 'economy': 'Economy Status', 'maintenance': 'Maintenance',
 }
-TOOL_GROUPS = {'members': 'Members', 'assets': 'Assets', 'server': 'Server', 'war_tools': 'War'}
+TOOL_GROUPS = {'members': 'Members', 'assets': 'Assets', 'deadzone': 'Deadzone', 'server': 'Server', 'war_tools': 'War'}
 
 
 def code_status(row):
@@ -272,7 +272,7 @@ class AdminPanel(discord.ui.LayoutView):
             rows.setdefault(row, []).append(control)
         if self.page == "home":
             sections = ((0,'📥 Needs attention','Review applications and Tester reports.'),
-                        (1,'🛡️ Manage players','Roles, inventories and account adjustments.'),
+                        (1,'🛡️ Manage players','Roles, inventories, Deadzone crypt and account adjustments.'),
                         (2,'📣 Manage server','Announcements, lottery and alliance wars.'),
                         (3,'🔑 Access & rewards','Verification and redemption codes.'),
                         (4,'⚙️ System','Read-only economy status and maintenance.'))
@@ -382,7 +382,7 @@ class AdminPanel(discord.ui.LayoutView):
                 self.add_item(AdminActionButton("toggle_code", "Disable Code" if self.selected_code()['enabled'] else "Enable Code", emoji="🔁", row=2))
         elif self.page == "home":
             pending=len(self.pending_applications());reports=len(self.pending_feedback())
-            for row,pages in ((0,('applications','tester')),(1,('members','assets')),(2,('server','war_tools')),(3,('verification','codes')),(4,('economy','maintenance'))):
+            for row,pages in ((0,('applications','tester')),(1,('members','assets','deadzone')),(2,('server','war_tools')),(3,('verification','codes')),(4,('economy','maintenance'))):
                 for page in pages:
                     count={'applications':pending,'tester':reports}.get(page)
                     label=PAGES[page]+(f' · {count}' if count is not None else '')
@@ -462,9 +462,17 @@ class AdminPanel(discord.ui.LayoutView):
             embed.description = {
                 'members':'Inspect a player or manage roles and activity level.',
                 'assets':'Select a player, review the amount, then confirm. No assets change on opening a tool.',
+                'deadzone':'Manage inactive members, send to crypt, or run inactivity scan.',
                 'server':'Prepare an announcement or review a lottery draw.',
                 'war_tools':'Review alliance targets before starting or ending a war.',
             }[self.page] + '\n**1 Choose tool → 2 Fill details → 3 Review & confirm**'
+            if self.page == "deadzone":
+                try:
+                    sleepers = self.db.execute("SELECT COUNT(*) FROM deadzone_members WHERE is_in_deadzone=1").fetchone()[0]
+                    thawed = self.db.execute("SELECT COUNT(*) FROM deadzone_members WHERE is_in_deadzone=1 AND thaw_count>=5").fetchone()[0]
+                except Exception:
+                    sleepers, thawed = 0, 0
+                embed.add_field(name="Crypt Population", value=f"💀 **Active Sleepers:** `{sleepers}`\n🧊 **Thawed Comrades:** `{thawed}`\n⏰ **Auto Inactivity Threshold:** `7 days`", inline=False)
         elif self.page == "applications":
             embed.description = f"**{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}** · **{len(self.pending_applications())}** awaiting review"
             form = self.selected_form()

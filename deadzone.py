@@ -640,6 +640,20 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         embed.set_footer(text="X BOT · Deadzone Division · 1+2 Respawn System")
         await interaction.followup.send(embed=embed)
 
+    @deadzone_group.command(name="restore", description="Admin: Restore a member from Deadzone and restore all perks")
+    @app_commands.describe(member="Member to restore from Deadzone")
+    async def dz_restore(interaction: discord.Interaction, member: discord.Member):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can restore members."), ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        success = await revive_member(bot, db, member, triggered_by="admin_restore")
+        if success:
+            await interaction.followup.send(f"⚡ **Resurrection Successful!** Restored {member.mention} from Deadzone. All Member, Music, and Rank perks restored.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"⚠️ {member.mention} is not in the Deadzone.", ephemeral=True)
+
     @deadzone_group.command(name="revive", description="Admin: Revive a member from the Deadzone and restore all perks")
     @app_commands.describe(member="Member to revive from Deadzone")
     async def dz_revive(interaction: discord.Interaction, member: discord.Member):

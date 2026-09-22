@@ -86,6 +86,7 @@ def build(panel, content):
             section('Create a backup','Review first; the backup starts only after confirmation.',action('backup_now'))
             section('Repair data','These operations can change stored records. Use only when needed.',action('tier5_repair','tier6_repair'))
     elif panel.page in TOOL_GROUPS:
+        for field in fields:section(field.name,field.value)
         inspections=take(lambda c:isinstance(c,staff_tools.ToolButton) and c.name in staff_tools.READ_ONLY)
         changes=take(lambda c:isinstance(c,staff_tools.ToolButton))
         if inspections:section('Inspect','Read-only player information.',inspections)

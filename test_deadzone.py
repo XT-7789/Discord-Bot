@@ -100,9 +100,11 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
 
     def test_staff_tools_integration(self):
         self.assertIn("deadzone_send", staff_tools.TOOLS)
-        self.assertEqual(staff_tools.TOOLS["deadzone_send"][0], "Members")
+        self.assertEqual(staff_tools.TOOLS["deadzone_send"][0], "Deadzone")
         self.assertIn("deadzone_restore", staff_tools.TOOLS)
-        self.assertEqual(staff_tools.TOOLS["deadzone_restore"][0], "Members")
+        self.assertEqual(staff_tools.TOOLS["deadzone_restore"][0], "Deadzone")
+        self.assertIn("deadzone_scan", staff_tools.TOOLS)
+        self.assertEqual(staff_tools.TOOLS["deadzone_scan"][0], "Deadzone")
 
     async def test_demotion_removes_privilege_roles_and_adds_deadzone(self):
         member_role = self.guild.get_role(1505437941647015986)
