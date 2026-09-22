@@ -18,6 +18,7 @@ DEFAULTS = {
     "deadzone_guest_role_id": "1524715220365217842",
     "deadzone_crypt_channel_id": "0",
     "deadzone_lounge_channel_id": "0",
+    "deadzone_notification_channel_id": "0",
     "deadzone_revive_bonus_xc": "150",
     "deadzone_revive_bonus_xp": "50",
     "deadzone_scavenge_cooldown": "72000",
@@ -163,9 +164,11 @@ async def demote_to_deadzone(bot, db, member: discord.Member, reason: str = "Ina
     )
     db.commit()
 
-    # Post notification in crypt channel if configured
+    # Post notification in notification channel (or crypt channel as fallback)
+    notif_channel_id = int(setting(db, "deadzone_notification_channel_id") or 0)
     crypt_channel_id = int(setting(db, "deadzone_crypt_channel_id") or 0)
-    channel = bot.get_channel(crypt_channel_id) if crypt_channel_id else None
+    target_channel_id = notif_channel_id or crypt_channel_id
+    channel = bot.get_channel(target_channel_id) if target_channel_id else None
     if channel:
         embed = discord.Embed(
             title="🪦 [TOMBSTONE ERECTED]",
@@ -228,14 +231,12 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     )
     db.commit()
 
-    # Announce resurrection in lounge or crypt
+    # Announce resurrection in notification channel or lounge
+    notif_channel_id = int(setting(db, "deadzone_notification_channel_id") or 0)
     lounge_channel_id = int(setting(db, "deadzone_lounge_channel_id") or 0)
+    target_id = notif_channel_id or lounge_channel_id
 
-    target_channel = None
-    if lounge_channel_id:
-        target_channel = bot.get_channel(lounge_channel_id)
-    if not target_channel:
-        target_channel = member.guild.system_channel
+    target_channel = bot.get_channel(target_id) if target_id else member.guild.system_channel
 
     embed = discord.Embed(
         title="⚡ [RESURRECTION ALERT]",
@@ -468,16 +469,27 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         embed.set_footer(text="X BOT · Crypt Explorations")
         await interaction.response.send_message(embed=embed)
 
-    @deadzone_group.command(name="wake", description="Remind a sleeping friend to return and break out of the Deadzone")
+    @deadzone_group.command(name="wake", description="Wake up or revive a sleeping member from the Deadzone")
     @app_commands.describe(member="Member currently sleeping in the Deadzone")
     async def dz_wake(interaction: discord.Interaction, member: discord.Member):
         status = member_status(db, member.id)
         if not status or not status["is_in_deadzone"]:
-            await interaction.response.send_message(f"{member.mention} is not in the Deadzone! They are already alive.", ephemeral=True)
+            await interaction.response.send_message(f"{member.mention} is not in the Deadzone! They are already active.", ephemeral=True)
             return
 
         touch_activity(db, interaction.user.id)
 
+        # If Admin or Staff: directly wake up and revive them!
+        if is_council_or_admin(interaction):
+            await interaction.response.defer(ephemeral=True)
+            success = await revive_member(bot, db, member, triggered_by="admin_wake")
+            if success:
+                await interaction.followup.send(f"⚡ **Wake Up Successful!** Revived {member.mention} from Deadzone. All Member, Music, and Level perks restored.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"⚠️ Failed to revive {member.mention}.", ephemeral=True)
+            return
+
+        # For regular members: send wake-up notification/DM
         try:
             await member.send(
                 f"📢 **WAKE UP CALL!**\n"
@@ -487,8 +499,65 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.response.send_message(f"🔔 Sent a direct wake-up call to {member.mention}!", ephemeral=True)
         except discord.Forbidden:
             await interaction.response.send_message(
-                f"📢 {member.mention}, wake up! {interaction.user.mention} is calling you from the living lounge! Type a message to revive!",
+                f"📢 {member.mention}, wake up! {interaction.user.mention} is calling you from the living lounge! Type a message or click the button to revive!",
             )
+
+    @deadzone_group.command(name="revive", description="Admin: Revive a member from the Deadzone and restore all perks")
+    @app_commands.describe(member="Member to revive from Deadzone")
+    async def dz_revive(interaction: discord.Interaction, member: discord.Member):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can revive members."), ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        success = await revive_member(bot, db, member, triggered_by="admin_revive")
+        if success:
+            await interaction.followup.send(f"⚡ **Resurrection Successful!** Revived {member.mention} from Deadzone. All Member, Music, and Rank perks restored.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"⚠️ {member.mention} is not in the Deadzone.", ephemeral=True)
+
+    @deadzone_group.command(name="send", description="Admin: Demote an inactive member to Deadzone")
+    @app_commands.describe(member="Member to demote", reason="Reason for demotion")
+    async def dz_send(interaction: discord.Interaction, member: discord.Member, reason: str = "Admin decision"):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can demote members."), ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        success = await demote_to_deadzone(bot, db, member, reason=reason)
+        if success:
+            await interaction.followup.send(f"✅ Successfully demoted {member.mention} to Deadzone. Member/Music/Rank roles removed.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"⚠️ Could not demote {member.mention} (already in Deadzone or bot).", ephemeral=True)
+
+    @deadzone_group.command(name="set_channel", description="Admin: Set notification or crypt channel for Deadzone")
+    @app_commands.describe(
+        notification_channel="Channel where tombstones and resurrection alerts are posted",
+        crypt_channel="Channel where the Deadzone board and Break Out button live",
+    )
+    async def dz_set_channel(
+        interaction: discord.Interaction,
+        notification_channel: Optional[discord.TextChannel] = None,
+        crypt_channel: Optional[discord.TextChannel] = None,
+    ):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can configure channels."), ephemeral=True)
+            return
+
+        updates = []
+        if notification_channel:
+            db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_notification_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(notification_channel.id),))
+            updates.append(f"📢 **Notification Channel:** {notification_channel.mention}")
+        if crypt_channel:
+            db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(crypt_channel.id),))
+            updates.append(f"🪦 **Crypt Channel:** {crypt_channel.mention}")
+
+        if not updates:
+            await interaction.response.send_message("Please choose at least one channel to set.", ephemeral=True)
+            return
+
+        db.commit()
+        await interaction.response.send_message("✅ **Deadzone Channels Updated:**\n" + "\n".join(updates), ephemeral=True)
 
     @deadzone_group.command(name="post", description="Admin: Post the official Deadzone resurrection board with the Break Out button")
     @app_commands.describe(channel="Channel to post the board in (defaults to current channel)")
