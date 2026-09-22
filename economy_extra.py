@@ -251,7 +251,7 @@ def register_commands(bot, db, create_player, find_item):
             container.add_item(discord.ui.TextDisplay(
                 f"## 💳 X BOT Balance\n"
                 f"🪙 Wallet: **{player['xc']:,} XC** · 🏦 Bank: **{player['bank_xc']:,} XC**\n"
-                f"⚔️ War Credits: **{player['money']:,}** · 💎 XCrystals: **{player['xcrystals']:,}**\n"
+                f"💵 Cash: **{player['money']:,}** · 💎 XCrystals: **{player['xcrystals']:,}**\n"
                 f"🎒 Backpack: **{item_count:,} item(s)** · 🏳️ Nation: **{player['nation_name']}**"
             ))
             container.add_item(discord.ui.ActionRow(EconomyBackButton(owner_id)))
@@ -289,7 +289,7 @@ def register_commands(bot, db, create_player, find_item):
             container = discord.ui.Container(accent_color=discord.Color.blurple())
             container.add_item(discord.ui.TextDisplay(
                 f"## ✨ X BOT Lobby\n"
-                f"🏳️ **{player['nation_name']}** · 🪙 **{player['xc']:,} XC** · ⚔️ **{player['money']:,} War Credits**\n"
+                f"🏳️ **{player['nation_name']}** · 🪙 **{player['xc']:,} XC** · 💵 **{player['money']:,} Cash**\n"
                 f"⭐ Nation Level **{progress['level']} — {progress['rank']}** · **{xp_text}**\n"
                 f"🧭 Next: **{progress['label']}**\n"
                 f"Choose a system below. Every page stays in this same panel."
@@ -341,7 +341,7 @@ def register_commands(bot, db, create_player, find_item):
             container.add_item(discord.ui.TextDisplay(
                 f"## 💰 X BOT Economy Centre\n"
                 f"🪙 Wallet **{player['xc']:,} XC** · 🏦 Bank **{player['bank_xc']:,} XC**\n"
-                f"⚔️ **{player['money']:,} War Credits** · 💎 **{player['xcrystals']:,} XCrystals**\n"
+                f"💵 **{player['money']:,} Cash** · 💎 **{player['xcrystals']:,} XCrystals**\n"
                 f"🎒 {inventory:,} inventory item(s) · 🏷️ {listings} market listing(s)\n"
                 f"🎁 Daily reward: **{daily_text}**"
             ))

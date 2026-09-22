@@ -27,7 +27,7 @@ DEFAULT_SETTINGS = {
     "transfer_min": "1",
     "transfer_max": "10000",
     "transfer_tax_percent": "0",
-    "exchange_xc_to_war_percent": "10000",
+    "exchange_xc_to_war_percent": "100000",
     "exchange_war_to_xc_percent": "1",
     "economy_shop_enabled": "1",
     "job_drop_base_chance": "6",
@@ -234,7 +234,7 @@ def initialise(db: sqlite3.Connection) -> None:
     db.execute(
         "INSERT INTO economy_settings(key,value) VALUES('version','Beta 1.4B') ON CONFLICT(key) DO UPDATE SET value='Beta 1.4B'"
     )
-    db.execute("UPDATE economy_settings SET value='10000' WHERE key='exchange_xc_to_war_percent' AND value='100'")
+    db.execute("UPDATE economy_settings SET value='100000' WHERE key='exchange_xc_to_war_percent'")
     db.execute("UPDATE economy_settings SET value='1' WHERE key='exchange_war_to_xc_percent' AND value='100'")
     categories = [
         ("Work & Career", "💼", 1, 0), ("Consumable", "🎟️", 2, 0),
@@ -651,7 +651,7 @@ def register_commands(bot, db, create_player) -> None:
 
     @bot.tree.command(name="economy_adjust", description="Admin: securely adjust a member's X BOT currency")
     @app_commands.describe(user="Member to update", currency="Currency account", amount="Positive to give, negative to take", reason="Required audit reason")
-    @app_commands.choices(currency=[app_commands.Choice(name="XC Wallet", value="xc"), app_commands.Choice(name="XC Bank", value="bank_xc"), app_commands.Choice(name="War Credits", value="money"), app_commands.Choice(name="XCrystals", value="xcrystals")])
+    @app_commands.choices(currency=[app_commands.Choice(name="XC Wallet", value="xc"), app_commands.Choice(name="XC Bank", value="bank_xc"), app_commands.Choice(name="Cash", value="money"), app_commands.Choice(name="XCrystals", value="xcrystals")])
     async def economy_adjust(interaction: discord.Interaction, user: discord.Member, currency: app_commands.Choice[str], amount: app_commands.Range[int, -100000000, 100000000], reason: str):
         if amount == 0:
             await interaction.response.send_message("Amount cannot be 0.", ephemeral=True); return
@@ -687,7 +687,7 @@ def register_commands(bot, db, create_player) -> None:
         text = (f"## 💳 {user.display_name}'s X BOT Balance\n"
                 f"🪙 **Wallet XC:** {player['xc']:,}\n"
                 f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
-                f"⚔️ **War Credits:** {player['money']:,}\n"
+                f"💵 **Cash:** {player['money']:,}\n"
                 f"💎 **XCrystals:** {player['xcrystals']:,}\n"
                 f"🎒 **Inventory:** {item_count:,} item(s)\n"
                 f"🏳️ **Nation:** {player['nation_name']}")
@@ -734,7 +734,7 @@ def register_commands(bot, db, create_player) -> None:
                 f"🎒 **Inventory:** {item_count:,} item(s)\n"
                 f"🪙 **Wallet XC:** {player['xc']:,}\n"
                 f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
-                f"⚔️ **War Credits:** {player['money']:,}\n"
+                f"💵 **Cash:** {player['money']:,}\n"
                 f"💎 **XCrystals:** {player['xcrystals']:,}")
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=discord.ui.Thumbnail(interaction.user.display_avatar.url)))
         view.add_item(container)
@@ -746,7 +746,7 @@ def register_commands(bot, db, create_player) -> None:
         app_commands.Choice(name="XC", value="xc"),
         app_commands.Choice(name="Bank XC", value="bank_xc"),
         app_commands.Choice(name="Net Worth XC", value="net_worth"),
-        app_commands.Choice(name="War Credits", value="money"),
+        app_commands.Choice(name="Cash", value="money"),
         app_commands.Choice(name="XCrystals", value="xcrystals"),
         app_commands.Choice(name="Land", value="land"),
         app_commands.Choice(name="Military Power", value="power"),
@@ -1555,7 +1555,7 @@ def register_commands(bot, db, create_player) -> None:
             total = unit_cost * amount
             player = create_player(interaction.user)
             if player['money'] < total:
-                await interaction.response.send_message(f"You need **{total:,} War Credits**.", ephemeral=True)
+                await interaction.response.send_message(f"You need **{total:,} Cash**.", ephemeral=True)
                 return
             await interaction.response.defer()
             await interaction.edit_original_response(view=RecruitConfirmView(interaction.user.id,unit,amount))
@@ -1580,14 +1580,14 @@ def register_commands(bot, db, create_player) -> None:
             total=self.cost*self.amount
             changed=db.execute('UPDATE players SET money=money-? WHERE user_id=? AND money>=?',(total,self.owner_id,total))
             if not changed.rowcount:
-                await interaction.edit_original_response(view=ArmyShopView(self.owner_id,notice=f'Not enough War Credits. Required: {total:,}.'))
+                await interaction.edit_original_response(view=ArmyShopView(self.owner_id,notice=f'Not enough Cash. Required: {total:,}.'))
                 return
             db.execute('''INSERT INTO player_war_units(user_id,unit_type_id,quantity) VALUES(?,?,?)
                 ON CONFLICT(user_id,unit_type_id) DO UPDATE SET quantity=quantity+excluded.quantity''',(self.owner_id,self.unit_id,self.amount))
-            log(db,self.owner_id,'recruit',f"Recruited {self.amount:,}x {unit['name']} for {total:,} War Credits ({self.cost:,} each)")
+            log(db,self.owner_id,'recruit',f"Recruited {self.amount:,}x {unit['name']} for {total:,} Cash ({self.cost:,} each)")
             db.commit()
             self.done=True
-            await interaction.edit_original_response(view=ArmyShopView(self.owner_id,notice=f"✅ Recruited {self.amount:,} × {unit['name']} · Paid {total:,} WC"))
+            await interaction.edit_original_response(view=ArmyShopView(self.owner_id,notice=f"✅ Recruited {self.amount:,} × {unit['name']} · Paid {total:,} Cash"))
 
     class RecruitConfirmView(discord.ui.LayoutView):
         def __init__(self,owner_id,unit,amount):
@@ -1706,7 +1706,7 @@ def register_commands(bot, db, create_player) -> None:
             container.add_item(discord.ui.TextDisplay(
                 f"## ⚔️ X BOT Army Recruit\n"
                 f"### {service_emoji} {service_name} · {category['emoji']} {category['label']}\n"
-                f"💰 **{player['money']:,} War Credits** available · Choose a unit, then enter quantity."
+                f"💵 **{player['money']:,} Cash** available · Choose a unit, then enter quantity."
             ))
             if notice:
                 container.add_item(discord.ui.TextDisplay(notice))
@@ -1724,7 +1724,7 @@ def register_commands(bot, db, create_player) -> None:
                 name, emoji, cost, power_value = unit['name'], unit['emoji'], unit['cost'], unit['power']
                 button = RecruitButton(unit)
                 owned=db.execute('SELECT quantity FROM player_war_units WHERE user_id=? AND unit_type_id=?',(owner_id,unit['id'])).fetchone()
-                container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"### {emoji} {discord.utils.escape_markdown(name)}\nOwned **{owned[0] if owned else 0:,}** · Power **{power_value:,}** / unit\nPrice **{cost:,} WC** / unit"), accessory=button))
+                container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"### {emoji} {discord.utils.escape_markdown(name)}\nOwned **{owned[0] if owned else 0:,}** · Power **{power_value:,}** / unit\nPrice **{cost:,} Cash** / unit"), accessory=button))
                 container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(
                 ArmyPageButton(owner_id, branch, category_id, 0, sort_mode, "⏪", page == 0),
@@ -1841,7 +1841,7 @@ def register_commands(bot, db, create_player) -> None:
             container = discord.ui.Container(accent_color=info[2])
             container.add_item(discord.ui.TextDisplay(
                 f"## ⚔️ {player['nation_name']} — {overall_name}\n"
-                f"Total Power **{sum(service_powers.values()):,}** · War Credits **{player['money']:,}**\n\n"
+                f"Total Power **{sum(service_powers.values()):,}** · Cash **{player['money']:,}**\n\n"
                 f"### {info[1]} {names[branch]}\n"
                 f"💥 **{branch_power:,} Service Power** · Units **{sum(int(u['quantity']) for u in units):,}**\n\n"
                 f"🪖 **{names['land']}** — {service_powers['land']:,} power\n"
@@ -1898,7 +1898,7 @@ def register_commands(bot, db, create_player) -> None:
     class ExchangeModal(discord.ui.Modal):
         def __init__(self, direction: str):
             self.direction = direction
-            source = "XC" if direction == "xc_to_war" else "War Credits"
+            source = "XC" if direction == "xc_to_war" else "Cash"
             super().__init__(title=f"Exchange {source}")
             self.amount_input = discord.ui.TextInput(label=f"{source} amount", placeholder="Enter amount", min_length=1, max_length=12)
             self.add_item(self.amount_input)
@@ -1914,22 +1914,22 @@ def register_commands(bot, db, create_player) -> None:
             player = create_player(interaction.user)
             if self.direction == "xc_to_war":
                 source_column, target_column = "xc", "money"
-                source_name, target_name = "XC", "War Credits"
+                source_name, target_name = "XC", "Cash"
                 rate = setting(db, "exchange_xc_to_war_percent")
+                gross_received = amount * rate // 100
+                spent = amount
             else:
                 source_column, target_column = "money", "xc"
-                source_name, target_name = "War Credits", "XC"
-                rate = setting(db, "exchange_war_to_xc_percent")
-            gross_received = amount * rate // 100
+                source_name, target_name = "Cash", "XC"
+                gross_received = amount // 1000
+                spent = gross_received * 1000
+
             if gross_received <= 0:
-                await interaction.response.send_message("This amount is too small for the current exchange rate.", ephemeral=True)
+                await interaction.response.send_message("This amount is too small for the current exchange rate (minimum 1,000 Cash).", ephemeral=True)
                 return
-            if player[source_column] < amount:
+            if player[source_column] < spent:
                 await interaction.response.send_message(f"You do not have enough **{source_name}**.", ephemeral=True)
                 return
-            spent = amount
-            if self.direction == "war_to_xc" and rate > 0:
-                spent = gross_received * 100 // rate
 
             # 6% transaction tax if amount > 1000
             tax_rate = 6 if amount > 1000 else 0
@@ -1947,7 +1947,7 @@ def register_commands(bot, db, create_player) -> None:
 
     class ExchangeButton(discord.ui.Button):
         def __init__(self, direction: str):
-            label = "XC → War Credits" if direction == "xc_to_war" else "War Credits → XC"
+            label = "XC → Cash" if direction == "xc_to_war" else "Cash → XC"
             super().__init__(label=label, emoji="🔄", style=discord.ButtonStyle.primary)
             self.direction = direction
 
@@ -1960,11 +1960,10 @@ def register_commands(bot, db, create_player) -> None:
             self.owner_id = owner_id
             player = db.execute("SELECT * FROM players WHERE user_id=?", (owner_id,)).fetchone()
             xc_rate = setting(db, "exchange_xc_to_war_percent")
-            war_rate = setting(db, "exchange_war_to_xc_percent")
             container = discord.ui.Container(accent_color=discord.Color.gold())
-            container.add_item(discord.ui.TextDisplay(f"## 🔄 X BOT Currency Exchange\n🪙 XC: **{player['xc']:,}**\n⚔️ War Credits: **{player['money']:,}**"))
+            container.add_item(discord.ui.TextDisplay(f"## 🔄 X BOT Currency Exchange\n🪙 XC: **{player['xc']:,}**\n💵 Cash: **{player['money']:,}**"))
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n🪙 1 XC → **{max(1, xc_rate // 100):,} War Credits**\n⚔️ 100 War Credits → **{war_rate} XC**\n-# 🏛️ Transactions over 1,000 have a 6% tax."))
+            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n🪙 1 XC → **{max(1, xc_rate // 100):,} Cash**\n💵 1,000 Cash → **1 XC**\n-# 🏛️ Transactions over 1,000 have a 6% tax."))
             container.add_item(discord.ui.ActionRow(ExchangeButton("xc_to_war"), ExchangeButton("war_to_xc"), EconomyCentreButton(owner_id, "Economy")))
             container.add_item(discord.ui.TextDisplay("-# XCrystals cannot be exchanged."))
             self.add_item(container)
@@ -1975,7 +1974,7 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message("Open `/menu` to use your own exchange menu.", ephemeral=True)
             return False
 
-    @bot.tree.command(name="exchange", description="Exchange XC and War Credits")
+    @bot.tree.command(name="exchange", description="Exchange XC and Cash")
     async def exchange(interaction: discord.Interaction):
         create_player(interaction.user)
         await interaction.response.send_message(view=ExchangeView(interaction.user.id))

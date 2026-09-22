@@ -272,9 +272,9 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rescuer_xc, 150)
 
     def test_exchange_rates_configuration(self):
-        """Test 1 XC = 100 War Credits configuration."""
+        """Test 1 XC = 1,000 Cash configuration."""
         import economy
-        self.assertEqual(economy.DEFAULT_SETTINGS["exchange_xc_to_war_percent"], "10000")
+        self.assertEqual(economy.DEFAULT_SETTINGS["exchange_xc_to_war_percent"], "100000")
         self.assertEqual(economy.DEFAULT_SETTINGS["exchange_war_to_xc_percent"], "1")
 
     async def test_sync_guild_member_levels(self):

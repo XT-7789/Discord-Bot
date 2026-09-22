@@ -808,7 +808,7 @@ async def reward_item_autocomplete(interaction: discord.Interaction, current: st
 
 
 @bot.tree.command(name="code_create", description="Create an X BOT reward code (Council/Admin)", **STAFF_COMMAND_KWARGS)
-@app_commands.describe(code="Unique code, for example SUMMER100", xc="XC reward", war_credits="War Credits reward", xcrystals="XCrystals reward", max_uses="0 means unlimited", item="Optional exact item name", item_quantity="Quantity of the optional item")
+@app_commands.describe(code="Unique code, for example SUMMER100", xc="XC reward", war_credits="Cash reward", xcrystals="XCrystals reward", max_uses="0 means unlimited", item="Optional exact item name", item_quantity="Quantity of the optional item")
 @app_commands.autocomplete(item=reward_item_autocomplete)
 async def code_create(interaction: discord.Interaction, code: str, xc: app_commands.Range[int, 0, 100000000] = 0, war_credits: app_commands.Range[int, 0, 100000000] = 0, xcrystals: app_commands.Range[int, 0, 100000000] = 0, max_uses: app_commands.Range[int, 0, 1000000] = 0, item: str = "", item_quantity: app_commands.Range[int, 0, 1000000] = 0):
     if not is_council_or_admin(interaction):
@@ -830,7 +830,7 @@ async def code_create(interaction: discord.Interaction, code: str, xc: app_comma
         await interaction.response.send_message(view=xbot_ui.danger("Code Already Exists", f"`{clean_code}` already exists. Disable it or use a different code."), ephemeral=True); return
     economy.log(db, interaction.user.id, "reward_code_created", f"Created {clean_code}")
     db.commit()
-    reward = f"🪙 {xc:,} XC · ⚔️ {war_credits:,} War Credits · 💎 {xcrystals:,} XCrystals"
+    reward = f"🪙 {xc:,} XC · 💵 {war_credits:,} Cash · 💎 {xcrystals:,} XCrystals"
     if item_row and item_quantity: reward += f" · {item_row['emoji']} {item_row['name']} ×{item_quantity}"
     await interaction.response.send_message(view=xbot_ui.success("🎟 Reward Code Created", f"`{clean_code}`\n{reward}\nUses: **{'Unlimited' if max_uses == 0 else max_uses}**"), ephemeral=True)
 
@@ -877,7 +877,7 @@ async def code_redeem(interaction: discord.Interaction, code: str):
         db.rollback(); raise
     economy.log(db, interaction.user.id, "reward_code_redeemed", f"Redeemed {reward['code']}")
     db.commit()
-    result = f"🪙 **{reward['reward_xc']:,} XC**\n⚔️ **{reward['reward_war_credits']:,} War Credits**\n💎 **{reward['reward_xcrystals']:,} XCrystals**"
+    result = f"🪙 **{reward['reward_xc']:,} XC**\n💵 **{reward['reward_war_credits']:,} Cash**\n💎 **{reward['reward_xcrystals']:,} XCrystals**"
     if item:
         result += f"\n{item['emoji']} **{item['name']} ×{reward['item_quantity']}**"
     await interaction.response.send_message(view=xbot_ui.success("🎁 Reward Redeemed", f"Code: `{reward['code']}`\n\n{result}"), ephemeral=True)
@@ -919,7 +919,7 @@ async def show_service_branch(interaction: discord.Interaction, player: Optional
         f"## {icon} {data['nation_name']} — {service_title}\n"
         f"🤝 **Alliance:** {alliance_text}\n"
         f"🗺️ **Land:** {data['land']:,}\n"
-        f"⚔️ **War Credits:** {data['money']:,}\n"
+        f"💵 **Cash:** {data['money']:,}\n"
         f"💥 **{service_title} Power:** {branch_power:,}\n"
         f"🌐 **Total Armed Forces Power:** {power(data):,}"
     ))
@@ -1646,7 +1646,7 @@ async def attack(interaction: discord.Interaction, target: discord.Member):
 
                 reward = (
                     f"🏛️ **{defender['capital_name']} has fallen!**\n"
-                    f"💰 You captured **{credits:,} War Credits**."
+                    f"💵 You captured **{credits:,} Cash**."
                 )
             else:
                 reward = (
