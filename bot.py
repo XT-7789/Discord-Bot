@@ -480,6 +480,7 @@ class XBot(discord.Client):
 
 
 bot = XBot()
+bot.db = db
 
 
 @tasks.loop(minutes=10)

@@ -24,8 +24,14 @@ DEFAULTS = {
 }
 
 
+_bot = None
+_db = None
+
+
 def initialise(db):
     """Initialise database tables and default configuration settings for Deadzone."""
+    global _db
+    _db = db
     for key, value in DEFAULTS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, value))
 
@@ -172,9 +178,9 @@ async def demote_to_deadzone(bot, db, member: discord.Member, reason: str = "Ina
             ),
             color=0x4A4D52,
         )
-        embed.set_footer(text="X BOT · Deadzone Division")
+        embed.set_footer(text="X BOT · Deadzone Division · Click the pinned Break Out button above or chat in lounge to revive")
         try:
-            await channel.send(embed=embed, view=DeadzoneReviveView())
+            await channel.send(embed=embed)
         except discord.HTTPException:
             pass
 
@@ -290,9 +296,10 @@ class DeadzoneReviveView(discord.ui.View):
             await interaction.response.send_message("Only members in the server can use this button.", ephemeral=True)
             return
 
-        db = interaction.client.db if hasattr(interaction.client, "db") else None
+        db = getattr(interaction.client, "db", None) or _db
+        bot = interaction.client or _bot
         if not db:
-            await interaction.response.send_message("Database unavailable.", ephemeral=True)
+            await interaction.response.send_message("Database unavailable. Please try again shortly.", ephemeral=True)
             return
 
         status = member_status(db, interaction.user.id)
@@ -301,7 +308,7 @@ class DeadzoneReviveView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True)
-        await revive_member(interaction.client, db, interaction.user, triggered_by="button")
+        await revive_member(bot, db, interaction.user, triggered_by="button")
         await interaction.followup.send("⚡ **Resurrection successful!** Your Member and Level perks have been restored. Welcome back!", ephemeral=True)
 
 
@@ -349,6 +356,9 @@ async def scan_guild_inactivity(bot, db, guild: discord.Guild):
 
 def start_deadzone_task(bot, db):
     """Start periodic task checking for inactive members."""
+    global _bot, _db
+    _bot = bot
+    _db = db
     if not deadzone_check_loop.is_running():
         deadzone_check_loop.bot = bot
         deadzone_check_loop.db = db
@@ -376,6 +386,9 @@ async def before_deadzone_loop():
 
 def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
     """Register Deadzone slash commands for both members and administrators."""
+    global _bot, _db
+    _bot = bot
+    _db = db
 
     deadzone_group = app_commands.Group(name="deadzone", description="X BOT Deadzone & Crypt operations")
 
