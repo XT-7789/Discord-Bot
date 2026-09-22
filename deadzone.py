@@ -223,10 +223,60 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
             except discord.HTTPException:
                 pass
 
-    # Retrieve member's level and restore reward roles (Member, Music, Level tags)
+    # 1. Parse saved roles from deadzone_members
+    saved_roles_raw = status["saved_roles"] if status and "saved_roles" in status.keys() else "[]"
+    try:
+        saved_role_ids = [int(x) for x in json.loads(saved_roles_raw)] if saved_roles_raw else []
+    except Exception:
+        saved_role_ids = []
+
+    # 2. Check if user held any level roles before demotion
+    # If the user held a level role (e.g. Level 7 Active, Level 10 Elite) before demotion,
+    # preserve that level so leveling.sync_reward_roles won't strip their level title!
     prof = leveling.profile(db, member.id)
-    level = prof["level"]
-    await leveling.sync_reward_roles(db, member, level)
+    current_level = int(prof["level"] if prof else 1)
+    max_role_level = current_level
+
+    reward_rows = db.execute("SELECT level, role_id FROM xp_rewards WHERE enabled=1 AND role_id!=''").fetchall()
+    role_to_level = {int(r["role_id"]): int(r["level"]) for r in reward_rows if str(r["role_id"]).isdigit()}
+    for rid in saved_role_ids:
+        if rid in role_to_level and role_to_level[rid] > max_role_level:
+            max_role_level = role_to_level[rid]
+
+    if max_role_level > current_level:
+        target_xp = leveling.xp_for_level(max_role_level)
+        db.execute(
+            """INSERT INTO xp_profiles(user_id, level, total_xp) VALUES(?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+            level=MAX(level, excluded.level),
+            total_xp=MAX(total_xp, excluded.total_xp)""",
+            (member.id, max_role_level, target_xp),
+        )
+        db.commit()
+        current_level = max_role_level
+
+    # 3. Restore all saved roles directly to the member
+    roles_to_add = []
+    for rid in saved_role_ids:
+        role = member.guild.get_role(rid)
+        if role and role not in member.roles and role not in roles_to_add:
+            roles_to_add.append(role)
+
+    # Always ensure default verified Member role is given back upon revival
+    member_role_id = int(setting(db, "verification_member_role_id") or 1505437941647015986)
+    m_role = member.guild.get_role(member_role_id)
+    if m_role and m_role not in member.roles and m_role not in roles_to_add:
+        roles_to_add.append(m_role)
+
+    if roles_to_add:
+        try:
+            await member.add_roles(*roles_to_add, reason="X BOT Deadzone Resurrection - Restoring saved roles")
+        except discord.HTTPException:
+            pass
+
+    # 4. Synchronize reward roles matching their restored level
+    await leveling.sync_reward_roles(db, member, current_level)
+    level = current_level
 
     # Award revival bonus
     bonus_xc = int(setting(db, "deadzone_revive_bonus_xc") or 0)

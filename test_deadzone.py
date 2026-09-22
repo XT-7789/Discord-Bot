@@ -176,6 +176,35 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         player_xc = self.db.execute("SELECT xc FROM players WHERE user_id=?", (55555,)).fetchone()["xc"]
         self.assertEqual(player_xc, 250)
 
+    async def test_revival_restores_saved_level_role_when_profile_is_low(self):
+        # Setup member with low profile level (Level 1) but who held Level 7 Active role in Discord
+        self.db.execute(
+            "INSERT INTO xp_profiles(user_id, level, total_xp) VALUES(?,?,?)",
+            (66666, 1, 10),
+        )
+        self.db.commit()
+
+        member_role = self.guild.get_role(1505437941647015986)
+        active_role = self.guild.get_role(1524719900785119354)  # Level 7 reward role
+        dz_role = self.guild.get_role(1551839505168859196)
+
+        member = make_member(66666, self.guild, roles=[member_role, active_role])
+        dummy_bot = SimpleNamespace(get_channel=lambda *a: None)
+
+        # 1. Demote to deadzone
+        await deadzone.demote_to_deadzone(dummy_bot, self.db, member)
+        self.assertIn(dz_role, member.roles)
+        self.assertNotIn(active_role, member.roles)
+
+        # 2. Revive member - should restore Active role and update xp profile to Level 7
+        revived = await deadzone.revive_member(dummy_bot, self.db, member, triggered_by="admin_restore")
+        self.assertTrue(revived)
+        self.assertIn(active_role, member.roles)
+        self.assertIn(member_role, member.roles)
+
+        prof = leveling.profile(self.db, 66666)
+        self.assertEqual(prof["level"], 7)
+
     async def test_scavenge_cooldown_and_prevention(self):
         # In Deadzone members cannot scavenge
         dz_role = self.guild.get_role(1551839505168859196)
