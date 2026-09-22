@@ -450,15 +450,18 @@ def register_commands(bot, db, create_player, find_item):
             await interaction.response.send_message(view=xbot_ui.danger("Transfer Rejected", "Choose another human player."), ephemeral=True); return
         if amount < minimum or amount > maximum:
             await interaction.response.send_message(view=xbot_ui.danger("Invalid Amount", f"Transfers must be **{minimum:,}–{maximum:,} XC**."), ephemeral=True); return
-        tax = amount * setting(db, "transfer_tax_percent") // 100
+        configured_tax = setting(db, "transfer_tax_percent")
+        tax_percent = 6 if amount > 1000 else configured_tax
+        tax = amount * tax_percent // 100
         received = amount - tax
         if sender["xc"] < amount:
             await interaction.response.send_message(view=xbot_ui.danger("Not Enough XC", f"You need **{amount:,} XC**."), ephemeral=True); return
         db.execute("UPDATE players SET xc=xc-? WHERE user_id=?", (amount, interaction.user.id))
         db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (received, player.id))
-        log(db, interaction.user.id, "pay", f"{amount} XC to {player.id}; tax {tax}")
+        log(db, interaction.user.id, "pay", f"{amount} XC to {player.id}; tax {tax} ({tax_percent}%)")
         db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("💸 Transfer Complete", f"Sent **{amount:,} XC** to {player.mention}.\nThey received **{received:,} XC**."))
+        tax_notice = f"\n-# 🏛️ Transfer tax applied: **{tax:,} XC** ({tax_percent}% on transfers > 1,000 XC)" if tax > 0 else ""
+        await interaction.response.send_message(view=xbot_ui.success("💸 Transfer Complete", f"Sent **{amount:,} XC** to {player.mention}.\nThey received **{received:,} XC**.{tax_notice}"))
 
 
 

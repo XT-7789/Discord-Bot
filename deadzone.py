@@ -25,6 +25,21 @@ DEFAULTS = {
     "deadzone_rescue_reward_xc": "50",
 }
 
+RESURRECTION_QUOTES = [
+    "Welcome back to the squad, soldier!",
+    "Death was just a temporary setback. Welcome back to the fight!",
+    "The Deadzone couldn't hold you down! Good to have you back alive.",
+    "Look who clawed their way out of the crypt! Welcome back!",
+    "Cryo-stasis deactivated. Grab your weapons and jump back in!",
+    "Legends never truly die—they just take a tactical nap. Welcome back!",
+    "Back from the cold abyss and ready for action!",
+    "The living missed you, operative! Time to make some noise.",
+    "Coffin shattered, spirit unbroken. Welcome back to the squad!",
+    "Rise and shine! Your comrades need you on the frontlines.",
+    "You conquered the silence of the Deadzone. Welcome back to life!",
+    "War calls once more. Glad to see you back on your feet, warrior!",
+]
+
 
 _bot = None
 _db = None
@@ -238,13 +253,14 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
 
     target_channel = bot.get_channel(target_id) if target_id else member.guild.system_channel
 
+    welcome_quote = random.choice(RESURRECTION_QUOTES)
     embed = discord.Embed(
         title="⚡ [RESURRECTION ALERT]",
         description=(
             f"🎉 {member.mention} **has broken out of their coffin and returned to the living!**\n\n"
             f"🛡️ **Status Restored:** Member, Music, and Level {level} perks are active.\n"
             f"🎁 **Survival Bonus:** Received `+{bonus_xc} XC` and `+{bonus_xp} XP`!\n\n"
-            f"*Welcome back to the squad, soldier!*"
+            f"*{welcome_quote}*"
         ),
         color=0x2ECC71,
     )

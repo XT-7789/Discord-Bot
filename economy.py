@@ -1920,8 +1920,8 @@ def register_commands(bot, db, create_player) -> None:
                 source_column, target_column = "money", "xc"
                 source_name, target_name = "War Credits", "XC"
                 rate = setting(db, "exchange_war_to_xc_percent")
-            received = amount * rate // 100
-            if received <= 0:
+            gross_received = amount * rate // 100
+            if gross_received <= 0:
                 await interaction.response.send_message("This amount is too small for the current exchange rate.", ephemeral=True)
                 return
             if player[source_column] < amount:
@@ -1929,11 +1929,21 @@ def register_commands(bot, db, create_player) -> None:
                 return
             spent = amount
             if self.direction == "war_to_xc" and rate > 0:
-                spent = received * 100 // rate
+                spent = gross_received * 100 // rate
+
+            # 6% transaction tax if amount > 1000
+            tax_rate = 6 if amount > 1000 else 0
+            tax = gross_received * tax_rate // 100
+            received = gross_received - tax
+            if received <= 0:
+                await interaction.response.send_message("This amount is too small after exchange tax.", ephemeral=True)
+                return
+
             db.execute(f"UPDATE players SET {source_column}={source_column}-?, {target_column}={target_column}+? WHERE user_id=?", (spent, received, interaction.user.id))
-            log(db, interaction.user.id, "exchange", f"{spent} {source_name} -> {received} {target_name}")
+            log(db, interaction.user.id, "exchange", f"{spent} {source_name} -> {received} {target_name} (tax {tax})")
             db.commit()
-            await interaction.response.send_message(view=xbot_ui.success("🔄 Exchange Complete", f"**{spent:,} {source_name}** → **{received:,} {target_name}**"), ephemeral=True)
+            tax_note = f"\n-# 🏛️ Exchange tax (6% on amounts > 1,000): **{tax:,} {target_name}** deducted." if tax > 0 else ""
+            await interaction.response.send_message(view=xbot_ui.success("🔄 Exchange Complete", f"**{spent:,} {source_name}** → **{received:,} {target_name}**{tax_note}"), ephemeral=True)
 
     class ExchangeButton(discord.ui.Button):
         def __init__(self, direction: str):
@@ -1954,7 +1964,7 @@ def register_commands(bot, db, create_player) -> None:
             container = discord.ui.Container(accent_color=discord.Color.gold())
             container.add_item(discord.ui.TextDisplay(f"## 🔄 X BOT Currency Exchange\n🪙 XC: **{player['xc']:,}**\n⚔️ War Credits: **{player['money']:,}**"))
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n🪙 1 XC → **{max(1, xc_rate // 100):,} War Credits**\n⚔️ 100 War Credits → **{war_rate} XC**"))
+            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n🪙 1 XC → **{max(1, xc_rate // 100):,} War Credits**\n⚔️ 100 War Credits → **{war_rate} XC**\n-# 🏛️ Transactions over 1,000 have a 6% tax."))
             container.add_item(discord.ui.ActionRow(ExchangeButton("xc_to_war"), ExchangeButton("war_to_xc"), EconomyCentreButton(owner_id, "Economy")))
             container.add_item(discord.ui.TextDisplay("-# XCrystals cannot be exchanged."))
             self.add_item(container)
