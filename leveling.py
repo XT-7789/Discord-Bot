@@ -1,6 +1,7 @@
 """X BOT Beta 1.4A activity XP, ranks, rewards, and announcements."""
 import math
 import random
+import sqlite3
 import time
 
 import discord
@@ -244,6 +245,53 @@ def register_commands(bot, db):
         current = xp_for_level(row["level"]); nxt = xp_for_level(row["level"] + 1); progress = row["total_xp"] - current
         body = f"🏆 **Server Rank:** #{server_rank}\n⭐ **Level:** {row['level']}\n📈 **EXP:** {row['total_xp']:,} · {progress:,}/{nxt-current:,} to next level\n🔥 Activity Streak: **{row['current_streak']} days** · Best: **{row['best_streak']}**\n💬 Message EXP: **{row['message_xp']:,}** · 🔊 Voice EXP: **{row['voice_xp']:,}**\n📅 Weekly EXP: **{row['weekly_xp']:,}**"
         await interaction.response.send_message(view=xbot_ui.panel(f"⭐ {target.display_name}'s Rank", body, colour=discord.Color.gold()))
+
+    @bot.tree.command(name="level", description="Check your own or another user's activity level and XP")
+    @app_commands.describe(member="Member whose level to check (leave empty for yourself)")
+    async def level(interaction: discord.Interaction, member: discord.Member | None = None):
+        target = member or interaction.user
+        row = profile(db, target.id)
+        db.commit()
+        server_rank = db.execute("SELECT COUNT(*)+1 rank FROM xp_profiles WHERE total_xp>?", (row["total_xp"],)).fetchone()["rank"]
+        current = xp_for_level(row["level"])
+        nxt = xp_for_level(row["level"] + 1)
+        progress = max(0, row["total_xp"] - current)
+        needed = max(1, nxt - current)
+        pct = min(100, int((progress / needed) * 100))
+
+        unlocked = db.execute(
+            "SELECT name, emoji FROM xp_rewards WHERE enabled=1 AND level<=? ORDER BY level DESC LIMIT 1",
+            (row["level"],),
+        ).fetchone()
+        title_text = f"{unlocked['emoji']} {unlocked['name']}" if unlocked else "👤 Novice / Guest"
+
+        next_reward = db.execute(
+            "SELECT level, name, emoji FROM xp_rewards WHERE enabled=1 AND level>? ORDER BY level ASC LIMIT 1",
+            (row["level"],),
+        ).fetchone()
+        next_text = f"Level {next_reward['level']} ({next_reward['emoji']} {next_reward['name']})" if next_reward else "Max Level Reached! 👑"
+
+        dz_status = "🟢 Active"
+        try:
+            dz_row = db.execute("SELECT is_in_deadzone FROM deadzone_members WHERE user_id=?", (target.id,)).fetchone()
+            if dz_row and dz_row["is_in_deadzone"]:
+                dz_status = "💀 In Deadzone"
+        except sqlite3.OperationalError:
+            pass
+
+        body = (
+            f"⭐ **Current Level:** **Level {row['level']}** ({title_text})\n"
+            f"🏆 **Server Rank:** #{server_rank}\n"
+            f"📈 **Total EXP:** **{row['total_xp']:,} XP**\n"
+            f"📊 **Progress to Level {row['level'] + 1}:** {progress:,} / {needed:,} XP (`{pct}%`)\n"
+            f"🎁 **Next Unlock:** {next_text}\n"
+            f"🔥 **Activity Streak:** **{row['current_streak']} days** (Best: {row['best_streak']})\n"
+            f"📡 **Status:** {dz_status}\n\n"
+            f"💬 Messages: `{row['message_xp']:,} XP` · 🔊 Voice: `{row['voice_xp']:,} XP`"
+        )
+        await interaction.response.send_message(
+            view=xbot_ui.panel(f"⭐ {target.display_name}'s Level & XP", body, colour=discord.Color.gold())
+        )
 
     @bot.tree.command(name="level_leaderboard", description="View the X BOT activity leaderboard")
     @app_commands.choices(period=[app_commands.Choice(name="All Time", value="total_xp"), app_commands.Choice(name="Weekly", value="weekly_xp")])

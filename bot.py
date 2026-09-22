@@ -281,6 +281,7 @@ PUBLIC_PLAYER_COMMANDS = {
     # Fast actions that are still useful without opening a panel first.
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
     "declare_war", "attack", "balance", "code_redeem", "daily", "deadzone",
+    "level", "rank",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -293,6 +294,7 @@ STAFF_SLASH_COMMANDS = {
     "inventory_check", "lottery_draw", "setlevel", "server_settings",
     "war_start", "war_end", "forces_check",
     "deadzone_send", "deadzone_restore", "deadzone_scan", "deadzone_post",
+    "level",
 }
 
 

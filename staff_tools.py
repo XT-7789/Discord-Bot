@@ -18,6 +18,7 @@ TOOLS = {
     'deadzone_restore': ('Members', 'Revive from Deadzone'),
     'deadzone_scan': ('Members', 'Scan inactive (7d)'),
     'deadzone_post': ('Members', 'Post Deadzone Board'),
+    'level': ('Members', 'Check user level'),
     'spawn': ('Assets', 'Give items'),
     'remove_item': ('Assets', 'Remove items'),
     'economy_adjust': ('Assets', 'Adjust currency'),
@@ -26,7 +27,7 @@ TOOLS = {
     'war_start': ('War', 'Start alliance war'),
     'war_end': ('War', 'End alliance war'),
 }
-READ_ONLY = {'inrole', 'inventory_check', 'forces_check'}
+READ_ONLY = {'inrole', 'inventory_check', 'forces_check', 'level'}
 
 
 def lookup(root, name, guild=None):
