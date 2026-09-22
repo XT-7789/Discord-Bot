@@ -15,6 +15,7 @@ TOOLS = {
     'forces_check': ('Members', 'Inspect armed forces'),
     'setlevel': ('Members', 'Set activity level'),
     'level': ('Members', 'Check user level'),
+    'level_sync': ('Members', 'Sync Discord roles'),
     'deadzone_send': ('Deadzone', 'Send to Deadzone'),
     'deadzone_restore': ('Deadzone', 'Revive from Deadzone'),
     'deadzone_scan': ('Deadzone', 'Scan inactive (7d)'),

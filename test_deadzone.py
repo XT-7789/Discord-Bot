@@ -33,6 +33,7 @@ class DummyGuild:
             1551839505168859196: make_role(1551839505168859196, "Deadzone"),
         }
         self.system_channel = None
+        self.members = []
 
     def get_role(self, role_id):
         return self.roles.get(int(role_id))
@@ -105,6 +106,8 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(staff_tools.TOOLS["deadzone_restore"][0], "Deadzone")
         self.assertIn("deadzone_scan", staff_tools.TOOLS)
         self.assertEqual(staff_tools.TOOLS["deadzone_scan"][0], "Deadzone")
+        self.assertIn("level_sync", staff_tools.TOOLS)
+        self.assertEqual(staff_tools.TOOLS["level_sync"][0], "Members")
 
     async def test_demotion_removes_privilege_roles_and_adds_deadzone(self):
         member_role = self.guild.get_role(1505437941647015986)
@@ -273,6 +276,54 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         import economy
         self.assertEqual(economy.DEFAULT_SETTINGS["exchange_xc_to_war_percent"], "10000")
         self.assertEqual(economy.DEFAULT_SETTINGS["exchange_war_to_xc_percent"], "1")
+
+    async def test_sync_guild_member_levels(self):
+        """Verify sync_guild_member_levels upgrades DB levels of members who hold Discord level roles."""
+        active_role = self.guild.get_role(1524719900785119354)  # Level 7 Active
+        member = make_member(111222, self.guild, roles=[active_role])
+        self.guild.members.append(member)
+
+        # Profile starts at Level 1 with 10 XP
+        self.db.execute("INSERT INTO xp_profiles(user_id, level, total_xp) VALUES(?,?,?)", (111222, 1, 10))
+        self.db.commit()
+
+        dummy_bot = SimpleNamespace(get_channel=lambda *a: None)
+        updated = await leveling.sync_guild_member_levels(dummy_bot, self.db, self.guild)
+        self.assertGreaterEqual(updated, 1)
+
+        prof = leveling.profile(self.db, 111222)
+        self.assertEqual(prof["level"], 7)
+        self.assertGreaterEqual(prof["total_xp"], leveling.xp_for_level(7))
+
+    async def test_deadzone_haunt_mechanics(self):
+        """Verify deadzone haunt cooldown, XC reward, and restrictions."""
+        # 1. Living member cannot haunt
+        living = make_member(333444, self.guild, roles=[])
+        self.db.execute("INSERT OR IGNORE INTO deadzone_members(user_id, last_active_at, is_in_deadzone) VALUES(?,0,0)", (333444,))
+        self.db.execute("INSERT OR IGNORE INTO players(user_id, nation_name, capital_name, xc) VALUES(?,?,?,?)", (333444, "N", "C", 50))
+        self.db.commit()
+
+        status = deadzone.member_status(self.db, 333444)
+        self.assertEqual(status["is_in_deadzone"], 0)
+
+        # 2. Deadzone sleeper can haunt and earns XC
+        sleeper = make_member(555666, self.guild, roles=[])
+        now = int(time.time())
+        self.db.execute("INSERT OR IGNORE INTO deadzone_members(user_id, last_active_at, is_in_deadzone, last_haunt_at) VALUES(?,0,1,0)", (555666,))
+        self.db.execute("INSERT OR IGNORE INTO players(user_id, nation_name, capital_name, xc) VALUES(?,?,?,?)", (555666, "N", "C", 50))
+        self.db.commit()
+
+        # Simulate haunt reward execution
+        reward_xc = int(deadzone.setting(self.db, "deadzone_haunt_reward_xc") or 30)
+        self.assertEqual(reward_xc, 30)
+        self.db.execute("UPDATE deadzone_members SET last_haunt_at=?, last_active_at=? WHERE user_id=?", (now, now, 555666))
+        self.db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (reward_xc, 555666))
+        self.db.commit()
+
+        new_status = deadzone.member_status(self.db, 555666)
+        self.assertEqual(new_status["last_haunt_at"], now)
+        player_xc = self.db.execute("SELECT xc FROM players WHERE user_id=?", (555666,)).fetchone()["xc"]
+        self.assertEqual(player_xc, 80)  # 50 + 30 = 80
 
 
 if __name__ == "__main__":

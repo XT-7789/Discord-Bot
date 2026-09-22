@@ -22,7 +22,9 @@ DEFAULTS = {
     "deadzone_revive_bonus_xc": "150",
     "deadzone_revive_bonus_xp": "50",
     "deadzone_scavenge_cooldown": "72000",
-    "deadzone_rescue_reward_xc": "50",
+    "deadzone_rescue_reward_xc": "100",
+    "deadzone_haunt_reward_xc": "30",
+    "deadzone_haunt_cooldown": "7200",
 }
 
 RESURRECTION_QUOTES = [
@@ -40,6 +42,16 @@ RESURRECTION_QUOTES = [
     "War calls once more. Glad to see you back on your feet, warrior!",
 ]
 
+GHOST_HAUNT_QUOTES = [
+    "From beneath the frozen crypt, chains rattle as a ghostly voice cries out for salvation...",
+    "A freezing mist creeps across the room... a lost soul from the Deadzone reaches out from the shadow realm!",
+    "The tombstone quivers! An ethereal whisper echoes through the halls: 'Don't leave me behind in the cold!'",
+    "A spectral chill grips the server. The phantom of an old comrade demands a rescue operation!",
+    "The coffin lid creaks open slightly in the fog. A restless spirit is calling their living teammates!",
+    "Static crackles across the comms... 'Can anyone hear me? I am shivering in the cryo-tomb!'",
+    "A glowing ghostly apparition points toward #general: 'Chat with me to thaw my stasis!'",
+]
+
 
 _bot = None
 _db = None
@@ -54,15 +66,20 @@ def initialise(db):
 
     db.execute("""CREATE TABLE IF NOT EXISTS deadzone_members (
         user_id INTEGER PRIMARY KEY,
-        last_active_at INTEGER NOT NULL,
+        last_active_at INTEGER NOT NULL DEFAULT 0,
         is_in_deadzone INTEGER NOT NULL DEFAULT 0,
         deadzone_entered_at INTEGER NOT NULL DEFAULT 0,
         resurrections_count INTEGER NOT NULL DEFAULT 0,
         saved_roles TEXT NOT NULL DEFAULT '[]',
-        thaw_count INTEGER NOT NULL DEFAULT 0
+        thaw_count INTEGER NOT NULL DEFAULT 0,
+        last_haunt_at INTEGER NOT NULL DEFAULT 0
     )""")
     try:
         db.execute("ALTER TABLE deadzone_members ADD COLUMN thaw_count INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        db.execute("ALTER TABLE deadzone_members ADD COLUMN last_haunt_at INTEGER NOT NULL DEFAULT 0")
     except Exception:
         pass
 
@@ -606,6 +623,79 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         embed.set_footer(text="X BOT · Crypt Explorations")
         await interaction.response.send_message(embed=embed)
 
+    @deadzone_group.command(name="haunt", description="Deadzone: Send an eerie cry from the crypt to summon living comrades")
+    @app_commands.describe(target="Optional comrade you want to summon / haunt")
+    async def dz_haunt(interaction: discord.Interaction, target: Optional[discord.Member] = None):
+        user_id = interaction.user.id
+        status = member_status(db, user_id)
+        if not status or not status["is_in_deadzone"]:
+            await interaction.response.send_message(
+                "☀️ **You are still among the living!** Only spirits trapped in the Deadzone crypt can haunt the server.\n"
+                "Use `/deadzone scavenge` or rescue a frozen comrade with `/deadzone rescue`!",
+                ephemeral=True,
+            )
+            return
+
+        cooldown = int(setting(db, "deadzone_haunt_cooldown") or 7200)
+        now = int(time.time())
+        last_haunt = status["last_haunt_at"] if "last_haunt_at" in status.keys() else 0
+
+        if (now - last_haunt) < cooldown:
+            rem = cooldown - (now - last_haunt)
+            mins = rem // 60
+            secs = rem % 60
+            await interaction.response.send_message(
+                f"⏳ **Your spiritual energy is recovering.** You can haunt the living again in **{mins}m {secs}s**.",
+                ephemeral=True,
+            )
+            return
+
+        reward_xc = int(setting(db, "deadzone_haunt_reward_xc") or 30)
+        db.execute(
+            "UPDATE deadzone_members SET last_haunt_at=?, last_active_at=? WHERE user_id=?",
+            (now, now, user_id),
+        )
+        db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (reward_xc, user_id))
+        touch_activity(db, user_id)
+        db.commit()
+
+        thaw = status["thaw_count"] if "thaw_count" in status.keys() else 0
+        quote = random.choice(GHOST_HAUNT_QUOTES)
+        rescue_reward = int(setting(db, "deadzone_rescue_reward_xc") or 100)
+
+        target_text = f"🎯 **Summoning Target:** {target.mention}\n" if target else ""
+        embed = discord.Embed(
+            title="👻 [GHOST TRANSMISSION · CRY FROM THE CRYPT]",
+            description=(
+                f"🕯️ *A sudden supernatural chill sweeps through the server...*\n\n"
+                f"💀 **{interaction.user.mention} is haunting from the Deadzone crypt!**\n"
+                f"> *\"{quote}\"*\n\n"
+                f"{target_text}"
+                f"🧊 **Cryo-Stasis Thaw Progress:** `{thaw}/5 messages`\n\n"
+                f"📜 **How to Break the Curse:**\n"
+                f"1. {interaction.user.mention} must chat in **#general** to thaw ({max(0, 5 - thaw)} more message(s) needed).\n"
+                f"2. A living comrade runs `/deadzone rescue {interaction.user.mention}` to pull them out and claim **+{rescue_reward} XC** hero bounty!\n\n"
+                f"🪙 *The ghostly wandering yielded `+{reward_xc} XC` spectral scrap into {interaction.user.mention}'s treasury.*"
+            ),
+            color=0x9B59B6,
+        )
+        embed.set_footer(text="X BOT · Deadzone Supernatural Frequency · 1+2 Respawn Protocol")
+
+        notif_channel_id = int(setting(db, "deadzone_notification_channel_id") or 0)
+        lounge_channel_id = int(setting(db, "deadzone_lounge_channel_id") or 0)
+        dest_id = notif_channel_id or lounge_channel_id
+        dest_channel = interaction.guild.get_channel(dest_id) if (dest_id and interaction.guild) else (interaction.guild.system_channel if interaction.guild else None)
+
+        if dest_channel and dest_channel.id != interaction.channel_id:
+            try:
+                await dest_channel.send(content=f"🔔 {target.mention}" if target else None, embed=embed)
+                await interaction.response.send_message(f"👻 **Haunting Successful!** Your ghostly voice manifested in {dest_channel.mention} (Earned `+{reward_xc} XC`)!", ephemeral=True)
+                return
+            except discord.HTTPException:
+                pass
+
+        await interaction.response.send_message(content=f"🔔 {target.mention}" if target else None, embed=embed)
+
     @deadzone_group.command(name="wake", description="Wake up or revive a sleeping member from the Deadzone")
     @app_commands.describe(member="Member currently sleeping in the Deadzone")
     async def dz_wake(interaction: discord.Interaction, member: discord.Member):
@@ -673,7 +763,7 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.followup.send(f"⚠️ Failed to rescue {member.mention}.", ephemeral=True)
             return
 
-        reward_xc = int(setting(db, "deadzone_rescue_reward_xc") or 50)
+        reward_xc = int(setting(db, "deadzone_rescue_reward_xc") or 100)
         db.execute("UPDATE players SET xc = xc + ? WHERE user_id = ?", (reward_xc, interaction.user.id))
         touch_activity(db, interaction.user.id)
         db.commit()

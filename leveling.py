@@ -183,6 +183,44 @@ async def sync_reward_roles(db, member, level):
     except discord.HTTPException:
         pass
 
+
+async def sync_guild_member_levels(bot, db, guild):
+    """Scan all members in a guild and align database XP profiles with their highest Discord level roles."""
+    if not guild:
+        return 0
+
+    reward_rows = db.execute("SELECT level, role_id FROM xp_rewards WHERE enabled=1 AND role_id!=''").fetchall()
+    role_to_level = {int(r["role_id"]): int(r["level"]) for r in reward_rows if str(r["role_id"]).isdigit()}
+
+    updated_count = 0
+    for member in guild.members:
+        if member.bot:
+            continue
+
+        member_role_ids = {r.id for r in member.roles}
+        held_levels = [role_to_level[rid] for rid in member_role_ids if rid in role_to_level]
+        if not held_levels:
+            continue
+
+        max_role_level = max(held_levels)
+        prof = profile(db, member.id)
+        current_level = int(prof["level"] if prof else 1)
+
+        if max_role_level > current_level:
+            target_xp = xp_for_level(max_role_level)
+            db.execute(
+                """INSERT INTO xp_profiles(user_id, level, total_xp) VALUES(?,?,?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                level=MAX(level, excluded.level),
+                total_xp=MAX(total_xp, excluded.total_xp)""",
+                (member.id, max_role_level, target_xp),
+            )
+            updated_count += 1
+            await sync_reward_roles(db, member, max_role_level)
+
+    db.commit()
+    return updated_count
+
 async def _announce(bot, db, member, new_level, rewards):
     if setting(db, "xp_announcement_enabled") != "1": return
     reward_text = ", ".join(f"{r['emoji']} **{r['name']}**" for r in rewards) or ""
@@ -236,7 +274,7 @@ async def voice_xp_loop():
 async def before_voice_xp():
     await voice_xp_loop.bot.wait_until_ready()
 
-def register_commands(bot, db):
+def register_commands(bot, db, is_council_or_admin=None):
     @bot.tree.command(name="rank", description="View your X BOT activity rank")
     @app_commands.describe(member="Leave empty to view your own rank")
     async def rank(interaction: discord.Interaction, member: discord.Member | None = None):
@@ -322,6 +360,26 @@ def register_commands(bot, db):
         db.execute("UPDATE xp_profiles SET total_xp=?,level=? WHERE user_id=?", (total, level, member.id)); db.commit()
         await sync_reward_roles(db, member, level)
         await interaction.response.send_message(view=xbot_ui.success("⭐ Level Updated", f"{member.mention} is now **Level {level}** with **{total:,} XP**."), ephemeral=True)
+
+    @bot.tree.command(name="level_sync", description="Admin: Sync all members' database XP levels with their Discord roles")
+    async def level_sync_command(interaction: discord.Interaction):
+        can_run = False
+        if getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator:
+            can_run = True
+        elif is_council_or_admin and is_council_or_admin(interaction):
+            can_run = True
+
+        if not can_run:
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can synchronize levels."), ephemeral=True)
+            return
+
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        count = await sync_guild_member_levels(bot, db, interaction.guild)
+        await interaction.followup.send(f"✅ **Level Synchronization Complete!** Checked all members and updated `{count}` profiles to match their highest Discord level roles.", ephemeral=True)
 
     @bot.tree.command(name="setannouncement", description="Admin: set the default or a reward-specific level announcement")
     @app_commands.default_permissions(administrator=True)
