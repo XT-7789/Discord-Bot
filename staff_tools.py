@@ -17,7 +17,6 @@ TOOLS = {
     'deadzone_send': ('Members', 'Send to Deadzone'),
     'deadzone_restore': ('Members', 'Revive from Deadzone'),
     'deadzone_scan': ('Members', 'Scan inactive (7d)'),
-    'deadzone_post': ('Members', 'Post Deadzone Board'),
     'level': ('Members', 'Check user level'),
     'spawn': ('Assets', 'Give items'),
     'remove_item': ('Assets', 'Remove items'),

@@ -90,7 +90,7 @@ def initialise(db):
         command_name TEXT PRIMARY KEY,
         access_mode TEXT NOT NULL
     )""")
-    for command_name in ("deadzone_send", "deadzone_restore", "deadzone_scan", "deadzone_post"):
+    for command_name in ("deadzone_send", "deadzone_restore", "deadzone_scan"):
         db.execute("INSERT OR IGNORE INTO command_permissions(command_name,access_mode) VALUES(?,'admin')", (command_name,))
         db.execute("UPDATE command_permissions SET access_mode='admin' WHERE command_name=?", (command_name,))
 
@@ -196,7 +196,7 @@ async def demote_to_deadzone(bot, db, member: discord.Member, reason: str = "Ina
             ),
             color=0x4A4D52,
         )
-        embed.set_footer(text="X BOT · Deadzone Division · Click the pinned Break Out button above or chat in lounge to revive")
+        embed.set_footer(text="X BOT · Deadzone Division · Click the pinned Break Out button above or chat in general to revive")
         try:
             await channel.send(embed=embed)
         except discord.HTTPException:
@@ -289,7 +289,7 @@ def build_deadzone_board_embed():
             "• Tag assigned: **Deadzone**.\n\n"
             "───\n\n"
             "### ⚡ HOW TO RESURRECT (1+2 RESPAWN PROTOCOL):\n"
-            "1. **Condition 1 (Thaw Out):** Send **5 chat messages** (e.g. in `#lounge`) to melt your cryo-stasis seal.\n"
+            "1. **Condition 1 (Thaw Out):** Send **5 chat messages** (e.g. in `#general`) to melt your cryo-stasis seal.\n"
             "2. **Condition 2 (Teammate Rescue):** Once thawed (5/5), have an active comrade rescue you with **`/deadzone rescue member:@you`** or click **`[ 🤝 Rescue Teammate ]`** below.\n\n"
             "🎁 **Resurrection Rewards:**\n"
             "• Instant restoration of **Member**, **Music**, and all earned **Level rank tags**.\n"
@@ -329,7 +329,7 @@ class DeadzoneReviveView(discord.ui.View):
             await interaction.response.send_message(
                 f"🧊 **Cryo-Stasis Thaw Progress: {thaw_count}/5 messages sent**\n\n"
                 f"Your coffin is frozen shut! Follow the **1+2 Respawn Protocol**:\n"
-                f"1. **Thaw out:** Send **{5 - thaw_count} more message(s)** in any chat channel (e.g. `#lounge`).\n"
+                f"1. **Thaw out:** Send **{5 - thaw_count} more message(s)** in any chat channel (e.g. `#general`).\n"
                 f"2. **Get rescued:** Once thawed (5/5), have an active comrade rescue you with `/deadzone rescue member:{interaction.user.mention}` (they earn **+50 XC**!).",
                 ephemeral=True,
             )
@@ -365,7 +365,7 @@ class DeadzoneReviveView(discord.ui.View):
             total_sleepers = db.execute("SELECT COUNT(*) as c FROM deadzone_members WHERE is_in_deadzone=1").fetchone()["c"]
             await interaction.response.send_message(
                 f"ℹ️ There are **{total_sleepers}** sleeper(s) in the Deadzone, but none have finished thawing (5/5 messages) yet.\n"
-                f"Tell them to chat in `#lounge` to thaw out, then use `/deadzone rescue @member` once they reach 5/5!",
+                f"Tell them to chat in `#general` to thaw out, then use `/deadzone rescue @member` once they reach 5/5!",
                 ephemeral=True,
             )
             return
@@ -588,7 +588,7 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.response.send_message(f"🔔 Sent a direct wake-up call to {member.mention} (Thaw progress: {thaw}/5)!", ephemeral=True)
         except discord.Forbidden:
             await interaction.response.send_message(
-                f"📢 {member.mention}, wake up! {interaction.user.mention} is calling you from the lounge! Send messages in chat to thaw ({thaw}/5) then get rescued!",
+                f"📢 {member.mention}, wake up! {interaction.user.mention} is calling you from #general! Send messages in chat to thaw ({thaw}/5) then get rescued!",
             )
 
     @deadzone_group.command(name="rescue", description="Rescue a thawed teammate from the Deadzone and earn +50 XC")
@@ -689,6 +689,12 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         if crypt_channel:
             db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(crypt_channel.id),))
             updates.append(f"🪦 **Crypt Channel:** {crypt_channel.mention}")
+            try:
+                embed = build_deadzone_board_embed()
+                await crypt_channel.send(embed=embed, view=DeadzoneReviveView())
+                updates.append("⚡ *Resurrection board automatically posted in crypt channel!*")
+            except discord.HTTPException:
+                pass
 
         if not updates:
             await interaction.response.send_message("Please choose at least one channel to set.", ephemeral=True)
@@ -696,28 +702,6 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
 
         db.commit()
         await interaction.response.send_message("✅ **Deadzone Channels Updated:**\n" + "\n".join(updates), ephemeral=True)
-
-    @deadzone_group.command(name="post", description="Admin: Post the official Deadzone resurrection board with the Break Out button")
-    @app_commands.describe(channel="Channel to post the board in (defaults to current channel)")
-    async def dz_post(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
-        if not is_council_or_admin(interaction):
-            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can post the Deadzone board."), ephemeral=True)
-            return
-
-        dest = channel or interaction.channel
-        if not isinstance(dest, discord.TextChannel):
-            await interaction.response.send_message(view=xbot_ui.danger("Invalid Channel", "Please choose a valid text channel."), ephemeral=True)
-            return
-
-        embed = build_deadzone_board_embed()
-        await dest.send(embed=embed, view=DeadzoneReviveView())
-        db.execute(
-            "INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (str(dest.id),),
-        )
-        db.commit()
-        await interaction.response.send_message(f"✅ Deadzone Crypt resurrection board posted in {dest.mention} and saved as the active crypt channel!", ephemeral=True)
 
     # Top-level standalone staff commands (accessible from staff_tools Admin Panel and slash)
     @bot.tree.command(name="deadzone_send", description="Admin: Demote an inactive member to Deadzone", **STAFF_COMMAND_KWARGS)
@@ -758,27 +742,5 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         demoted = await scan_guild_inactivity(bot, db, interaction.guild)
         names = ", ".join(m.display_name for m in demoted) if demoted else "None"
         await interaction.followup.send(f"🔍 **Deadzone Scan Complete.** Demoted `{len(demoted)}` members: {names}", ephemeral=True)
-
-    @bot.tree.command(name="deadzone_post", description="Admin: Post the Deadzone board with the Break Out button", **STAFF_COMMAND_KWARGS)
-    @app_commands.describe(channel="Channel to post the board in (defaults to current channel)")
-    async def deadzone_post(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
-        if not is_council_or_admin(interaction):
-            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can post the Deadzone board."), ephemeral=True)
-            return
-
-        dest = channel or interaction.channel
-        if not isinstance(dest, discord.TextChannel):
-            await interaction.response.send_message(view=xbot_ui.danger("Invalid Channel", "Please choose a valid text channel."), ephemeral=True)
-            return
-
-        embed = build_deadzone_board_embed()
-        await dest.send(embed=embed, view=DeadzoneReviveView())
-        db.execute(
-            "INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (str(dest.id),),
-        )
-        db.commit()
-        await interaction.response.send_message(f"✅ Deadzone Crypt resurrection board posted in {dest.mention} and saved as the active crypt channel!", ephemeral=True)
 
     bot.tree.add_command(deadzone_group)
