@@ -29,6 +29,7 @@ import tier7
 import tier8
 import system_ui
 import casual_games
+import deadzone
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -138,6 +139,7 @@ tier6.initialise(db)
 tier7.initialise(db)
 tier8.initialise(db)
 casual_games.initialise(db)
+deadzone.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -278,7 +280,7 @@ PUBLIC_PLAYER_COMMANDS = {
     "warfront", "city", "army", "recruit", "diplomacy", "casino", "craft", "research",
     # Fast actions that are still useful without opening a panel first.
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
-    "declare_war", "attack", "balance", "code_redeem", "daily",
+    "declare_war", "attack", "balance", "code_redeem", "daily", "deadzone",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -290,6 +292,7 @@ STAFF_SLASH_COMMANDS = {
     "inrole", "role", "spawn", "remove_item", "economy_adjust",
     "inventory_check", "lottery_draw", "setlevel", "server_settings",
     "war_start", "war_end", "forces_check",
+    "deadzone_send", "deadzone_restore", "deadzone_scan",
 }
 
 
@@ -417,6 +420,7 @@ class XBot(discord.Client):
     async def setup_hook(self):
         applications.setup_persistent_views(self, db)
         tester_feedback.setup_persistent_views(self, db)
+        self.add_view(deadzone.DeadzoneReviveView())
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
 
         def hide_panel_commands(command_guild, allowed_names):
@@ -472,6 +476,7 @@ class XBot(discord.Client):
         casino.start_vip_cleanup_task(self, db)
         leveling.start_voice_task(self, db)
         tier4.start_backup_task(self, db)
+        deadzone.start_deadzone_task(self, db)
 
 
 bot = XBot()
@@ -693,7 +698,16 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     await leveling.handle_message(bot, db, message)
+    await deadzone.handle_message(bot, db, message)
     await run_xb_prefix(message)
+
+
+@bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    if member.bot:
+        return
+    if after.channel is not None:
+        deadzone.touch_activity(db, member.id)
 
 
 @bot.tree.command(name="ping", description="Check whether X BOT is online")
@@ -993,6 +1007,7 @@ advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db)
 applications.register_commands(bot, db)
 staff_panel.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
+deadzone.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 # X Community has retired the old company/job economy.  Keep the historical
 # database tables for old logs, but do not publish these commands any more.

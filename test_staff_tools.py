@@ -16,7 +16,7 @@ import staff_tools as tools
 
 def catalogue(calls):
     commands = {}
-    for filename in ('bot.py', 'economy.py', 'war_tier.py', 'leveling.py', 'casino.py'):
+    for filename in ('bot.py', 'economy.py', 'war_tier.py', 'leveling.py', 'casino.py', 'deadzone.py'):
         for node in ast.walk(ast.parse(Path(__file__).with_name(filename).read_text(encoding='utf-8-sig'))):
             if not isinstance(node, ast.AsyncFunctionDef):
                 continue
