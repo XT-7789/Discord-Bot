@@ -360,6 +360,20 @@ class GamerCardView(discord.ui.View):
         btn_edit.callback = self.on_edit_handles
         self.add_item(btn_edit)
 
+        btn_profile = discord.ui.Button(
+            label="Economy Profile",
+            emoji="👤",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"xbot:game:prof:{target_user.id}",
+        )
+        btn_profile.callback = self.on_view_profile
+        self.add_item(btn_profile)
+
+    async def on_view_profile(self, interaction: discord.Interaction):
+        import economy
+        view = economy.build_profile_view(self.target_user, self.db)
+        await interaction.response.send_message(view=view, ephemeral=True)
+
     async def on_copy_steam(self, interaction: discord.Interaction):
         steam_code = self.profile["steam_id"] if self.profile and self.profile["steam_id"] else ""
         if not steam_code:
@@ -476,6 +490,42 @@ class QuickGameSetModal(discord.ui.Modal):
             f"• 📱 **Mobile:** `{m or 'Not set'}`",
             ephemeral=True,
         )
+
+
+def build_gamer_card(target: discord.User | discord.Member, profile, db, guild: Optional[discord.Guild] = None):
+    """Build the Gamer Card embed and interactive GamerCardView for a player."""
+    held_roles = []
+    if guild and isinstance(target, discord.Member):
+        for key, cfg in GAME_CONFIG.items():
+            role_id_str = setting(db, cfg["role_key"])
+            if role_id_str.isdigit():
+                role = guild.get_role(int(role_id_str))
+                if role and role in target.roles:
+                    held_roles.append(f"{cfg['emoji']} {role.name}")
+
+    roles_text = " · ".join(held_roles) if held_roles else "No gaming roles selected"
+    steam_text = f"`{profile['steam_id']}`" if profile and profile["steam_id"] else "*Not set*"
+    roblox_text = f"`{profile['roblox_name']}`" if profile and profile["roblox_name"] else "*Not set*"
+    mobile_text = f"`{profile['mobile_games']}`" if profile and profile["mobile_games"] else "*Not set*"
+
+    embed = discord.Embed(
+        title=f"🎮 {target.display_name}'s Gamer Card",
+        description=(
+            f"🏷️ **Game Roles:** {roles_text}\n\n"
+            f"🎮 **Steam ID / Friend Code:** {steam_text}\n"
+            f"🟥 **Roblox User:** {roblox_text}\n"
+            f"📱 **Mobile Games:** {mobile_text}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Click the buttons below to copy codes or invite this player to your Lounge squad!"
+        ),
+        color=discord.Color.blurple(),
+    )
+    avatar_url = target.display_avatar.url if hasattr(target, "display_avatar") else "https://cdn.discordapp.com/embed/avatars/0.png"
+    embed.set_thumbnail(url=avatar_url)
+    embed.set_footer(text="X BOT · Gaming Card · Click [Edit Handles] to update your tags")
+
+    card_view = GamerCardView(target, profile, db)
+    return embed, card_view
 
 
 def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> None:
@@ -598,38 +648,7 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
     async def game_profile_command(interaction: discord.Interaction, user: Optional[discord.Member] = None):
         target = user or interaction.user
         profile = get_game_profile(db, target.id)
-
-        # Check held game roles
-        held_roles = []
-        if interaction.guild and isinstance(target, discord.Member):
-            for key, cfg in GAME_CONFIG.items():
-                role_id_str = setting(db, cfg["role_key"])
-                if role_id_str.isdigit():
-                    role = interaction.guild.get_role(int(role_id_str))
-                    if role and role in target.roles:
-                        held_roles.append(f"{cfg['emoji']} {role.name}")
-
-        roles_text = " · ".join(held_roles) if held_roles else "No gaming roles selected"
-        steam_text = f"`{profile['steam_id']}`" if profile and profile["steam_id"] else "*Not set*"
-        roblox_text = f"`{profile['roblox_name']}`" if profile and profile["roblox_name"] else "*Not set*"
-        mobile_text = f"`{profile['mobile_games']}`" if profile and profile["mobile_games"] else "*Not set*"
-
-        embed = discord.Embed(
-            title=f"🎮 {target.display_name}'s Gamer Card",
-            description=(
-                f"🏷️ **Game Roles:** {roles_text}\n\n"
-                f"🎮 **Steam ID / Friend Code:** {steam_text}\n"
-                f"🟥 **Roblox User:** {roblox_text}\n"
-                f"📱 **Mobile Games:** {mobile_text}\n\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"Click the buttons below to copy codes or invite this player to your Lounge squad!"
-            ),
-            color=discord.Color.blurple(),
-        )
-        embed.set_thumbnail(url=target.display_avatar.url)
-        embed.set_footer(text="X BOT · Gaming Card · Click [Edit Handles] to update your tags")
-
-        card_view = GamerCardView(target, profile, db)
+        embed, card_view = build_gamer_card(target, profile, db, interaction.guild)
         await interaction.response.send_message(embed=embed, view=card_view)
 
     @gaming_group.command(name="leaderboard", description="View the Top 10 Weekly Gamers in Voice Lounges")

@@ -233,12 +233,13 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
 
         view = gaming.GamerCardView(target, profile, self.db)
 
-        # Should have Steam button, Roblox button, Invite button, Edit button
+        # Should have Steam button, Roblox button, Invite button, Edit button, Economy Profile button
         labels = [item.label for item in view.children if isinstance(item, discord.ui.Button)]
         self.assertIn("Copy Steam Code", labels)
         self.assertIn("Copy Roblox User", labels)
         self.assertIn("Invite to Lounge", labels)
         self.assertIn("Edit Handles", labels)
+        self.assertIn("Economy Profile", labels)
 
         # Test Steam copy
         interaction = MagicMock(spec=discord.Interaction)
@@ -253,6 +254,12 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
         await view.on_copy_roblox(interaction)
         interaction.response.send_message.assert_awaited()
         self.assertIn("ProRoblox", interaction.response.send_message.call_args[0][0])
+
+        # Test View Economy Profile
+        interaction.response.send_message.reset_mock()
+        await view.on_view_profile(interaction)
+        interaction.response.send_message.assert_awaited()
+        self.assertTrue(interaction.response.send_message.call_args[1].get("ephemeral"))
 
     async def test_quick_game_set_modal(self):
         user_id = 888
@@ -275,6 +282,34 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["steam_id"], "steam_test_99")
         self.assertEqual(saved["roblox_name"], "roblox_test_99")
         self.assertEqual(saved["mobile_games"], "Apex, MLBB")
+
+    async def test_economy_profile_view_and_gamer_button(self):
+        target = make_member(999, self.guild, display_name="TestProfileUser")
+        gaming.save_game_profile(self.db, 999, "my_steam_tag", "my_roblox_tag", "Wild Rift")
+
+        view = economy.build_profile_view(target, self.db)
+        self.assertIsInstance(view, discord.ui.LayoutView)
+
+        # Check action row buttons
+        buttons = [item for item in view.children if isinstance(item, discord.ui.Container)][0].children
+        action_rows = [b for b in buttons if isinstance(b, discord.ui.ActionRow)]
+        self.assertTrue(len(action_rows) > 0)
+        btn_labels = [btn.label for btn in action_rows[0].children if isinstance(btn, discord.ui.Button)]
+        self.assertIn("Gamer Card", btn_labels)
+        self.assertIn("Edit Handles", btn_labels)
+
+        # Click Gamer Card button
+        btn_gamer = [btn for btn in action_rows[0].children if getattr(btn, "label", None) == "Gamer Card"][0]
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.guild = self.guild
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+
+        await btn_gamer.callback(interaction)
+        interaction.response.send_message.assert_awaited()
+        embed = interaction.response.send_message.call_args[1].get("embed")
+        self.assertIsNotNone(embed)
+        self.assertIn("TestProfileUser's Gamer Card", embed.title)
 
 
 if __name__ == "__main__":

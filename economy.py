@@ -6,12 +6,13 @@ import time
 import tier8
 import unicodedata
 from pathlib import Path
+from typing import Optional
 
 import discord
-from discord import app_commands
-from discord.ext import tasks
 import xbot_ui
 import war_system
+from discord import app_commands
+from discord.ext import tasks
 
 
 DEFAULT_SETTINGS = {
@@ -589,6 +590,93 @@ def award_mining_collection_if_complete(db: sqlite3.Connection, user_id: int, no
     return xc_reward, crystal_reward, len(materials)
 
 
+def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) -> discord.ui.LayoutView:
+    """Build an interactive LayoutView for a member's economy profile with 1-click Gamer Card navigation."""
+    player = db.execute("SELECT * FROM players WHERE user_id = ?", (target.id,)).fetchone()
+    if not player and create_player_fn:
+        player = create_player_fn(target)
+    elif not player:
+        player = {
+            "nation_name": f"{target.display_name}'s Nation",
+            "job_id": None,
+            "xc": 0,
+            "bank_xc": 0,
+            "money": 0,
+            "xcrystals": 0,
+        }
+
+    job = None
+    if player and player["job_id"] is not None:
+        job = db.execute("SELECT name FROM jobs WHERE id = ?", (player["job_id"],)).fetchone()
+
+    item_count = 0
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventories'").fetchone():
+        row = db.execute(
+            "SELECT COALESCE(SUM(quantity), 0) AS total FROM inventories WHERE user_id = ?",
+            (target.id,),
+        ).fetchone()
+        if row:
+            item_count = row["total"]
+
+    game_prof = db.execute("SELECT * FROM game_profiles WHERE user_id = ?", (target.id,)).fetchone() if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='game_profiles'").fetchone() else None
+    gaming_line = ""
+    if game_prof and (game_prof["steam_id"] or game_prof["roblox_name"]):
+        tags = []
+        if game_prof["steam_id"]: tags.append(f"Steam: `{game_prof['steam_id']}`")
+        if game_prof["roblox_name"]: tags.append(f"Roblox: `{game_prof['roblox_name']}`")
+        gaming_line = f"\n🎮 **Gaming:** " + " · ".join(tags)
+
+    view = discord.ui.LayoutView(timeout=180)
+    container = discord.ui.Container(accent_color=discord.Color.blurple())
+    avatar_url = target.display_avatar.url if hasattr(target, "display_avatar") else "https://cdn.discordapp.com/embed/avatars/0.png"
+    text = (f"## 👤 {target.display_name}'s X BOT Profile\n"
+            f"🏳️ **Nation:** {player['nation_name']}\n"
+            f"💼 **Job:** {job['name'] if job else 'Unemployed'}\n"
+            f"🎒 **Inventory:** {item_count:,} item(s)\n"
+            f"🪙 **Wallet XC:** {player['xc']:,}\n"
+            f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
+            f"💵 **Cash:** {player['money']:,}\n"
+            f"💎 **XCrystals:** {player['xcrystals']:,}"
+            f"{gaming_line}")
+    container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=discord.ui.Thumbnail(avatar_url)))
+
+    row = discord.ui.ActionRow()
+    btn_gamer = discord.ui.Button(
+        label="Gamer Card",
+        emoji="🎮",
+        style=discord.ButtonStyle.primary,
+        custom_id=f"xbot:prof:gamer:{target.id}",
+    )
+    btn_edit = discord.ui.Button(
+        label="Edit Handles",
+        emoji="⚙️",
+        style=discord.ButtonStyle.secondary,
+        custom_id=f"xbot:prof:edit:{target.id}",
+    )
+
+    async def on_gamer_click(b_inter: discord.Interaction):
+        import gaming
+        g_prof = gaming.get_game_profile(db, target.id)
+        embed, card_view = gaming.build_gamer_card(target, g_prof, db, b_inter.guild)
+        await b_inter.response.send_message(embed=embed, view=card_view, ephemeral=True)
+
+    btn_gamer.callback = on_gamer_click
+
+    async def on_edit_click(b_inter: discord.Interaction):
+        import gaming
+        existing = gaming.get_game_profile(db, b_inter.user.id)
+        modal = gaming.QuickGameSetModal(db, existing)
+        await b_inter.response.send_modal(modal)
+
+    btn_edit.callback = on_edit_click
+
+    row.add_item(btn_gamer)
+    row.add_item(btn_edit)
+    container.add_item(row)
+    view.add_item(container)
+    return view
+
+
 def register_commands(bot, db, create_player) -> None:
     def is_economy_staff(interaction: discord.Interaction) -> bool:
         """Staff-only read access for admin/moderator economy lookups.
@@ -724,37 +812,12 @@ def register_commands(bot, db, create_player) -> None:
             ephemeral=True,
         )
 
-    @bot.tree.command(name="profile", description="View your X BOT economy profile")
-    async def profile(interaction: discord.Interaction):
-        player = create_player(interaction.user)
-        job = None
-        if player['job_id'] is not None:
-            job = db.execute("SELECT name FROM jobs WHERE id = ?", (player['job_id'],)).fetchone()
-        item_count = db.execute(
-            "SELECT COALESCE(SUM(quantity), 0) AS total FROM inventories WHERE user_id = ?",
-            (interaction.user.id,),
-        ).fetchone()['total']
-        game_prof = db.execute("SELECT * FROM game_profiles WHERE user_id = ?", (interaction.user.id,)).fetchone() if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='game_profiles'").fetchone() else None
-        gaming_line = ""
-        if game_prof and (game_prof["steam_id"] or game_prof["roblox_name"]):
-            tags = []
-            if game_prof["steam_id"]: tags.append(f"Steam: `{game_prof['steam_id']}`")
-            if game_prof["roblox_name"]: tags.append(f"Roblox: `{game_prof['roblox_name']}`")
-            gaming_line = f"\n🎮 **Gaming:** " + " · ".join(tags)
-
-        view = discord.ui.LayoutView(timeout=180)
-        container = discord.ui.Container(accent_color=discord.Color.blurple())
-        text = (f"## 👤 {interaction.user.display_name}'s X BOT Profile\n"
-                f"🏳️ **Nation:** {player['nation_name']}\n"
-                f"💼 **Job:** {job['name'] if job else 'Unemployed'}\n"
-                f"🎒 **Inventory:** {item_count:,} item(s)\n"
-                f"🪙 **Wallet XC:** {player['xc']:,}\n"
-                f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
-                f"💵 **Cash:** {player['money']:,}\n"
-                f"💎 **XCrystals:** {player['xcrystals']:,}"
-                f"{gaming_line}")
-        container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=discord.ui.Thumbnail(interaction.user.display_avatar.url)))
-        view.add_item(container)
+    @bot.tree.command(name="profile", description="View your or another member's X BOT economy profile")
+    @app_commands.describe(user="Member whose profile you want to inspect (optional)")
+    async def profile(interaction: discord.Interaction, user: Optional[discord.Member] = None):
+        target = user or interaction.user
+        create_player(target)
+        view = build_profile_view(target, db, create_player)
         await interaction.response.send_message(view=view)
 
     @bot.tree.command(name="leaderboard", description="View an X BOT leaderboard")
