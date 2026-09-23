@@ -315,35 +315,6 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
 
     gaming_group = app_commands.Group(name="gaming", description="X BOT Gaming Zone commands")
 
-    @gaming_group.command(name="roles", description="Post the interactive Gaming Zone self-assign roles menu")
-    async def game_roles_command(interaction: discord.Interaction):
-        can_run = False
-        if getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator:
-            can_run = True
-        elif is_council_or_admin and is_council_or_admin(interaction):
-            can_run = True
-
-        if not can_run:
-            await interaction.response.send_message(
-                view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Staff can post the Game Roles panel."),
-                ephemeral=True,
-            )
-            return
-
-        embed = discord.Embed(
-            title="🎮 [GAMING ZONE · SELECT YOUR GAMES]",
-            description=(
-                "Choose the games you play to unlock discussion channels and receive LFG party pings!\n\n"
-                "• **🎮 Steam**: PC games, Counter-Strike, Lethal Company, Steam discussions\n"
-                "• **🟥 Roblox**: Blox Fruits, Doors, Brookhaven, Roblox teaming\n"
-                "• **📱 Mobile**: Mobile Legends, PUBG Mobile, Brawl Stars, Gacha games\n\n"
-                "-# Click a button below to toggle the role on or off at any time."
-            ),
-            color=0x3498DB,
-        )
-        embed.set_footer(text="X BOT · Gaming Community")
-        await interaction.response.send_message(embed=embed, view=GameRolesView())
-
     async def _handle_lfg(
         interaction: discord.Interaction,
         game: app_commands.Choice[str],

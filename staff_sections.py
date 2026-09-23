@@ -1,5 +1,6 @@
 """Consistent browse / preview / action sections for private Admin subpages."""
 import discord
+from discord.ui.select import BaseSelect
 
 
 def build(panel, content):
@@ -21,15 +22,15 @@ def build(panel, content):
         return take(lambda c:getattr(c,'action',None) in names)
 
     def add_rows(items):
-        # A select occupies a full row; buttons stay in short pairs on mobile.
+        # A select occupies a full row alone; buttons can pack up to 5 per row.
         pending=[]
         for item in items:
-            if isinstance(item,discord.ui.Select):
+            if isinstance(item,(discord.ui.Select,BaseSelect)):
                 if pending:parts.append(discord.ui.ActionRow(*pending));pending=[]
                 parts.append(discord.ui.ActionRow(item))
             else:
                 pending.append(item)
-                if len(pending)==2:parts.append(discord.ui.ActionRow(*pending));pending=[]
+                if len(pending)==5:parts.append(discord.ui.ActionRow(*pending));pending=[]
         if pending:parts.append(discord.ui.ActionRow(*pending))
 
     def section(title,body,items=()):
@@ -93,22 +94,19 @@ def build(panel, content):
         asset_actions=action('asset_edit_money','asset_spawn_item','asset_remove_item','refresh')
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))
         for field in fields:section(field.name,field.value)
-        section('Player Economy & Inventory Manager','Select target player, then edit money or spawn/remove backpack items directly.',user_select+asset_actions)
-        if legacy_tools:section('Advanced Tool Wizards','Multi-step guided wizards.',legacy_tools)
+        section('Player Economy & Inventory Manager','Select target player, then edit money or spawn/remove backpack items directly.',user_select+asset_actions+legacy_tools)
     elif panel.page=='war_tools':
         user_select=take(lambda c:isinstance(c,AdminUserSelect))
         war_actions=action('war_edit_troops','war_edit_capital','war_edit_resources','war_toggle_status','refresh')
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))
         for field in fields:section(field.name,field.value)
-        section('Armed Forces & Military Manager','Select a commander to inspect or edit army, air, navy, capital health and resources.',user_select+war_actions)
-        if legacy_tools:section('Alliance War Tools','Guided war controls.',legacy_tools)
+        section('Armed Forces & Military Manager','Select a commander to inspect or edit army, air, navy, capital health and resources.',user_select+war_actions+legacy_tools)
     elif panel.page=='server':
         channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
         server_actions=action('server_post_gaming_roles','post_verification','post_tester_feedback','server_post_deadzone','server_say','server_toggle_level','server_set_level_channel','server_edit_template','server_lottery_draw')
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))
         for field in fields:section(field.name,field.value)
-        section('Server Channel & Action Controls','Select a channel above, then choose a setting or panel action below.',channel_select+server_actions)
-        if legacy_tools:section('Other Server Tools','Guided server tools.',legacy_tools)
+        section('Server Channel & Action Controls','Select a channel above, then choose a setting or panel action below.',channel_select+server_actions+legacy_tools)
     elif panel.page in TOOL_GROUPS:
         for field in fields:section(field.name,field.value)
         inspections=take(lambda c:isinstance(c,staff_tools.ToolButton) and c.name in staff_tools.READ_ONLY)
