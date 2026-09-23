@@ -493,35 +493,8 @@ def process_job_inactivity(db: sqlite3.Connection, now: int | None = None):
 
 
 def start_job_inactivity_task(bot: discord.Client, db: sqlite3.Connection) -> None:
-    """Start one hourly inactivity scan and publish events to the configured channel."""
-    if getattr(bot, "job_inactivity_loop", None):
-        return
-
-    @tasks.loop(hours=1)
-    async def inactivity_loop():
-        events = process_job_inactivity(db)
-        channel_id = setting(db, "job_log_channel_id")
-        if not channel_id or not events:
-            return
-        channel = bot.get_channel(channel_id)
-        if channel is None:
-            try:
-                channel = await bot.fetch_channel(channel_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return
-        for event, user_id, display_name, job_name, inactive_days in events:
-            if event == "warning":
-                view = xbot_ui.warning("⚠️ Job Inactivity Warning", f"<@{user_id}> has not completed a shift for **{inactive_days} days**.\nJob: **{job_name}**\nComplete `/work` before day **{setting(db, 'job_fire_days')}** to keep this job.")
-            else:
-                view = xbot_ui.danger("📋 Job Inactivity Dismissal", f"<@{user_id}> was removed from **{job_name}** after **{inactive_days} inactive days**.\nTheir Discord role was not changed. They may reapply with the configured Work Pass.")
-            await channel.send(view=view)
-
-    @inactivity_loop.before_loop
-    async def before_inactivity_loop():
-        await bot.wait_until_ready()
-
-    bot.job_inactivity_loop = inactivity_loop
-    inactivity_loop.start()
+    """Retired: Job system is inactive; no background inactivity loop needed."""
+    return
 
 
 def find_item(db, name: str, user_id: int | None = None):
@@ -605,10 +578,6 @@ def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) ->
             "xcrystals": 0,
         }
 
-    job = None
-    if player and player["job_id"] is not None:
-        job = db.execute("SELECT name FROM jobs WHERE id = ?", (player["job_id"],)).fetchone()
-
     item_count = 0
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventories'").fetchone():
         row = db.execute(
@@ -631,7 +600,6 @@ def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) ->
     avatar_url = target.display_avatar.url if hasattr(target, "display_avatar") else "https://cdn.discordapp.com/embed/avatars/0.png"
     text = (f"## 👤 {target.display_name}'s X BOT Profile\n"
             f"🏳️ **Nation:** {player['nation_name']}\n"
-            f"💼 **Job:** {job['name'] if job else 'Unemployed'}\n"
             f"🎒 **Inventory:** {item_count:,} item(s)\n"
             f"🪙 **Wallet XC:** {player['xc']:,}\n"
             f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
@@ -758,15 +726,6 @@ def register_commands(bot, db, create_player) -> None:
         log(db, user.id, "admin_currency_adjust", f"{interaction.user} ({interaction.user.id}) changed {column} by {amount:+} | {reason[:200]}")
         db.commit()
         await interaction.response.send_message(view=xbot_ui.success("💰 Economy Adjusted", f"{user.mention} · **{currency.name}: {amount:+,}**\nReason: **{reason[:200]}**\n-# This action was recorded in Economy Logs."), ephemeral=True)
-
-    @bot.tree.command(name="job_log_channel", description="Admin: choose the Discord channel for job warnings and dismissals")
-    @app_commands.describe(channel="Channel that receives automatic job activity logs")
-    async def job_log_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        db.execute("""INSERT INTO economy_settings(key,value) VALUES('job_log_channel_id',?)
-            ON CONFLICT(key) DO UPDATE SET value=excluded.value""", (str(channel.id),))
-        log(db, interaction.user.id, "job_log_channel", f"{interaction.user} set job log channel to {channel.name} ({channel.id})")
-        db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("📨 Job Log Channel Saved", f"Warnings and dismissals will be sent to {channel.mention}."), ephemeral=True)
 
     @bot.tree.command(name="balance", description="View your X BOT balance, or inspect a member as staff")
     @app_commands.describe(user="Optional: staff may inspect another member")
@@ -943,53 +902,6 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message("This Job Board belongs to the player who opened it. Use `/job_list` for your own menu.", ephemeral=True)
             return False
 
-
-    @bot.tree.command(name="job_apply", description="Apply for an X BOT job")
-    @app_commands.describe(name="The exact job name")
-    async def job_apply(interaction: discord.Interaction, name: str):
-        job = db.execute("SELECT * FROM jobs WHERE name = ? AND enabled = 1", (name.strip(),)).fetchone()
-        if job is None:
-            await interaction.response.send_message("❌ Job not found. Use `/job_list` first.", ephemeral=True)
-            return
-        error = apply_to_job(interaction.user, job)
-        if error:
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-        await interaction.response.send_message(view=xbot_ui.success("💼 Job Started", f"You are now working as **{job['emoji']} {job['name']}**!"))
-
-    @bot.tree.command(name="work", description="Work your current job and earn XC")
-    async def work(interaction: discord.Interaction):
-        player = create_player(interaction.user)
-        if player['job_id'] is None:
-            await interaction.response.send_message("❌ Choose a job first with `/job_list` and `/job_apply`.", ephemeral=True)
-            return
-        job = db.execute("SELECT * FROM jobs WHERE id = ? AND enabled = 1", (player['job_id'],)).fetchone()
-        if job is None:
-            await interaction.response.send_message("❌ Your job is unavailable. Choose another job.", ephemeral=True)
-            return
-        today = int(time.time() // 86400)
-        completed = player['work_shifts_today'] if player['work_day'] == today else 0
-        if completed >= job['shifts_per_day']:
-            await interaction.response.send_message(f"⛔ You have completed this job's **{job['shifts_per_day']} shifts today**. Come back tomorrow.", ephemeral=True)
-            return
-        cooldown = setting(db, "work_cooldown")
-        remaining = cooldown - (int(time.time()) - player['last_work'])
-        if remaining > 0:
-            await interaction.response.send_message(f"⏳ Your next shift starts in **{remaining} seconds**.", ephemeral=True)
-            return
-        reward = random.randint(job['min_salary'], job['max_salary'])
-        crystal = 1 if random.randint(1, 100) <= setting(db, "work_crystal_chance") else 0
-        incentive, incentive_amount, incentive_chance = roll_job_incentive(
-            db, interaction.user.id, player['job_started_at'], int(time.time())
-        )
-        db.execute("""UPDATE players SET xc = xc + ?, xcrystals=xcrystals+?, last_work = ?,
-            work_day=?, work_shifts_today=?,job_warning_sent=0 WHERE user_id = ?""", (reward, crystal, int(time.time()), today, completed + 1, interaction.user.id))
-        incentive_log = f", +{incentive_amount} {incentive['name']}" if incentive else ""
-        log(db, interaction.user.id, "work", f"{job['name']}: +{reward} XC, +{crystal} XCrystals{incentive_log}")
-        db.commit()
-        bonus = "\n💎 Lucky drop: **1 XCrystal!**" if crystal else ""
-        incentive_text = f"\n🎁 Job incentive: **{incentive_amount}x {incentive['emoji']} {incentive['name']}** ({incentive_chance}% chance)" if incentive else ""
-        await interaction.response.send_message(view=xbot_ui.success("💼 Shift Complete", f"Earned **{reward:,} XC** as **{job['name']}**.\nShifts today: **{completed + 1}/{job['shifts_per_day']}**{bonus}{incentive_text}"))
 
     def shop_categories():
         return db.execute("""SELECT c.* FROM item_categories c WHERE c.enabled=1 AND EXISTS(

@@ -288,7 +288,7 @@ PUBLIC_PLAYER_COMMANDS = {
     "declare_war", "attack", "balance", "code_redeem", "daily", "deadzone",
     "level", "rank",
     # Direct slash commands restored for convenient fast access without menu-clicking fatigue.
-    "exchange", "pay", "work", "bank", "deposit", "withdraw",
+    "exchange", "pay", "bank", "deposit", "withdraw",
     "coinflip", "blackjack", "slot", "dice", "roulette", "scratch",
     # Gaming Zone & LFG squad recruitment
     "gaming", "lfg",
@@ -1122,7 +1122,7 @@ deadzone.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 # X Community has retired the old company/job economy.  Keep the historical
 # database tables for old logs, but do not publish these commands any more.
 for _retired_command in (
-    "job_list", "job_apply",
+    "job_list", "job_apply", "job_log_channel", "work",
     "keno", "tower", "highlow", "balloonpop",
     "armed_forces", "army_recruit",
     "prepare", "rally", "supply_buy", "navy", "airforce",
