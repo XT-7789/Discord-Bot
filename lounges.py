@@ -558,14 +558,17 @@ class LoungeBookingSelectView(discord.ui.View):
 
     async def on_confirm(self, interaction: discord.Interaction):
         global _bot, _db
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
         if not _db:
-            await interaction.response.send_message("Database error.", ephemeral=True)
+            await interaction.followup.send("Database error.", ephemeral=True)
             return
 
         # Double check if lounge is still free
         current = get_lounge_row(_db, self.chosen_lounge_id)
         if not current or current["status"] != "available":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "⚠️ This lounge was just reserved by someone else! Please pick another.",
                 ephemeral=True,
             )
@@ -610,7 +613,7 @@ class LoungeBookingSelectView(discord.ui.View):
         # Update lobby board
         await refresh_lobby_message(_bot, _db, guild)
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"🎉 **{info['name']} reserved successfully!**\n"
             f"• Mode: **{self.chosen_privacy.title()}**\n"
             f"• Duration: **{self.chosen_duration} minutes** (Expires <t:{expires_at}:R>)\n"
@@ -685,13 +688,13 @@ class LoungeHostControlView(discord.ui.View):
         except Exception:
             invited = []
 
-        if interaction.guild:
-            await apply_lounge_permissions(interaction.guild, lounge["lounge_id"], interaction.user, new_privacy, invited)
-
-        # Update host panel embed
+        # Update host panel embed immediately to acknowledge interaction
         updated_lounge = get_lounge_row(_db, lounge["lounge_id"])
         embed = build_host_control_embed(updated_lounge)
         await interaction.response.edit_message(embed=embed, view=self)
+
+        if interaction.guild:
+            await apply_lounge_permissions(interaction.guild, lounge["lounge_id"], interaction.user, new_privacy, invited)
 
         await refresh_lobby_message(_bot, _db, interaction.guild)
         await interaction.followup.send(
@@ -770,10 +773,13 @@ class LoungeMemberSelectView(discord.ui.View):
 
     async def on_select(self, interaction: discord.Interaction):
         global _bot, _db
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
         target = self.user_select.values[0]
         lounge = get_lounge_row(_db, self.lounge_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("❌ Lounge is no longer active.", ephemeral=True)
+            await interaction.followup.send("❌ Lounge is no longer active.", ephemeral=True)
             return
 
         try:
@@ -788,10 +794,10 @@ class LoungeMemberSelectView(discord.ui.View):
 
         if self.action == "invite":
             if target.id == interaction.user.id:
-                await interaction.response.send_message("❌ You are already the host!", ephemeral=True)
+                await interaction.followup.send("❌ You are already the host!", ephemeral=True)
                 return
             if target.id in invited:
-                await interaction.response.send_message(f"⚠️ {target.mention} is already invited.", ephemeral=True)
+                await interaction.followup.send(f"⚠️ {target.mention} is already invited.", ephemeral=True)
                 return
 
             invited.append(target.id)
@@ -828,7 +834,7 @@ class LoungeMemberSelectView(discord.ui.View):
             except Exception:
                 pass
 
-            await interaction.response.send_message(f"✅ Successfully invited {target.mention} to **{info['name']}**!", ephemeral=True)
+            await interaction.followup.send(f"✅ Successfully invited {target.mention} to **{info['name']}**!", ephemeral=True)
 
         elif self.action == "kick":
             if target.id in invited:
@@ -851,7 +857,7 @@ class LoungeMemberSelectView(discord.ui.View):
                 except Exception:
                     pass
 
-            await interaction.response.send_message(f"👢 Removed {target.mention} from **{info['name']}**.", ephemeral=True)
+            await interaction.followup.send(f"👢 Removed {target.mention} from **{info['name']}**.", ephemeral=True)
 
         # Update host panel embed in text channel
         if tc and lounge.get("control_message_id"):
