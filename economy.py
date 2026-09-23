@@ -564,18 +564,19 @@ def award_mining_collection_if_complete(db: sqlite3.Connection, user_id: int, no
 
 
 def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) -> discord.ui.LayoutView:
-    """Build an interactive LayoutView for a member's economy profile with 1-click Gamer Card navigation."""
+    """Build an interactive LayoutView for a member's unified profile with 1-click Gamer Card & Mining Stats."""
     player = db.execute("SELECT * FROM players WHERE user_id = ?", (target.id,)).fetchone()
     if not player and create_player_fn:
         player = create_player_fn(target)
     elif not player:
         player = {
             "nation_name": f"{target.display_name}'s Nation",
-            "job_id": None,
             "xc": 0,
             "bank_xc": 0,
             "money": 0,
             "xcrystals": 0,
+            "mining_level": 1,
+            "mining_exp": 0,
         }
 
     item_count = 0
@@ -586,6 +587,13 @@ def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) ->
         ).fetchone()
         if row:
             item_count = row["total"]
+
+    xp_row = db.execute("SELECT level, total_xp FROM xp_profiles WHERE user_id = ?", (target.id,)).fetchone() if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='xp_profiles'").fetchone() else None
+    level_info = f"⭐ **Level:** {xp_row['level']} ({xp_row['total_xp']:,} XP)" if xp_row else "⭐ **Level:** 1 (0 XP)"
+
+    m_level = player["mining_level"] if "mining_level" in player.keys() else 1
+    m_exp = player["mining_exp"] if "mining_exp" in player.keys() else 0
+    mining_line = f"⛏️ **Mining:** Lv.{m_level} ({m_exp:,} EXP)"
 
     game_prof = db.execute("SELECT * FROM game_profiles WHERE user_id = ?", (target.id,)).fetchone() if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='game_profiles'").fetchone() else None
     gaming_line = ""
@@ -600,11 +608,10 @@ def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) ->
     avatar_url = target.display_avatar.url if hasattr(target, "display_avatar") else "https://cdn.discordapp.com/embed/avatars/0.png"
     text = (f"## 👤 {target.display_name}'s X BOT Profile\n"
             f"🏳️ **Nation:** {player['nation_name']}\n"
-            f"🎒 **Inventory:** {item_count:,} item(s)\n"
-            f"🪙 **Wallet XC:** {player['xc']:,}\n"
-            f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
-            f"💵 **Cash:** {player['money']:,}\n"
-            f"💎 **XCrystals:** {player['xcrystals']:,}"
+            f"{level_info} · {mining_line}\n"
+            f"🪙 **Wallet XC:** {player['xc']:,} · 🏦 **Bank XC:** {player['bank_xc']:,}\n"
+            f"💵 **Cash:** {player['money']:,} · 💎 **XCrystals:** {player['xcrystals']:,}\n"
+            f"🎒 **Inventory:** {item_count:,} item(s)"
             f"{gaming_line}")
     container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=discord.ui.Thumbnail(avatar_url)))
 
@@ -614,6 +621,12 @@ def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) ->
         emoji="🎮",
         style=discord.ButtonStyle.primary,
         custom_id=f"xbot:prof:gamer:{target.id}",
+    )
+    btn_mining = discord.ui.Button(
+        label="Mining Stats",
+        emoji="⛏️",
+        style=discord.ButtonStyle.secondary,
+        custom_id=f"xbot:prof:mining:{target.id}",
     )
     btn_edit = discord.ui.Button(
         label="Edit Handles",
@@ -628,7 +641,29 @@ def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) ->
         embed, card_view = gaming.build_gamer_card(target, g_prof, db, b_inter.guild)
         await b_inter.response.send_message(embed=embed, view=card_view, ephemeral=True)
 
-    btn_gamer.callback = on_gamer_click
+    async def on_mining_click(b_inter: discord.Interaction):
+        refresh_mining_energy(db, target.id)
+        db.commit()
+        player_row = db.execute("""SELECT p.*,a.name area_name,a.emoji area_emoji,i.name pickaxe_name FROM players p
+            LEFT JOIN mining_areas a ON a.id=p.mining_area_id LEFT JOIN items i ON i.id=p.equipped_pickaxe_id WHERE p.user_id=?""", (target.id,)).fetchone()
+        if not player_row:
+            await b_inter.response.send_message("❌ Player not found.", ephemeral=True)
+            return
+        m_lvl = player_row["mining_level"]
+        next_exp = 50 * m_lvl * (m_lvl + 1)
+        next_area = db.execute("""SELECT name,emoji,required_level FROM mining_areas
+            WHERE enabled=1 AND required_level>? ORDER BY required_level,position LIMIT 1""", (m_lvl,)).fetchone()
+        tool_stats = ""
+        if player_row["equipped_pickaxe_id"]:
+            tool = db.execute("SELECT pickaxe_power,pickaxe_luck,pickaxe_yield_bonus,pickaxe_cooldown_reduction FROM items WHERE id=?", (player_row["equipped_pickaxe_id"],)).fetchone()
+            if tool:
+                tool_stats = f" · Power {tool['pickaxe_power']} · Luck {tool['pickaxe_luck']}% · Yield +{tool['pickaxe_yield_bonus']}%"
+        area_goal = (f"\n🔓 **Next Area:** {next_area['emoji']} {next_area['name']} at Level {next_area['required_level']}"
+                     if next_area else "\n🏆 You have unlocked every current mining area.")
+        body = (f"⛏️ **Level:** {m_lvl} · **EXP:** {player_row['mining_exp']:,}/{next_exp:,}\n"
+            f"⚡ **Energy:** {player_row['mining_energy']}/{setting(db,'mining_max_energy')}\n🗺️ **Area:** {player_row['area_emoji'] or '❓'} {player_row['area_name'] or 'Not selected'}\n"
+            f"🛠️ **Pickaxe:** {player_row['pickaxe_name'] or 'Not equipped'}{tool_stats}\n📊 **Mining Runs:** {player_row['total_mines']:,} · **Rare Finds:** {player_row['rare_mining_finds']:,}{area_goal}")
+        await b_inter.response.send_message(view=xbot_ui.panel(f"⛏️ {target.display_name}'s Mining Stats", body, colour=discord.Color.dark_gold()), ephemeral=True)
 
     async def on_edit_click(b_inter: discord.Interaction):
         import gaming
@@ -636,9 +671,12 @@ def build_profile_view(target, db: sqlite3.Connection, create_player_fn=None) ->
         modal = gaming.QuickGameSetModal(db, existing)
         await b_inter.response.send_modal(modal)
 
+    btn_gamer.callback = on_gamer_click
+    btn_mining.callback = on_mining_click
     btn_edit.callback = on_edit_click
 
     row.add_item(btn_gamer)
+    row.add_item(btn_mining)
     row.add_item(btn_edit)
     container.add_item(row)
     view.add_item(container)
@@ -789,118 +827,62 @@ def register_commands(bot, db, create_player) -> None:
         app_commands.Choice(name="XCrystals", value="xcrystals"),
         app_commands.Choice(name="Land", value="land"),
         app_commands.Choice(name="Military Power", value="power"),
+        app_commands.Choice(name="Activity Level & XP", value="level"),
+        app_commands.Choice(name="Weekly Activity XP", value="level_weekly"),
+        app_commands.Choice(name="Mining Level", value="mining"),
+        app_commands.Choice(name="Casino Profit", value="casino"),
+        app_commands.Choice(name="Weekly Lounge Gamers", value="gaming"),
     ])
     async def leaderboard(interaction: discord.Interaction, category: app_commands.Choice[str]):
+        footer_text = None
         if category.value == 'power':
             rows = db.execute("""SELECT p.nation_name,COALESCE(SUM(w.quantity*u.power),0) score FROM players p
                 LEFT JOIN player_war_units w ON w.user_id=p.user_id LEFT JOIN war_unit_types u ON u.id=w.unit_type_id AND u.enabled=1
                 GROUP BY p.user_id ORDER BY score DESC LIMIT 10""").fetchall()
+            lines = [f"**{index}.** 🏳️ {row['nation_name']} — **{row['score']:,} Power**" for index, row in enumerate(rows, 1)]
         elif category.value == 'net_worth':
             rows = db.execute("SELECT nation_name,(xc+bank_xc) score FROM players ORDER BY score DESC LIMIT 10").fetchall()
+            lines = [f"**{index}.** {row['nation_name']} — **{row['score']:,} XC**" for index, row in enumerate(rows, 1)]
+        elif category.value == 'level':
+            rows = db.execute("SELECT x.*, p.nation_name FROM xp_profiles x LEFT JOIN players p ON p.user_id=x.user_id ORDER BY x.total_xp DESC LIMIT 10").fetchall()
+            medals = ["🥇", "🥈", "🥉"]
+            lines = [f"{medals[i] if i<3 else f'**#{i+1}**'} <@{r['user_id']}> ({r['nation_name'] or 'Player'}) · Level **{r['level']}** · {r['total_xp']:,} EXP" for i, r in enumerate(rows)]
+        elif category.value == 'level_weekly':
+            rows = db.execute("SELECT x.*, p.nation_name FROM xp_profiles x LEFT JOIN players p ON p.user_id=x.user_id ORDER BY x.weekly_xp DESC LIMIT 10").fetchall()
+            medals = ["🥇", "🥈", "🥉"]
+            lines = [f"{medals[i] if i<3 else f'**#{i+1}**'} <@{r['user_id']}> ({r['nation_name'] or 'Player'}) · Level **{r['level']}** · {r['weekly_xp']:,} EXP" for i, r in enumerate(rows)]
+            lines.append(
+                "\n🎁 **Weekly Dividend Prize Pool (Top 10):**\n"
+                "🥇 1st: **+$100,000 Cash + 250 XC**\n"
+                "🥈 2nd: **+$60,000 Cash + 150 XC**\n"
+                "🥉 3rd: **+$40,000 Cash + 100 XC**\n"
+                "🎖️ 4th–10th: **+$20,000 Cash + 50 XC**\n"
+                "-# 💰 Dividends auto-distribute Mondays at 00:00 UTC."
+            )
+            footer_text = "Weekly XP resets automatically every Monday at 00:00 UTC."
+        elif category.value == 'mining':
+            rows = db.execute("SELECT display_name,nation_name,mining_level,mining_exp,rare_mining_finds FROM players ORDER BY mining_level DESC,mining_exp DESC LIMIT 10").fetchall()
+            lines = [f"**{index}.** ⛏️ **{row['display_name'] or row['nation_name'] or 'Unknown Miner'}** · Lv.{row['mining_level']} · {row['mining_exp']:,} EXP · {row['rare_mining_finds']} rare" for index, row in enumerate(rows, 1)]
+        elif category.value == 'casino':
+            rows = db.execute("SELECT * FROM casino_stats ORDER BY total_won-total_wagered DESC, biggest_payout DESC LIMIT 10").fetchall()
+            lines = [f"**{number}.** <@{row['user_id']}> — **{row['total_won'] - row['total_wagered']:+,} XC** (Won: {row['total_won']:,} XC)" for number, row in enumerate(rows, 1)]
+        elif category.value == 'gaming':
+            rows = db.execute("""SELECT p.user_id, p.display_name, x.voice_xp, x.weekly_xp
+                FROM xp_profiles x
+                JOIN players p ON p.user_id=x.user_id
+                WHERE x.weekly_xp > 0
+                ORDER BY x.voice_xp DESC, x.weekly_xp DESC
+                LIMIT 10""").fetchall()
+            medals = ["🥇", "🥈", "🥉"]
+            lines = [f"{medals[idx] if idx < 3 else f'**#{idx+1}**'} <@{r['user_id']}> — `{r['voice_xp']:,} Voice XP` (`{r['weekly_xp']:,} Weekly XP`)" for idx, r in enumerate(rows)]
         else:
             allowed = {'xc', 'bank_xc', 'money', 'xcrystals', 'land'}
             column = category.value if category.value in allowed else 'xc'
             rows = db.execute(f"SELECT nation_name,{column} score FROM players ORDER BY {column} DESC LIMIT 10").fetchall()
-        lines = [f"🏆 **{category.name} Leaderboard**"]
-        lines.extend(f"**{index}.** {row['nation_name']} — {row['score']}" for index, row in enumerate(rows, 1))
-        await interaction.response.send_message(view=xbot_ui.panel(f"🏆 {category.name} Leaderboard", "\n".join(lines[1:]), colour=discord.Color.gold()))
+            lines = [f"**{index}.** {row['nation_name']} — **{row['score']:,}**" for index, row in enumerate(rows, 1)]
 
-    @bot.tree.command(name="job_list", description="View available jobs")
-    async def job_list(interaction: discord.Interaction):
-        jobs = db.execute("""SELECT j.*,i.name requirement_item_name FROM jobs j
-            LEFT JOIN items i ON i.id=j.requirement_item_id WHERE j.enabled = 1 ORDER BY j.min_salary""").fetchall()
-        if not jobs:
-            await interaction.response.send_message("❌ No jobs are available right now.")
-            return
-        create_player(interaction.user)
-        view = JobBoardView(interaction.user.id, 0)
-        await interaction.response.send_message(view=view)
-
-    def listed_jobs():
-        return db.execute("""SELECT j.*,i.name requirement_item_name FROM jobs j
-            LEFT JOIN items i ON i.id=j.requirement_item_id WHERE j.enabled=1 ORDER BY j.min_salary""").fetchall()
-
-    def apply_to_job(user, job):
-        create_player(user)
-        if job['required_role_id'] and not member_has_role(user, job['required_role_id']):
-            return "❌ You do not have the Discord role required for this job."
-        if job['requirement_quantity']:
-            required = db.execute("SELECT quantity FROM inventories WHERE user_id=? AND item_id=?", (user.id, job['requirement_item_id'])).fetchone()
-            if required is None or required['quantity'] < job['requirement_quantity']:
-                return "❌ You do not own the required job item(s)."
-        current = db.execute("SELECT job_id FROM players WHERE user_id=?", (user.id,)).fetchone()
-        recommendation = db.execute("SELECT value FROM economy_settings WHERE key='job_recommendation_item_id'").fetchone()
-        if (job['requirement_quantity'] and recommendation and str(job['requirement_item_id']) == recommendation['value']
-                and not setting(db, "job_keep_recommendation")):
-            db.execute("UPDATE inventories SET quantity=quantity-? WHERE user_id=? AND item_id=?",
-                       (job['requirement_quantity'], user.id, job['requirement_item_id']))
-        if current is None or current['job_id'] != job['id']:
-            db.execute("UPDATE players SET job_id=?,job_started_at=?,job_warning_sent=0 WHERE user_id=?", (job['id'], int(time.time()), user.id))
-        else:
-            db.execute("UPDATE players SET job_id=? WHERE user_id=?", (job['id'], user.id))
-        log(db, user.id, "job_apply", job['name'])
-        db.commit()
-        return None
-
-    class StartJobButton(discord.ui.Button):
-        def __init__(self, job):
-            super().__init__(label="Start Job", emoji="🔨", style=discord.ButtonStyle.primary)
-            self.job_id = job['id']
-
-        async def callback(self, interaction: discord.Interaction):
-            job = db.execute("SELECT * FROM jobs WHERE id=? AND enabled=1", (self.job_id,)).fetchone()
-            if job is None:
-                await interaction.response.send_message("❌ This job is no longer available.", ephemeral=True)
-                return
-            error = apply_to_job(interaction.user, job)
-            if error:
-                await interaction.response.send_message(error, ephemeral=True)
-                return
-            await interaction.response.send_message(view=xbot_ui.success("💼 Job Started", f"You are now working as **{job['emoji']} {job['name']}**! Use `/work` to begin a shift."), ephemeral=True)
-
-    class JobPageButton(discord.ui.Button):
-        def __init__(self, owner_id: int, page: int, direction: int, disabled: bool):
-            super().__init__(label="Previous" if direction < 0 else "Next", emoji="◀️" if direction < 0 else "▶️", style=discord.ButtonStyle.primary, disabled=disabled)
-            self.owner_id, self.page, self.direction = owner_id, page, direction
-
-        async def callback(self, interaction: discord.Interaction):
-            view = JobBoardView(self.owner_id, self.page + self.direction)
-            await interaction.response.edit_message(view=view)
-
-    class JobBoardView(discord.ui.LayoutView):
-        def __init__(self, owner_id: int, page: int):
-            super().__init__(timeout=300)
-            self.owner_id = owner_id
-            jobs = listed_jobs()
-            pages = max(1, (len(jobs) + 4) // 5)
-            self.page = max(0, min(page, pages - 1))
-            shown = jobs[self.page * 5:(self.page + 1) * 5]
-            container = discord.ui.Container(accent_color=discord.Color.gold())
-            container.add_item(discord.ui.TextDisplay("## 🔨 X.'s Department Job List\nChoose a department with its **Start Job** button. Discord roles and requirements are checked automatically."))
-            container.add_item(discord.ui.Separator())
-            for job in shown:
-                requirements = []
-                if job['requirement_quantity']:
-                    requirements.append(f"{job['requirement_quantity']}x {job['requirement_item_name'] or 'Required Item'}")
-                if job['required_role_id']:
-                    requirements.append(f"Role required: <@&{job['required_role_id']}>")
-                required = " · ".join(requirements) if requirements else "No requirements"
-                pay = f"{job['min_salary']}" if job['min_salary'] == job['max_salary'] else f"{job['min_salary']}–{job['max_salary']}"
-                text = f"### {job['emoji']} {job['name']}\n⏰ **{job['shifts_per_day']}** shifts/day\n💰 **{pay} XC** per shift\n🎟️ {required}"
-                container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=StartJobButton(job)))
-                container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.ActionRow(
-                JobPageButton(owner_id, self.page, -1, self.page == 0),
-                JobPageButton(owner_id, self.page, 1, self.page >= pages - 1),
-            ))
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page + 1}/{pages} · Use /work after starting a job."))
-            self.add_item(container)
-
-        async def interaction_check(self, interaction: discord.Interaction) -> bool:
-            if interaction.user.id == self.owner_id:
-                return True
-            await interaction.response.send_message("This Job Board belongs to the player who opened it. Use `/job_list` for your own menu.", ephemeral=True)
-            return False
+        body = "\n".join(lines) if lines else "No records found yet."
+        await interaction.response.send_message(view=xbot_ui.panel(f"🏆 {category.name} Leaderboard", body, colour=discord.Color.gold(), footer=footer_text))
 
 
     def shop_categories():
@@ -1182,8 +1164,7 @@ def register_commands(bot, db, create_player) -> None:
         db.execute("UPDATE players SET mining_area_id=? WHERE user_id=?", (selected["id"], interaction.user.id)); db.commit()
         await interaction.response.send_message(view=xbot_ui.success("🗺️ Mining Area Selected", f"Current area: **{selected['emoji']} {selected['name']}**\n{selected['description']}"))
 
-    @bot.tree.command(name="mining_profile", description="View Mining Level, EXP, energy and equipped Pickaxe")
-    async def mining_profile(interaction: discord.Interaction):
+    async def show_mining_profile(interaction: discord.Interaction):
         create_player(interaction.user); energy = refresh_mining_energy(db, interaction.user.id); db.commit()
         player = db.execute("""SELECT p.*,a.name area_name,a.emoji area_emoji,i.name pickaxe_name FROM players p
             LEFT JOIN mining_areas a ON a.id=p.mining_area_id LEFT JOIN items i ON i.id=p.equipped_pickaxe_id WHERE p.user_id=?""", (interaction.user.id,)).fetchone()
@@ -1206,19 +1187,13 @@ def register_commands(bot, db, create_player) -> None:
     async def mining_help(interaction: discord.Interaction):
         player = create_player(interaction.user)
         body = ("**1.** Use `/mine` to collect a material from your selected area.\n"
-                "**2.** Use `/mining_profile` to see your level, energy, area and equipped pickaxe.\n"
+                "**2.** Use `/profile` (or `[ ⛏️ Mining Stats ]`) to see your level, energy, area and equipped pickaxe.\n"
                 "**3.** Use `/mine_area` to switch to an unlocked area.\n"
                 "**4.** Use `/shop` to buy a better pickaxe, then `/equip` it.\n"
                 "**5.** Use `/inventory` or `/sell_mined` to turn materials into XC.\n"
                 "**6.** Find every material, then use `/mining_collection` to track your completion reward.\n\n"
                 f"You start with a **Basic Pickaxe** automatically. Your current Mining Level is **{player['mining_level']}**.")
         await interaction.response.send_message(view=xbot_ui.panel("⛏️ X BOT Mining Guide", body, colour=discord.Color.dark_gold()))
-
-    @bot.tree.command(name="mining_leaderboard", description="View the server Mining Level leaderboard")
-    async def mining_leaderboard(interaction: discord.Interaction):
-        rows = db.execute("SELECT display_name,mining_level,mining_exp,total_mines,rare_mining_finds FROM players ORDER BY mining_level DESC,mining_exp DESC LIMIT 10").fetchall()
-        lines = [f"**{index}. {row['display_name'] or 'Unknown Miner'}** · Lv.{row['mining_level']} · {row['mining_exp']:,} EXP · {row['rare_mining_finds']} rare" for index,row in enumerate(rows,1)]
-        await interaction.response.send_message(view=xbot_ui.panel("🏆 Mining Leaderboard", "\n".join(lines) or "No miners yet.", colour=discord.Color.gold()))
 
     @bot.tree.command(name="mining_areas", description="View Mining Areas, levels and unlock requirements")
     async def mining_areas(interaction: discord.Interaction):
@@ -1399,7 +1374,7 @@ def register_commands(bot, db, create_player) -> None:
                 return
             actions = {
                 "mine": mine.callback,
-                "profile": mining_profile.callback,
+                "profile": show_mining_profile,
                 "areas": mining_areas.callback,
                 "collection": mining_collection.callback,
                 "inventory": inventory.callback,

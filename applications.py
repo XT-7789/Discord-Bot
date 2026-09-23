@@ -403,43 +403,6 @@ class ApplicationStartView(discord.ui.View):
 
 
 def register_commands(bot, db):
-    async def form_autocomplete(_interaction, current):
-        rows = db.execute("SELECT name FROM application_forms WHERE enabled=1 AND name LIKE ? ORDER BY name LIMIT 25", (f"%{current}%",)).fetchall()
-        return [app_commands.Choice(name=row["name"], value=row["name"]) for row in rows]
-
-    @bot.tree.command(name="verify", description="Verify yourself and receive X BOT Guest access")
-    async def verify(interaction: discord.Interaction):
-        await complete_verification(bot, db, interaction)
-
-    @bot.tree.command(name="verification_panel", description="Admin: post the X BOT verification button")
-    @app_commands.default_permissions(administrator=True)
-    async def verification_panel(interaction: discord.Interaction, channel: discord.TextChannel | None = None):
-        destination = channel or interaction.channel
-        await destination.send(view=VerificationView(bot, db))
-        await interaction.response.send_message(view=xbot_ui.success("Verification Panel Posted", f"The verification panel was posted in {destination.mention}."), ephemeral=True)
-
-    @bot.tree.command(name="apply", description="Submit an X BOT server application")
-    @app_commands.autocomplete(form=form_autocomplete)
-    async def apply(interaction: discord.Interaction, form: str):
-        if setting(db, "applications_enabled") != "1":
-            await interaction.response.send_message(view=xbot_ui.warning("Applications Closed", "Applications are currently disabled."), ephemeral=True); return
-        selected = db.execute("SELECT * FROM application_forms WHERE name=? COLLATE NOCASE AND enabled=1", (form.strip(),)).fetchone()
-        if not selected:
-            await interaction.response.send_message(view=xbot_ui.danger("Application Not Found", "Use the form choices shown by Discord."), ephemeral=True); return
-        await begin_application(bot, db, interaction, selected)
-
-    @bot.tree.command(name="application_panel", description="Admin: post an application button")
-    @app_commands.autocomplete(form=form_autocomplete)
-    @app_commands.default_permissions(administrator=True)
-    async def application_panel(interaction: discord.Interaction, form: str, channel: discord.TextChannel | None = None):
-        selected = db.execute("SELECT * FROM application_forms WHERE name=? COLLATE NOCASE AND enabled=1", (form.strip(),)).fetchone()
-        if not selected:
-            await interaction.response.send_message(view=xbot_ui.danger("Application Not Found", "Choose an open application form."), ephemeral=True); return
-        destination = channel or interaction.channel
-        embed = discord.Embed(title=f"{selected['emoji']} {selected['name']}", description=selected["description"], colour=discord.Color.blue())
-        await destination.send(embed=embed, view=ApplicationStartView(bot, db, selected))
-        await interaction.response.send_message(view=xbot_ui.success("Application Panel Posted", f"The application button was posted in {destination.mention}."), ephemeral=True)
-
     @bot.tree.command(name="application_review", description="Staff: accept, deny, or hold an application")
     @app_commands.choices(decision=[app_commands.Choice(name="Accept", value="accepted"), app_commands.Choice(name="Deny", value="denied"), app_commands.Choice(name="Hold", value="hold")])
     async def application_review(interaction: discord.Interaction, submission_id: int, decision: app_commands.Choice[str], reason: str = ""):

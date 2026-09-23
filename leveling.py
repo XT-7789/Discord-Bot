@@ -477,25 +477,6 @@ def register_commands(bot, db, is_council_or_admin=None):
             view=xbot_ui.panel(f"⭐ {target.display_name}'s Level & XP", body, colour=discord.Color.gold())
         )
 
-    @bot.tree.command(name="level_leaderboard", description="View the X BOT activity leaderboard")
-    @app_commands.choices(period=[app_commands.Choice(name="All Time", value="total_xp"), app_commands.Choice(name="Weekly", value="weekly_xp")])
-    async def level_leaderboard(interaction: discord.Interaction, period: app_commands.Choice[str] | None = None):
-        column = period.value if period else "total_xp"
-        rows = db.execute(f"SELECT x.* FROM xp_profiles x ORDER BY x.{column} DESC LIMIT 10").fetchall(); medals = ["🥇", "🥈", "🥉"]
-        lines = [f"{medals[i] if i<3 else f'**#{i+1}**'} <@{r['user_id']}> · Level **{r['level']}** · {r[column]:,} EXP" for i, r in enumerate(rows)]
-        body = "\n".join(lines) or "No activity XP has been earned yet."
-        footer_text = "Weekly XP resets automatically by calendar week."
-        if column == "weekly_xp":
-            body += (
-                "\n\n🎁 **Weekly Dividend Prize Pool (Top 10):**\n"
-                "🥇 1st: **+$100,000 Cash + 250 XC**\n"
-                "🥈 2nd: **+$60,000 Cash + 150 XC**\n"
-                "🥉 3rd: **+$40,000 Cash + 100 XC**\n"
-                "🎖️ 4th–10th: **+$20,000 Cash + 50 XC**\n"
-                "-# 💰 Dividends are auto-distributed at weekly rollover."
-            )
-            footer_text = "Dividends auto-distribute every Monday at 00:00 UTC."
-        await interaction.response.send_message(view=xbot_ui.panel("🏆 X BOT Level Leaderboard", body, colour=discord.Color.gold(), footer=footer_text))
 
     @bot.tree.command(name="level_rewards", description="View X BOT level reward roles")
     async def level_rewards(interaction: discord.Interaction):

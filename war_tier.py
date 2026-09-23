@@ -3672,14 +3672,6 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         lines = [f"**#{r['id']}** <@{r['attacker_id']}> ⚔️ <@{r['defender_id']}> · Winner <@{r['winner_id']}> · <t:{r['created_at']}:R>" for r in rows]
         await interaction.response.send_message(view=xbot_ui.panel("📜 Recent Battle History", "\n".join(lines), colour=discord.Color.dark_red()))
 
-    @bot.tree.command(name="war_leaderboard", description="View the strongest Nations")
-    async def war_leaderboard(interaction: discord.Interaction):
-        rows = db.execute("""SELECT p.user_id,p.nation_name,COALESCE(SUM(w.quantity*u.power),0) power
-            FROM players p LEFT JOIN player_war_units w ON w.user_id=p.user_id
-            LEFT JOIN war_unit_types u ON u.id=w.unit_type_id AND u.enabled=1
-            GROUP BY p.user_id ORDER BY power DESC LIMIT 10""").fetchall()
-        body = "\n".join(f"**{index}.** 🏳️ {r['nation_name']} · **{r['power']:,} Power**" for index, r in enumerate(rows, 1)) or "No Nations yet."
-        await interaction.response.send_message(view=xbot_ui.panel("🏆 War Power Leaderboard", body, colour=discord.Color.gold()))
 
     @bot.tree.command(name="war_stats", description="View a Nation's battle record")
     async def war_stats(interaction: discord.Interaction, player: discord.Member | None = None):

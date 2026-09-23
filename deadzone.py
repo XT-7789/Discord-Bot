@@ -1022,42 +1022,6 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         else:
             await interaction.followup.send(f"⚠️ Could not demote {member.mention} (already in Deadzone or bot).", ephemeral=True)
 
-    @deadzone_group.command(name="set_channel", description="Admin: Set notification or crypt channel for Deadzone")
-    @app_commands.describe(
-        notification_channel="Channel where tombstones and resurrection alerts are posted",
-        crypt_channel="Channel where the Deadzone board and Break Out button live",
-    )
-    async def dz_set_channel(
-        interaction: discord.Interaction,
-        notification_channel: Optional[discord.TextChannel] = None,
-        crypt_channel: Optional[discord.TextChannel] = None,
-    ):
-        if not is_council_or_admin(interaction):
-            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can configure channels."), ephemeral=True)
-            return
-
-        updates = []
-        if notification_channel:
-            db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_notification_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(notification_channel.id),))
-            updates.append(f"📢 **Notification Channel:** {notification_channel.mention}")
-        if crypt_channel:
-            db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(crypt_channel.id),))
-            updates.append(f"🪦 **Crypt Channel:** {crypt_channel.mention}")
-            try:
-                embed = build_deadzone_board_embed(db)
-                msg = await crypt_channel.send(embed=embed, view=DeadzoneReviveView())
-                db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_message_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(msg.id),))
-                updates.append("⚡ *Resurrection board automatically posted in crypt channel!*")
-            except discord.HTTPException:
-                pass
-
-        if not updates:
-            await interaction.response.send_message("Please choose at least one channel to set.", ephemeral=True)
-            return
-
-        db.commit()
-        await interaction.response.send_message("✅ **Deadzone Channels Updated:**\n" + "\n".join(updates), ephemeral=True)
-
     # Top-level standalone staff commands (accessible from staff_tools Admin Panel and slash)
     @bot.tree.command(name="deadzone_send", description="Admin: Demote an inactive member to Deadzone", **STAFF_COMMAND_KWARGS)
     @app_commands.describe(member="Member to demote", reason="Reason for demotion")

@@ -288,7 +288,7 @@ PUBLIC_PLAYER_COMMANDS = {
     "declare_war", "attack", "balance", "code_redeem", "daily", "deadzone",
     "level", "rank",
     # Direct slash commands restored for convenient fast access without menu-clicking fatigue.
-    "exchange", "pay", "bank", "deposit", "withdraw",
+    "exchange", "pay", "bank", "leaderboard",
     "coinflip", "blackjack", "slot", "dice", "roulette", "scratch",
     # Gaming Zone & LFG squad recruitment
     "gaming", "lfg",
@@ -1128,6 +1128,14 @@ for _retired_command in (
     "prepare", "rally", "supply_buy", "navy", "airforce",
     # Replaced by the single interactive /server_settings panel.
     "setannouncement", "announcementshow", "setannouncementchat",
+    # Standalone verification, application, and deadzone panels retired (managed via Staff Panel /admin)
+    "verification_panel", "application_panel", "verify", "apply",
+    # Economy deposit/withdraw retired in favour of /bank & /menu
+    "deposit", "withdraw",
+    # Leaderboards unified into /leaderboard
+    "mining_leaderboard", "level_leaderboard", "casino_leaderboard", "war_leaderboard",
+    # Mining profile unified into /profile
+    "mining_profile",
 ):
     bot.tree.remove_command(_retired_command)
 

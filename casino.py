@@ -770,16 +770,6 @@ def register_commands(bot, db, create_player) -> None:
             f"Net result: **{profit:+} XC**\n"
             f"Biggest payout: **{row['biggest_payout']} XC**", colour=discord.Color.gold()))
 
-    @bot.tree.command(name="casino_leaderboard", description="View X BOT Casino's biggest winners")
-    async def casino_leaderboard(interaction: discord.Interaction):
-        rows = db.execute("SELECT * FROM casino_stats ORDER BY total_won-total_wagered DESC, biggest_payout DESC LIMIT 10").fetchall()
-        if not rows:
-            await interaction.response.send_message("🎰 No Casino games have been played yet.")
-            return
-        lines = ["🏆 **X BOT Casino Leaderboard**"]
-        for number, row in enumerate(rows, 1):
-            lines.append(f"**{number}.** <@{row['user_id']}> — **{row['total_won'] - row['total_wagered']:+} XC**")
-        await interaction.response.send_message(view=xbot_ui.panel("🏆 Casino Leaderboard", "\n".join(lines[1:]), colour=discord.Color.gold()))
     @bot.tree.command(name="dice", description="Casino: guess a dice number")
     @app_commands.describe(bet="XC to bet", guess="Choose 1 to 6")
     async def dice(interaction: discord.Interaction, bet: int, guess: app_commands.Range[int, 1, 6]):

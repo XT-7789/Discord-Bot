@@ -407,25 +407,7 @@ def register_commands(bot, db, create_player, find_item):
     @bot.tree.command(name="bank", description="View your XC wallet and bank balance")
     async def bank(interaction: discord.Interaction):
         player = create_player(interaction.user)
-        await interaction.response.send_message(view=xbot_ui.panel("🏦 X BOT Bank", f"🪙 Wallet: **{player['xc']:,} XC**\n🏦 Bank: **{player['bank_xc']:,} XC**\n💰 Net XC: **{player['xc'] + player['bank_xc']:,} XC**", colour=discord.Color.gold(), footer="Use /deposit and /withdraw to move XC."))
-
-    @bot.tree.command(name="deposit", description="Move XC from your wallet into your bank")
-    async def deposit(interaction: discord.Interaction, amount: int):
-        player = create_player(interaction.user)
-        if amount <= 0 or player["xc"] < amount:
-            await interaction.response.send_message(view=xbot_ui.danger("Deposit Rejected", "Enter a positive amount available in your wallet."), ephemeral=True); return
-        db.execute("UPDATE players SET xc=xc-?,bank_xc=bank_xc+? WHERE user_id=?", (amount, amount, interaction.user.id))
-        log(db, interaction.user.id, "deposit", f"{amount} XC"); db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("🏦 Deposit Complete", f"Deposited **{amount:,} XC**.\nBank balance: **{player['bank_xc'] + amount:,} XC**"), ephemeral=True)
-
-    @bot.tree.command(name="withdraw", description="Move XC from your bank into your wallet")
-    async def withdraw(interaction: discord.Interaction, amount: int):
-        player = create_player(interaction.user)
-        if amount <= 0 or player["bank_xc"] < amount:
-            await interaction.response.send_message(view=xbot_ui.danger("Withdrawal Rejected", "Enter a positive amount available in your bank."), ephemeral=True); return
-        db.execute("UPDATE players SET bank_xc=bank_xc-?,xc=xc+? WHERE user_id=?", (amount, amount, interaction.user.id))
-        log(db, interaction.user.id, "withdraw", f"{amount} XC"); db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("🏦 Withdrawal Complete", f"Withdrew **{amount:,} XC**.\nWallet balance: **{player['xc'] + amount:,} XC**"), ephemeral=True)
+        await interaction.response.send_message(view=xbot_ui.panel("🏦 X BOT Bank", f"🪙 Wallet: **{player['xc']:,} XC**\n🏦 Bank: **{player['bank_xc']:,} XC**\n💰 Net XC: **{player['xc'] + player['bank_xc']:,} XC**", colour=discord.Color.gold(), footer="Use the Bank buttons to deposit and withdraw XC."))
 
     @bot.tree.command(name="daily", description="Collect your daily XC and Cash reward with activity streak multipliers")
     async def daily(interaction: discord.Interaction):
