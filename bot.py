@@ -287,6 +287,8 @@ PUBLIC_PLAYER_COMMANDS = {
     # Direct slash commands restored for convenient fast access without menu-clicking fatigue.
     "exchange", "pay", "work", "bank", "deposit", "withdraw",
     "coinflip", "blackjack", "slot", "dice", "roulette", "scratch",
+    # Gaming Zone & LFG squad recruitment
+    "gaming", "lfg",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -299,6 +301,7 @@ STAFF_SLASH_COMMANDS = {
     "inventory_check", "lottery_draw", "setlevel", "server_settings",
     "war_start", "war_end", "forces_check",
     "level",
+    "deadzone_restore", "deadzone_scan", "deadzone_send", "level_sync",
 }
 
 
@@ -1732,6 +1735,14 @@ tier8.register_commands(bot, db, create_player)
 casual_games.register(bot, db, create_player)
 system_ui.register(bot, db, create_player)
 gaming.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
+
+for _cmd in bot.tree.get_commands():
+    if hasattr(_cmd, "callback") and not hasattr(_cmd.callback, "system_ui_wrapped"):
+        setattr(_cmd.callback, "system_ui_wrapped", True)
+    if isinstance(_cmd, app_commands.Group):
+        for _sub in _cmd.commands:
+            if hasattr(_sub, "callback") and not hasattr(_sub.callback, "system_ui_wrapped"):
+                setattr(_sub.callback, "system_ui_wrapped", True)
 
 
 # Seed server-only Tier 1.6 commands before applying their Council/Admin
