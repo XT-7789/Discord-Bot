@@ -48,6 +48,7 @@ _bot = None
 _db = None
 _user_vc_duration = {}
 _user_dz_thaw_seconds = {}
+_squad_ping_cooldowns = {}
 
 
 def setting(db, key):
@@ -805,6 +806,227 @@ class LoungeHostControlView(discord.ui.View):
 
         await interaction.response.send_message("🧹 **Ending session and initiating auto-clean...**", ephemeral=True)
         await clear_and_reopen_lounge(_bot, _db, interaction.guild, lounge["lounge_id"], reason=f"Ended early by host {interaction.user.display_name}")
+
+    @discord.ui.button(label="Ping Squad (LFG)", emoji="📢", style=discord.ButtonStyle.primary, custom_id="lounge_host_squad_ping", row=2)
+    async def ping_squad_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        global _db
+        lounge = get_lounge_by_channel(_db, interaction.channel_id)
+        if not lounge or lounge["status"] != "occupied":
+            await interaction.response.send_message("❌ This lounge is not currently active.", ephemeral=True)
+            return
+
+        is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
+        if interaction.user.id != lounge["host_user_id"] and not is_admin:
+            await interaction.response.send_message("🔒 Only the Lounge Host or an Admin can ping a squad.", ephemeral=True)
+            return
+
+        now = int(time.time())
+        last_ping = _squad_ping_cooldowns.get(lounge["lounge_id"], 0)
+        if now - last_ping < 300:
+            rem = 300 - (now - last_ping)
+            await interaction.response.send_message(f"⏳ Squad ping is on cooldown! You can broadcast again in **{rem}s**.", ephemeral=True)
+            return
+
+        view = LoungeSquadPingSelectView(lounge["lounge_id"])
+        await interaction.response.send_message("📢 **Select Game Squad to Rally:**", view=view, ephemeral=True)
+
+
+class LoungeSquadPingSelectView(discord.ui.View):
+    """View allowing host to select game category for LFG broadcast."""
+    def __init__(self, lounge_id: int):
+        super().__init__(timeout=60)
+        self.lounge_id = lounge_id
+
+        options = [
+            discord.SelectOption(label="Steam Squad", value="steam", emoji="🎮", description="Broadcast to Steam gamers"),
+            discord.SelectOption(label="Roblox Squad", value="roblox", emoji="🟥", description="Broadcast to Roblox gamers"),
+            discord.SelectOption(label="Mobile Squad", value="mobile", emoji="📱", description="Broadcast to Mobile gamers"),
+            discord.SelectOption(label="General Squad", value="general", emoji="👥", description="Broadcast general community LFG"),
+        ]
+
+        self.select_cat = discord.ui.Select(
+            placeholder="Step 1: Choose game category to ping…",
+            options=options,
+        )
+        self.select_cat.callback = self.on_select
+        self.add_item(self.select_cat)
+
+    async def on_select(self, interaction: discord.Interaction):
+        cat = self.select_cat.values[0]
+        modal = LoungeSquadPingModal(self.lounge_id, cat)
+        await interaction.response.send_modal(modal)
+
+
+class LoungeSquadPingModal(discord.ui.Modal):
+    """Modal to specify game title and squad party details."""
+    def __init__(self, lounge_id: int, category: str):
+        cat_names = {"steam": "Steam", "roblox": "Roblox", "mobile": "Mobile", "general": "General"}
+        super().__init__(title=f"Rally {cat_names.get(category, 'Gaming')} Squad")
+        self.lounge_id = lounge_id
+        self.category = category
+
+        self.activity_input = discord.ui.TextInput(
+            label="Game & Activity Details",
+            placeholder="e.g. Valorant Ranked 5v5 (Need 2), Bedwars, Lethal Company…",
+            default="Looking for gamers to squad up in voice! Jump in!",
+            max_length=150,
+            required=True,
+        )
+        self.add_item(self.activity_input)
+
+        self.slots_input = discord.ui.TextInput(
+            label="Spots Open",
+            placeholder="e.g. 2, 3, or Full Party",
+            default="Any",
+            max_length=20,
+            required=False,
+        )
+        self.add_item(self.slots_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        global _bot, _db
+        await interaction.response.defer(ephemeral=True)
+
+        lounge = get_lounge_row(_db, self.lounge_id)
+        if not lounge or lounge["status"] != "occupied":
+            await interaction.followup.send("❌ This lounge is no longer active.", ephemeral=True)
+            return
+
+        _squad_ping_cooldowns[self.lounge_id] = int(time.time())
+        info = LOUNGES.get(self.lounge_id)
+        guild = interaction.guild
+        if not guild:
+            await interaction.followup.send("Guild unavailable.", ephemeral=True)
+            return
+
+        import gaming
+        role_map = {
+            "steam": ("game_role_steam_id", "game_channel_steam_id", "Steam Squad", 0x1B2838),
+            "roblox": ("game_role_roblox_id", "game_channel_roblox_id", "Roblox Squad", 0xE74C3C),
+            "mobile": ("game_role_mobile_id", "game_channel_mobile_id", "Mobile Squad", 0x2ECC71),
+        }
+
+        role_mention = ""
+        target_channel = None
+
+        if self.category in role_map:
+            role_key, ch_key, cat_label, color_val = role_map[self.category]
+            role_id = int(gaming.setting(_db, role_key) or 0)
+            ch_id = int(gaming.setting(_db, ch_key) or 0)
+            if role_id:
+                role_mention = f"<@&{role_id}> "
+            if ch_id:
+                target_channel = guild.get_channel(ch_id)
+        else:
+            cat_label = "Gaming Squad"
+            color_val = 0x5865F2
+
+        if not target_channel:
+            notif_id = int(setting(_db, "deadzone_notification_channel_id") or 0)
+            target_channel = guild.get_channel(notif_id) or interaction.channel
+
+        privacy = lounge.get("privacy", "private")
+        priv_badge = "🔒 Private Lounge (Click Jump In to enter!)" if privacy == "private" else "🌐 Public Lounge (Open to All)"
+
+        embed = discord.Embed(
+            title=f"🎮 [SQUAD RALLY · {cat_label.upper()}]",
+            description=(
+                f"📢 {interaction.user.mention} **is rallying a squad in {lounge['name']}!**\n\n"
+                f"🎯 **Game / Activity:** {self.activity_input.value}\n"
+                f"👥 **Spots Open:** `{self.slots_input.value}`\n"
+                f"🔊 **Voice Channel:** <#{info['vc_id']}>\n"
+                f"🛡️ **Access:** {priv_badge}\n\n"
+                f"🎁 **Voice Perks:** Active chatters in Lounge VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!"
+            ),
+            color=color_val,
+        )
+        embed.set_footer(text=f"X BOT · Lounge #{self.lounge_id} Squad Rally · Click [Jump In] to join")
+
+        join_view = LoungeSquadJoinView(self.lounge_id)
+        try:
+            await target_channel.send(content=f"{role_mention}🚨 **Squad Rally in {lounge['name']}!**", embed=embed, view=join_view)
+            await interaction.followup.send(f"✅ **Squad rally broadcasted in {target_channel.mention}!** Members can click to join your lounge.", ephemeral=True)
+        except discord.HTTPException as err:
+            await interaction.followup.send(f"⚠️ Failed to post rally in {target_channel.mention}: {err}", ephemeral=True)
+
+
+class LoungeSquadJoinView(discord.ui.View):
+    """Persistent view attached to Squad Rally broadcasts allowing instant access."""
+    def __init__(self, lounge_id: int):
+        super().__init__(timeout=None)
+        self.lounge_id = int(lounge_id)
+        button = discord.ui.Button(
+            label="Jump In / Join Squad",
+            emoji="🚀",
+            style=discord.ButtonStyle.success,
+            custom_id=f"xbot:lounge:joinsquad:{self.lounge_id}",
+        )
+        button.callback = self.on_join
+        self.add_item(button)
+
+    async def on_join(self, interaction: discord.Interaction):
+        global _bot, _db
+        if not _db:
+            await interaction.response.send_message("Database unavailable.", ephemeral=True)
+            return
+
+        lounge = get_lounge_row(_db, self.lounge_id)
+        if not lounge or lounge["status"] != "occupied":
+            await interaction.response.send_message("⚠️ This lounge session has ended or is no longer occupied.", ephemeral=True)
+            return
+
+        # Check deadzone
+        dz_status = deadzone.member_status(_db, interaction.user.id)
+        if dz_status and dz_status["is_in_deadzone"]:
+            await interaction.response.send_message("💀 You are currently in the Deadzone. Please thaw and revive to join squads.", ephemeral=True)
+            return
+
+        info = LOUNGES.get(self.lounge_id)
+        if not info:
+            await interaction.response.send_message("Lounge configuration error.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        user = interaction.user
+
+        try:
+            invited = json.loads(lounge.get("invited_user_ids") or "[]")
+        except Exception:
+            invited = []
+
+        is_host = user.id == lounge["host_user_id"]
+        already_invited = user.id in invited
+
+        if not is_host and not already_invited:
+            invited.append(user.id)
+            _db.execute("UPDATE server_lounges SET invited_user_ids=? WHERE lounge_id=?", (json.dumps(invited), self.lounge_id))
+            _db.commit()
+
+            # Apply permission overwrites
+            if guild:
+                tc = guild.get_channel(info["text_id"])
+                vc = guild.get_channel(info["vc_id"])
+                overwrite = discord.PermissionOverwrite(view_channel=True, send_messages=True, connect=True, speak=True)
+                if tc:
+                    try: await tc.set_permissions(user, overwrite=overwrite)
+                    except discord.HTTPException: pass
+                if vc:
+                    try: await vc.set_permissions(user, overwrite=overwrite)
+                    except discord.HTTPException: pass
+
+                # Notify lounge text chat
+                if tc:
+                    try:
+                        await tc.send(f"👋 {user.mention} **joined the squad from the LFG rally!** Welcome them in!")
+                    except Exception:
+                        pass
+
+        await interaction.response.send_message(
+            f"🎉 **Welcome to the squad!** You now have access to **{lounge['name']}**.\n"
+            f"• 🔊 Voice Channel: <#{info['vc_id']}>\n"
+            f"• 💬 Text Channel: <#{info['text_id']}>",
+            ephemeral=True,
+        )
 
 
 class LoungeMemberSelectView(discord.ui.View):

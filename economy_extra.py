@@ -427,7 +427,7 @@ def register_commands(bot, db, create_player, find_item):
         log(db, interaction.user.id, "withdraw", f"{amount} XC"); db.commit()
         await interaction.response.send_message(view=xbot_ui.success("🏦 Withdrawal Complete", f"Withdrew **{amount:,} XC**.\nWallet balance: **{player['xc'] + amount:,} XC**"), ephemeral=True)
 
-    @bot.tree.command(name="daily", description="Collect your daily XC reward")
+    @bot.tree.command(name="daily", description="Collect your daily XC and Cash reward with activity streak multipliers")
     async def daily(interaction: discord.Interaction):
         player = create_player(interaction.user)
         remaining = setting(db, "daily_cooldown") - (int(time.time()) - player["last_daily"])
@@ -435,11 +435,38 @@ def register_commands(bot, db, create_player, find_item):
             hours, remainder = divmod(remaining, 3600); minutes = remainder // 60
             await interaction.response.send_message(view=xbot_ui.warning("🎁 Daily Reward", f"Your next reward is ready in **{hours}h {minutes}m**."), ephemeral=True)
             return
-        reward = setting(db, "daily_reward")
-        db.execute("UPDATE players SET xc=xc+?,last_daily=? WHERE user_id=?", (reward, int(time.time()), interaction.user.id))
-        log(db, interaction.user.id, "daily", f"+{reward} XC")
+
+        import leveling
+        streak, streak_rewards_list = leveling._update_activity_streak(db, interaction.user)
+
+        base_xc = setting(db, "daily_reward")
+        base_cash = 10000
+
+        # Streak Bonus: +10% per consecutive day (capped at +200% for 20+ days)
+        bonus_pct = min(200, max(0, (streak - 1) * 10))
+        bonus_xc = (base_xc * bonus_pct) // 100
+        bonus_cash = (base_cash * bonus_pct) // 100
+
+        total_xc = base_xc + bonus_xc
+        total_cash = base_cash + bonus_cash
+
+        db.execute("UPDATE players SET xc=xc+?,money=money+?,last_daily=? WHERE user_id=?",
+                   (total_xc, total_cash, int(time.time()), interaction.user.id))
+        log(db, interaction.user.id, "daily", f"+{total_xc} XC, +${total_cash:,} Cash (Streak {streak}d, +{bonus_pct}%)")
         db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("🎁 Daily Reward", f"You collected **{reward:,} XC**."))
+
+        desc = (
+            f"💰 **Base Reward:** `{base_xc:,} XC` · `${base_cash:,} Cash`\n"
+            f"🔥 **Activity Streak:** **{streak} Days** (`+{bonus_pct}%` Streak Bonus)\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🎁 **Total Received:** **+{total_xc:,} XC** · **+${total_cash:,} Cash**"
+        )
+        if streak_rewards_list:
+            desc += f"\n\n🎉 **Milestone Unlocked!**\nDay {streak} Streak Rewards: **{', '.join(streak_rewards_list)}**"
+
+        await interaction.response.send_message(
+            view=xbot_ui.panel("🎁 Daily Reward Collected!", desc, colour=discord.Color.green())
+        )
 
     @bot.tree.command(name="pay", description="Send XC to another player")
     @app_commands.describe(player="Player receiving XC", amount="XC to send")

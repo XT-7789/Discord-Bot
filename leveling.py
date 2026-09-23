@@ -20,6 +20,7 @@ DEFAULTS = {
     "xp_announcement_channel_id": "0", "xp_announcement_template": "🎉 **LEVEL UP!** {mention} reached **Level {level}**! {reward}",
     "xp_message_cash_min": "100", "xp_message_cash_max": "300",
     "xp_message_lucky_chance_percent": "5", "xp_message_lucky_xc_min": "1", "xp_message_lucky_xc_max": "5",
+    "last_settled_dividend_week": "",
 }
 
 def initialise(db):
@@ -54,6 +55,30 @@ def initialise(db):
         war_credits INTEGER NOT NULL DEFAULT 0,xcrystals INTEGER NOT NULL DEFAULT 0,
         enabled INTEGER NOT NULL DEFAULT 1
     )""")
+    streak_columns = {row["name"] for row in db.execute("PRAGMA table_info(streak_rewards)")}
+    for name, definition in {
+        "xp": "INTEGER NOT NULL DEFAULT 0",
+        "money": "INTEGER NOT NULL DEFAULT 0",
+    }.items():
+        if name not in streak_columns:
+            db.execute(f"ALTER TABLE streak_rewards ADD COLUMN {name} {definition}")
+    streak_marker = db.execute("SELECT value FROM economy_settings WHERE key='activity_streak_rewards_v2_seeded'").fetchone()
+    if streak_marker is None:
+        milestones = [
+            (2, 10, 5000, 25),
+            (3, 25, 10000, 50),
+            (5, 50, 25000, 100),
+            (7, 100, 50000, 250),
+            (14, 250, 100000, 500),
+            (30, 500, 250000, 1000),
+        ]
+        for days, xc, money, xp in milestones:
+            existing = db.execute("SELECT id FROM streak_rewards WHERE days=?", (days,)).fetchone()
+            if existing:
+                db.execute("UPDATE streak_rewards SET xc=?, money=?, war_credits=?, xp=?, enabled=1 WHERE id=?", (xc, money, money, xp, existing["id"]))
+            else:
+                db.execute("INSERT INTO streak_rewards(days, xc, money, war_credits, xp, enabled) VALUES(?,?,?,?,?,1)", (days, xc, money, money, xp))
+        db.execute("INSERT INTO economy_settings(key,value) VALUES('activity_streak_rewards_v2_seeded','1')")
     seed_rewards = [
         (2, "Member", "👤", "permanent"), (5, "Music", "🎵", "permanent"),
         (7, "Active", "✨", "exclusive"), (10, "Elite", "⭐", "exclusive"),
@@ -78,6 +103,10 @@ def initialise(db):
             db.execute("UPDATE xp_rewards SET role_id=? WHERE level=? AND role_id=''", (role_id, level))
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES('verification_guest_role_id','1524715220365217842')")
         db.execute("INSERT INTO economy_settings(key,value) VALUES('beta_1_4a_reward_roles_seeded','1')")
+    db.execute("""CREATE TABLE IF NOT EXISTS command_permissions (
+        command_name TEXT PRIMARY KEY,
+        access_mode TEXT NOT NULL DEFAULT 'public'
+    )""")
     for command_name in ("setlevel", "setannouncement", "announcementshow", "setannouncementchat"):
         db.execute("INSERT OR IGNORE INTO command_permissions(command_name,access_mode) VALUES(?,'admin')", (command_name,))
         db.execute("UPDATE command_permissions SET access_mode='admin' WHERE command_name=?", (command_name,))
@@ -112,7 +141,11 @@ def _ensure_economy_player(db, member):
 def _grant_value_reward(db, member, reward, reason):
     """Grant configured currency/item values without replacing any existing settings."""
     _ensure_economy_player(db, member)
-    xc = max(0, int(reward["xc"] or 0)); war = max(0, int(reward["war_credits"] or 0)); crystals = max(0, int(reward["xcrystals"] or 0))
+    xc = max(0, int(reward["xc"] or 0))
+    war = max(0, int(reward["money"] if ("money" in reward.keys() and reward["money"]) else (reward["war_credits"] or 0)))
+    crystals = max(0, int(reward["xcrystals"] or 0))
+    xp_val = max(0, int(reward["xp"] or 0)) if "xp" in reward.keys() else 0
+
     db.execute("UPDATE players SET xc=xc+?,money=money+?,xcrystals=xcrystals+? WHERE user_id=?", (xc, war, crystals, member.id))
     item_id = reward["item_id"]; quantity = max(0, int(reward["item_quantity"] or 0))
     if item_id and quantity and db.execute("SELECT 1 FROM items WHERE id=? AND enabled=1", (item_id,)).fetchone():
@@ -120,9 +153,18 @@ def _grant_value_reward(db, member, reward, reason):
             ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""", (member.id, item_id, quantity))
     details = []
     if xc: details.append(f"{xc} XC")
-    if war: details.append(f"{war} War Credits")
+    if war: details.append(f"${war:,} Cash")
     if crystals: details.append(f"{crystals} XCrystals")
     if item_id and quantity: details.append(f"{quantity} item(s) #{item_id}")
+    if xp_val:
+        row = profile(db, member.id)
+        new_total = row["total_xp"] + xp_val
+        new_lvl = level_for_xp(new_total)
+        week_key = time.strftime("%Y-W%W", time.gmtime())
+        weekly = 0 if row["last_week_key"] != week_key else row["weekly_xp"]
+        db.execute("UPDATE xp_profiles SET total_xp=?,weekly_xp=?,level=?,last_week_key=? WHERE user_id=?",
+                   (new_total, weekly + xp_val, new_lvl, week_key, member.id))
+        details.append(f"{xp_val} XP")
     if details:
         db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (member.id, reason, ", ".join(details), int(time.time())))
     return details
@@ -243,8 +285,74 @@ async def _announce(bot, db, member, new_level, rewards):
         try: await channel.send(view=xbot_ui.success(f"🎉 Level {new_level} Announcement", text))
         except discord.HTTPException: pass
 
+async def settle_weekly_dividends(bot, db):
+    """Settle top 10 weekly XP earners when transitioning to a new calendar week."""
+    current_week_key = time.strftime("%Y-W%W", time.gmtime())
+    row = db.execute("SELECT value FROM economy_settings WHERE key='last_settled_dividend_week'").fetchone()
+    last_settled = row["value"] if row else ""
+
+    if not last_settled:
+        db.execute("INSERT OR REPLACE INTO economy_settings(key,value) VALUES('last_settled_dividend_week',?)", (current_week_key,))
+        db.commit()
+        return []
+
+    if last_settled == current_week_key:
+        return []
+
+    # Settle previous week's top 10
+    top_earners = db.execute(
+        "SELECT * FROM xp_profiles WHERE last_week_key=? AND weekly_xp>0 ORDER BY weekly_xp DESC LIMIT 10",
+        (last_settled,)
+    ).fetchall()
+
+    settled_results = []
+    if top_earners:
+        for idx, earner in enumerate(top_earners):
+            rank = idx + 1
+            if rank == 1:
+                cash, xc = 100000, 250
+            elif rank == 2:
+                cash, xc = 60000, 150
+            elif rank == 3:
+                cash, xc = 40000, 100
+            else:
+                cash, xc = 20000, 50
+
+            db.execute("UPDATE players SET money=money+?, xc=xc+? WHERE user_id=?", (cash, xc, earner["user_id"]))
+            db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
+                       (earner["user_id"], "weekly_dividend", f"Rank #{rank} Weekly Dividend: +${cash:,} Cash, +{xc} XC (Week {last_settled})", int(time.time())))
+            settled_results.append((rank, earner["user_id"], earner["weekly_xp"], cash, xc))
+
+        # Broadcast announcement if channel configured
+        chan_id = int(setting(db, "xp_announcement_channel_id") or 0)
+        target_chan = bot.get_channel(chan_id) if chan_id and bot else None
+        if target_chan and settled_results:
+            medals = ["🥇", "🥈", "🥉"]
+            lines = [
+                f"{medals[r-1] if r<=3 else f'**#{r}**'} <@{uid}> — `{xp:,} XP` ➔ **+${c:,} Cash** & **+{x} XC**"
+                for r, uid, xp, c, x in settled_results
+            ]
+            embed = discord.Embed(
+                title=f"🏆 Weekly Activity Dividends Distributed! (Week {last_settled})",
+                description="Congratulations to our top active members of the week! The prize pool has been deposited into your wallets:\n\n" + "\n".join(lines),
+                color=discord.Color.gold()
+            )
+            embed.set_footer(text="Keep chatting, playing, and chilling in Voice Lounges to rank in this week's leaderboard!")
+            try:
+                await target_chan.send(embed=embed)
+            except Exception:
+                pass
+
+    db.execute("INSERT OR REPLACE INTO economy_settings(key,value) VALUES('last_settled_dividend_week',?)", (current_week_key,))
+    db.commit()
+    return settled_results
+
 async def grant_xp(bot, db, member, amount, source):
     if amount <= 0: return
+    try:
+        await settle_weekly_dividends(bot, db)
+    except Exception:
+        pass
     row = profile(db, member.id); old_level = row["level"]; week_key = time.strftime("%Y-W%W", time.gmtime())
     weekly = 0 if row["last_week_key"] != week_key else row["weekly_xp"]
     total = row["total_xp"] + amount; new_level = level_for_xp(total)
@@ -294,6 +402,10 @@ def start_voice_task(bot, db):
 @tasks.loop(minutes=1)
 async def voice_xp_loop():
     bot = voice_xp_loop.bot; db = voice_xp_loop.db
+    try:
+        await settle_weekly_dividends(bot, db)
+    except Exception:
+        pass
     if setting(db, "xp_enabled") != "1" or setting(db, "xp_voice_enabled") != "1": return
     ignored_channels = _ids(setting(db, "xp_ignored_channel_ids")); ignored_roles = _ids(setting(db, "xp_ignored_role_ids")); amount = int(setting(db, "xp_voice_per_minute"))
     for guild in bot.guilds:
@@ -371,7 +483,19 @@ def register_commands(bot, db, is_council_or_admin=None):
         column = period.value if period else "total_xp"
         rows = db.execute(f"SELECT x.* FROM xp_profiles x ORDER BY x.{column} DESC LIMIT 10").fetchall(); medals = ["🥇", "🥈", "🥉"]
         lines = [f"{medals[i] if i<3 else f'**#{i+1}**'} <@{r['user_id']}> · Level **{r['level']}** · {r[column]:,} EXP" for i, r in enumerate(rows)]
-        await interaction.response.send_message(view=xbot_ui.panel("🏆 X BOT Level Leaderboard", "\n".join(lines) or "No activity XP has been earned yet.", colour=discord.Color.gold(), footer="Weekly XP resets automatically by calendar week."))
+        body = "\n".join(lines) or "No activity XP has been earned yet."
+        footer_text = "Weekly XP resets automatically by calendar week."
+        if column == "weekly_xp":
+            body += (
+                "\n\n🎁 **Weekly Dividend Prize Pool (Top 10):**\n"
+                "🥇 1st: **+$100,000 Cash + 250 XC**\n"
+                "🥈 2nd: **+$60,000 Cash + 150 XC**\n"
+                "🥉 3rd: **+$40,000 Cash + 100 XC**\n"
+                "🎖️ 4th–10th: **+$20,000 Cash + 50 XC**\n"
+                "-# 💰 Dividends are auto-distributed at weekly rollover."
+            )
+            footer_text = "Dividends auto-distribute every Monday at 00:00 UTC."
+        await interaction.response.send_message(view=xbot_ui.panel("🏆 X BOT Level Leaderboard", body, colour=discord.Color.gold(), footer=footer_text))
 
     @bot.tree.command(name="level_rewards", description="View X BOT level reward roles")
     async def level_rewards(interaction: discord.Interaction):

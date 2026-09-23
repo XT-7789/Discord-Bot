@@ -440,6 +440,8 @@ class XBot(discord.Client):
         self.add_view(deadzone.DeadzoneReviveView())
         self.add_view(lounges.LoungeLobbyView())
         self.add_view(lounges.LoungeHostControlView())
+        for lid in range(1, 6):
+            self.add_view(lounges.LoungeSquadJoinView(lid))
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
 
         def hide_panel_commands(command_guild, allowed_names):

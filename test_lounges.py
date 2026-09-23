@@ -221,6 +221,37 @@ class LoungesTests(unittest.IsolatedAsyncioTestCase):
         interaction_valid.response.send_message.assert_called_once()
         self.assertIn("Select your Lounge & Booking Details", interaction_valid.response.send_message.call_args[0][0])
 
+    async def test_squad_join_view_whitelists_member(self):
+        # Setup occupied lounge
+        now = int(time.time())
+        self.db.execute(
+            """UPDATE server_lounges
+            SET status='occupied', host_user_id=12345, host_name='HostUser', reserved_at=?, expires_at=?, invited_user_ids='[]'
+            WHERE lounge_id=2""",
+            (now, now + 3600),
+        )
+        self.db.commit()
+
+        join_view = lounges.LoungeSquadJoinView(2)
+        join_btn = join_view.children[0]
+
+        joiner = self.guild.get_member(777888)
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.user = joiner
+        interaction.guild = self.guild
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+
+        await join_btn.callback(interaction)
+        interaction.response.send_message.assert_called_once()
+        self.assertIn("Welcome to the squad!", interaction.response.send_message.call_args[0][0])
+
+        # Verify DB updated
+        row = lounges.get_lounge_row(self.db, 2)
+        invited = json.loads(row["invited_user_ids"])
+        self.assertIn(777888, invited)
+
 
 if __name__ == "__main__":
     unittest.main()
+
