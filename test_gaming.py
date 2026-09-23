@@ -227,6 +227,55 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
         status_after = self.db.execute("SELECT status FROM lfg_parties WHERE id=?", (party_id,)).fetchone()["status"]
         self.assertEqual(status_after, "cancelled")
 
+    async def test_gamer_card_view_and_copy(self):
+        target = make_member(777, self.guild, display_name="TargetGamer")
+        profile = {"user_id": 777, "steam_id": "12345678", "roblox_name": "ProRoblox", "mobile_games": "CODM"}
+
+        view = gaming.GamerCardView(target, profile, self.db)
+
+        # Should have Steam button, Roblox button, Invite button, Edit button
+        labels = [item.label for item in view.children if isinstance(item, discord.ui.Button)]
+        self.assertIn("Copy Steam Code", labels)
+        self.assertIn("Copy Roblox User", labels)
+        self.assertIn("Invite to Lounge", labels)
+        self.assertIn("Edit Handles", labels)
+
+        # Test Steam copy
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+        await view.on_copy_steam(interaction)
+        interaction.response.send_message.assert_awaited()
+        self.assertIn("12345678", interaction.response.send_message.call_args[0][0])
+
+        # Test Roblox copy
+        interaction.response.send_message.reset_mock()
+        await view.on_copy_roblox(interaction)
+        interaction.response.send_message.assert_awaited()
+        self.assertIn("ProRoblox", interaction.response.send_message.call_args[0][0])
+
+    async def test_quick_game_set_modal(self):
+        user_id = 888
+        modal = gaming.QuickGameSetModal(self.db, existing=None)
+        modal.steam_input._value = "steam_test_99"
+        modal.roblox_input._value = "roblox_test_99"
+        modal.mobile_input._value = "Apex, MLBB"
+
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.user = make_member(user_id, self.guild)
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+
+        await modal.on_submit(interaction)
+        interaction.response.send_message.assert_awaited()
+        self.assertIn("Gaming Handles Updated!", interaction.response.send_message.call_args[0][0])
+
+        saved = gaming.get_game_profile(self.db, user_id)
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["steam_id"], "steam_test_99")
+        self.assertEqual(saved["roblox_name"], "roblox_test_99")
+        self.assertEqual(saved["mobile_games"], "Apex, MLBB")
+
 
 if __name__ == "__main__":
     unittest.main()

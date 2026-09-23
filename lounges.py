@@ -49,6 +49,7 @@ _db = None
 _user_vc_duration = {}
 _user_dz_thaw_seconds = {}
 _squad_ping_cooldowns = {}
+_lounge_squad_time = {}
 
 
 def setting(db, key):
@@ -273,6 +274,7 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
         (lounge_id,),
     )
     db.commit()
+    _lounge_squad_time.pop(lounge_id, None)
 
     # 5. Announce clean reopen in the text channel
     if guild:
@@ -936,6 +938,14 @@ class LoungeSquadPingModal(discord.ui.Modal):
         privacy = lounge.get("privacy", "private")
         priv_badge = "🔒 Private Lounge (Click Jump In to enter!)" if privacy == "private" else "🌐 Public Lounge (Open to All)"
 
+        host_profile = _db.execute("SELECT * FROM game_profiles WHERE user_id=?", (interaction.user.id,)).fetchone()
+        host_handle_line = ""
+        if host_profile:
+            if self.category == "steam" and host_profile["steam_id"]:
+                host_handle_line = f"\n🎮 **Host Steam Code:** `{host_profile['steam_id']}`"
+            elif self.category == "roblox" and host_profile["roblox_name"]:
+                host_handle_line = f"\n🟥 **Host Roblox User:** `{host_profile['roblox_name']}`"
+
         embed = discord.Embed(
             title=f"🎮 [SQUAD RALLY · {cat_label.upper()}]",
             description=(
@@ -943,8 +953,10 @@ class LoungeSquadPingModal(discord.ui.Modal):
                 f"🎯 **Game / Activity:** {self.activity_input.value}\n"
                 f"👥 **Spots Open:** `{self.slots_input.value}`\n"
                 f"🔊 **Voice Channel:** <#{info['vc_id']}>\n"
-                f"🛡️ **Access:** {priv_badge}\n\n"
-                f"🎁 **Voice Perks:** Active chatters in Lounge VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!"
+                f"🛡️ **Access:** {priv_badge}"
+                f"{host_handle_line}\n\n"
+                f"🎁 **Voice Perks:** Active chatters in Lounge VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
+                f"📦 **Supply Drop:** 30+ min squad sessions earn a **Gamer Supply Drop** (+$10,000 Cash, +25 XC, +50 XP)!"
             ),
             color=color_val,
         )
@@ -1276,6 +1288,47 @@ async def lounge_check_loop():
                 if tc:
                     try:
                         await tc.send(f"🎁 **[Lounge VC Perk]** {member.mention} earned **+$1,000 Cash**, **+10 XC**, and **+25 XP** for active voice chatting in {vc.mention}!")
+                    except Exception:
+                        pass
+
+        # 3. Squad Playtime & Gamer Supply Drop: 30+ minutes (1800s) of squad voice chat (2+ members)
+        human_members = [
+            m for m in vc.members
+            if not getattr(m, "bot", False) and not (getattr(m, "voice", None) and (getattr(m, "voice").self_deaf or getattr(m, "voice").afk))
+        ]
+        if len(human_members) >= 2:
+            _lounge_squad_time[lid] = _lounge_squad_time.get(lid, 0) + 30
+            if _lounge_squad_time[lid] >= 1800:
+                _lounge_squad_time[lid] = 0
+                now_ts = int(time.time())
+                for sm in human_members:
+                    leveling._ensure_economy_player(_db, sm)
+                    _db.execute("UPDATE players SET money=money+10000, xc=xc+25 WHERE user_id=?", (sm.id,))
+                    _db.execute(
+                        "INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
+                        (sm.id, "gamer_supply_drop", "+$10,000 Cash, +25 XC, +50 XP (30m Squad VC Drop)", now_ts),
+                    )
+                    await leveling.grant_xp(_bot, _db, sm, 50, "gamer_supply_drop")
+                _db.commit()
+
+                if tc:
+                    try:
+                        pings = " ".join(sm.mention for sm in human_members)
+                        squad_embed = discord.Embed(
+                            title="📦 [GAMER SUPPLY DROP DELIVERED!]",
+                            description=(
+                                f"🎖️ **Outstanding Squadwork!** The squad in **{info['name']}** has maintained active voice chat for **30+ minutes**!\n\n"
+                                f"🎁 **Supply Drop Rewarded to Active Squadmates:**\n"
+                                f"• 💵 **+$10,000 Cash**\n"
+                                f"• 🪙 **+25 XC**\n"
+                                f"• ⭐ **+50 XP**\n\n"
+                                f"Squadmates rewarded: {pings}\n"
+                                f"-# Keep gaming and voice chatting together for more supply drops!"
+                            ),
+                            color=discord.Color.gold(),
+                        )
+                        squad_embed.set_footer(text="X BOT · Gaming Squad Perks · Drops deliver every 30 mins")
+                        await tc.send(embed=squad_embed)
                     except Exception:
                         pass
 

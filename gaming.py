@@ -308,6 +308,176 @@ class LFGPartyView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
 
+import json
+
+
+class GamerCardView(discord.ui.View):
+    """Interactive Gamer Card view with copy buttons, lounge invite, and edit handles."""
+    def __init__(self, target_user: discord.User | discord.Member, profile, db):
+        super().__init__(timeout=180)
+        self.target_user = target_user
+        self.profile = profile
+        self.db = db
+
+        steam_code = profile["steam_id"] if profile and profile["steam_id"] else ""
+        roblox_name = profile["roblox_name"] if profile and profile["roblox_name"] else ""
+
+        if steam_code:
+            btn_steam = discord.ui.Button(
+                label="Copy Steam Code",
+                emoji="🎮",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"xbot:game:steam:{target_user.id}",
+            )
+            btn_steam.callback = self.on_copy_steam
+            self.add_item(btn_steam)
+
+        if roblox_name:
+            btn_roblox = discord.ui.Button(
+                label="Copy Roblox User",
+                emoji="🟥",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"xbot:game:roblox:{target_user.id}",
+            )
+            btn_roblox.callback = self.on_copy_roblox
+            self.add_item(btn_roblox)
+
+        btn_invite = discord.ui.Button(
+            label="Invite to Lounge",
+            emoji="🚀",
+            style=discord.ButtonStyle.success,
+            custom_id=f"xbot:game:invite:{target_user.id}",
+        )
+        btn_invite.callback = self.on_invite_lounge
+        self.add_item(btn_invite)
+
+        btn_edit = discord.ui.Button(
+            label="Edit Handles",
+            emoji="⚙️",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"xbot:game:edit:{target_user.id}",
+        )
+        btn_edit.callback = self.on_edit_handles
+        self.add_item(btn_edit)
+
+    async def on_copy_steam(self, interaction: discord.Interaction):
+        steam_code = self.profile["steam_id"] if self.profile and self.profile["steam_id"] else ""
+        if not steam_code:
+            await interaction.response.send_message("No Steam ID or Friend Code registered.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"📋 **Steam ID / Friend Code for {self.target_user.display_name}:**\n`{steam_code}`\n\n*(Copy and paste into Steam to add as friend!)*",
+            ephemeral=True,
+        )
+
+    async def on_copy_roblox(self, interaction: discord.Interaction):
+        roblox_name = self.profile["roblox_name"] if self.profile and self.profile["roblox_name"] else ""
+        if not roblox_name:
+            await interaction.response.send_message("No Roblox username registered.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"📋 **Roblox Username for {self.target_user.display_name}:**\n`{roblox_name}`\n\n*(Copy and search on Roblox to connect!)*",
+            ephemeral=True,
+        )
+
+    async def on_invite_lounge(self, interaction: discord.Interaction):
+        import lounges
+        active = lounges.get_active_lounge_by_host(self.db, interaction.user.id)
+        if not active:
+            await interaction.response.send_message(
+                "⚠️ You do not currently host an active Lounge. Reserve a Lounge in the lobby first, then invite your squadmates!",
+                ephemeral=True,
+            )
+            return
+
+        lounge_id = active["lounge_id"]
+        info = lounges.LOUNGES.get(lounge_id)
+        try:
+            invited = json.loads(active.get("invited_user_ids") or "[]")
+        except Exception:
+            invited = []
+
+        if self.target_user.id not in invited:
+            invited.append(self.target_user.id)
+            self.db.execute("UPDATE server_lounges SET invited_user_ids=? WHERE lounge_id=?", (json.dumps(invited), lounge_id))
+            self.db.commit()
+
+            guild = interaction.guild
+            if guild and info:
+                tc = guild.get_channel(info["text_id"])
+                vc = guild.get_channel(info["vc_id"])
+                overwrite = discord.PermissionOverwrite(view_channel=True, send_messages=True, connect=True, speak=True)
+                if tc:
+                    try: await tc.set_permissions(self.target_user, overwrite=overwrite)
+                    except discord.HTTPException: pass
+                if vc:
+                    try: await vc.set_permissions(self.target_user, overwrite=overwrite)
+                    except discord.HTTPException: pass
+                if tc:
+                    try: await tc.send(f"👋 {self.target_user.mention} **was invited to the squad by {interaction.user.mention}!**")
+                    except Exception: pass
+
+        await interaction.response.send_message(
+            f"✅ **Invited {self.target_user.mention} to your active lounge ({active['name']})!**\n"
+            f"• Voice Channel: <#{info['vc_id']}>\n"
+            f"• Text Channel: <#{info['text_id']}>",
+            ephemeral=True,
+        )
+
+    async def on_edit_handles(self, interaction: discord.Interaction):
+        existing = get_game_profile(self.db, interaction.user.id)
+        modal = QuickGameSetModal(self.db, existing)
+        await interaction.response.send_modal(modal)
+
+
+class QuickGameSetModal(discord.ui.Modal):
+    """Modal to edit gaming handles quickly."""
+    def __init__(self, db, existing=None):
+        super().__init__(title="Edit Gaming Handles")
+        self.db = db
+
+        self.steam_input = discord.ui.TextInput(
+            label="Steam Friend Code / ID",
+            placeholder="e.g. 123456789 or custom vanity URL",
+            default=existing["steam_id"] if existing and existing["steam_id"] else "",
+            max_length=60,
+            required=False,
+        )
+        self.add_item(self.steam_input)
+
+        self.roblox_input = discord.ui.TextInput(
+            label="Roblox Username",
+            placeholder="e.g. BloxPlayer_99",
+            default=existing["roblox_name"] if existing and existing["roblox_name"] else "",
+            max_length=50,
+            required=False,
+        )
+        self.add_item(self.roblox_input)
+
+        self.mobile_input = discord.ui.TextInput(
+            label="Mobile Games / Tags",
+            placeholder="e.g. Wild Rift, PUBG Mobile, Genshin",
+            default=existing["mobile_games"] if existing and existing["mobile_games"] else "",
+            max_length=80,
+            required=False,
+        )
+        self.add_item(self.mobile_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        s = self.steam_input.value.strip()
+        r = self.roblox_input.value.strip()
+        m = self.mobile_input.value.strip()
+
+        save_game_profile(self.db, interaction.user.id, s, r, m)
+        await interaction.response.send_message(
+            f"✅ **Gaming Handles Updated!**\n"
+            f"• 🎮 **Steam:** `{s or 'Not set'}`\n"
+            f"• 🟥 **Roblox:** `{r or 'Not set'}`\n"
+            f"• 📱 **Mobile:** `{m or 'Not set'}`",
+            ephemeral=True,
+        )
+
+
 def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> None:
     """Register all slash commands and listeners for the Gaming Zone."""
     bot.xbot_db = db
@@ -423,7 +593,7 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
             ephemeral=True,
         )
 
-    @gaming_group.command(name="profile", description="View a member's gaming profile and game tags")
+    @gaming_group.command(name="profile", description="View a member's interactive gaming profile card")
     @app_commands.describe(user="Member whose gaming profile you want to inspect")
     async def game_profile_command(interaction: discord.Interaction, user: Optional[discord.Member] = None):
         target = user or interaction.user
@@ -440,22 +610,58 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
                         held_roles.append(f"{cfg['emoji']} {role.name}")
 
         roles_text = " · ".join(held_roles) if held_roles else "No gaming roles selected"
-        steam_text = profile["steam_id"] if profile and profile["steam_id"] else "*Not set*"
-        roblox_text = profile["roblox_name"] if profile and profile["roblox_name"] else "*Not set*"
-        mobile_text = profile["mobile_games"] if profile and profile["mobile_games"] else "*Not set*"
+        steam_text = f"`{profile['steam_id']}`" if profile and profile["steam_id"] else "*Not set*"
+        roblox_text = f"`{profile['roblox_name']}`" if profile and profile["roblox_name"] else "*Not set*"
+        mobile_text = f"`{profile['mobile_games']}`" if profile and profile["mobile_games"] else "*Not set*"
 
         embed = discord.Embed(
-            title=f"🎮 {target.display_name}'s Gaming Card",
+            title=f"🎮 {target.display_name}'s Gamer Card",
             description=(
                 f"🏷️ **Game Roles:** {roles_text}\n\n"
-                f"🎮 **Steam ID / Code:** {steam_text}\n"
+                f"🎮 **Steam ID / Friend Code:** {steam_text}\n"
                 f"🟥 **Roblox User:** {roblox_text}\n"
-                f"📱 **Mobile Games:** {mobile_text}\n"
+                f"📱 **Mobile Games:** {mobile_text}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Click the buttons below to copy codes or invite this player to your Lounge squad!"
             ),
             color=discord.Color.blurple(),
         )
         embed.set_thumbnail(url=target.display_avatar.url)
-        embed.set_footer(text="Use /gaming set to customize your gaming card")
+        embed.set_footer(text="X BOT · Gaming Card · Click [Edit Handles] to update your tags")
+
+        card_view = GamerCardView(target, profile, db)
+        await interaction.response.send_message(embed=embed, view=card_view)
+
+    @gaming_group.command(name="leaderboard", description="View the Top 10 Weekly Gamers in Voice Lounges")
+    async def gaming_leaderboard_command(interaction: discord.Interaction):
+        rows = db.execute(
+            """SELECT p.user_id, p.display_name, x.voice_xp, x.weekly_xp
+            FROM xp_profiles x
+            JOIN players p ON p.user_id=x.user_id
+            WHERE x.weekly_xp > 0
+            ORDER BY x.voice_xp DESC, x.weekly_xp DESC
+            LIMIT 10"""
+        ).fetchall()
+
+        medals = ["🥇", "🥈", "🥉"]
+        lines = []
+        for idx, r in enumerate(rows):
+            medal = medals[idx] if idx < 3 else f"**#{idx+1}**"
+            name = r["display_name"] or f"Player {r['user_id']}"
+            lines.append(f"{medal} <@{r['user_id']}> — `{r['voice_xp']:,} Voice XP` (`{r['weekly_xp']:,} Weekly XP`)")
+
+        body = "\n".join(lines) if lines else "No squad gaming activity recorded this week yet."
+        body += (
+            "\n\n🎁 **Squad Gamer Perk:**\n"
+            "Hang out in Lounge VCs for 30+ minutes with your squad to receive **Gamer Supply Drops**!"
+        )
+
+        embed = discord.Embed(
+            title="🏆 [X BOT WEEKLY GAMER LEADERBOARD]",
+            description=body,
+            color=discord.Color.gold(),
+        )
+        embed.set_footer(text="Weekly gaming ranks reset every Monday at 00:00 UTC")
         await interaction.response.send_message(embed=embed)
 
     bot.tree.add_command(gaming_group)
