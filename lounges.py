@@ -33,7 +33,7 @@ LOUNGE_VC_CHANNEL_IDS: Set[int] = {info["vc_id"] for info in LOUNGES.values()}
 DEFAULT_SETTINGS = {
     "lounge_enabled": "1",
     "lounge_default_duration_mins": "60",
-    "lounge_max_duration_mins": "120",
+    "lounge_max_duration_mins": "300",  # 5 hours maximum session with extensions
     "lounge_cooldown_seconds": "900",  # 15 minutes cooldown after hosting
     "lounge_lobby_channel_id": "0",
     "lounge_lobby_message_id": "0",
@@ -93,6 +93,9 @@ def initialise(db):
 
     for key, val in DEFAULT_SETTINGS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, val))
+
+    # Ensure max duration is set to 300 minutes (5 hours)
+    db.execute("INSERT INTO economy_settings(key,value) VALUES('lounge_max_duration_mins','300') ON CONFLICT(key) DO UPDATE SET value='300'")
 
     db.commit()
 
@@ -332,7 +335,7 @@ def build_lobby_embed(db):
         + "\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📜 **Reservation Rules:**\n"
-        f"• **Duration:** Choose 30m, 60m, or 120m sessions.\n"
+        f"• **Duration:** Choose 30m, 1h, 2h, or 3h initial booking (Extendable up to 5h max!).\n"
         f"• **Privacy:** Host can invite/kick members and toggle Private/Public anytime.\n"
         f"• **Auto-Clean:** When the timer expires, the bot kicks VC, clears chat history, and resets permissions!"
     )
@@ -507,13 +510,14 @@ class LoungeBookingSelectView(discord.ui.View):
         self.add_item(self.select_lounge)
 
         self.chosen_lounge_id = int(free_lounges[0]["lounge_id"])
-        self.chosen_duration = 60
+        self.chosen_duration = 180
         self.chosen_privacy = "private"
 
         duration_options = [
             discord.SelectOption(label="30 Minutes", value="30", emoji="⚡"),
-            discord.SelectOption(label="1 Hour (Recommended)", value="60", default=True, emoji="⏱️"),
-            discord.SelectOption(label="2 Hours (Maximum)", value="120", emoji="⏳"),
+            discord.SelectOption(label="1 Hour", value="60", emoji="⏱️"),
+            discord.SelectOption(label="2 Hours", value="120", emoji="⏳"),
+            discord.SelectOption(label="3 Hours (Recommended Initial Max)", value="180", default=True, emoji="🕒"),
         ]
         self.select_duration = discord.ui.Select(
             placeholder="Step 2: Choose session duration…",
@@ -714,14 +718,14 @@ class LoungeHostControlView(discord.ui.View):
             await interaction.response.send_message("🔒 Only the Lounge Host can extend the session.", ephemeral=True)
             return
 
-        max_duration = int(setting(_db, "lounge_max_duration_mins") or 120) * 60
+        max_duration = int(setting(_db, "lounge_max_duration_mins") or 300) * 60
         reserved_at = lounge["reserved_at"]
         current_expiry = lounge["expires_at"]
         new_expiry = current_expiry + 1800  # +30 minutes
 
         if (new_expiry - reserved_at) > max_duration:
             await interaction.response.send_message(
-                f"⚠️ Cannot extend further! Maximum session length is **{max_duration // 60} minutes**.",
+                f"⚠️ Cannot extend further! Maximum extended session length is **{max_duration // 60} minutes (5 Hours)**.",
                 ephemeral=True,
             )
             return
@@ -734,8 +738,11 @@ class LoungeHostControlView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
         await refresh_lobby_message(_bot, _db, interaction.guild)
+        total_mins = (new_expiry - reserved_at) // 60
         await interaction.followup.send(
-            f"⏳ **Session extended by +30 minutes!** New expiry: <t:{new_expiry}:R> (<t:{new_expiry}:t>).",
+            f"⏳ **Session extended by +30 minutes!**\n"
+            f"• Current Total Session: **{total_mins} mins** (Max: 5 Hours)\n"
+            f"• New Expiry: <t:{new_expiry}:R> (<t:{new_expiry}:t>)",
             ephemeral=True,
         )
 
