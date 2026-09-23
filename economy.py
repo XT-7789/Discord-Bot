@@ -726,6 +726,14 @@ def register_commands(bot, db, create_player) -> None:
             "SELECT COALESCE(SUM(quantity), 0) AS total FROM inventories WHERE user_id = ?",
             (interaction.user.id,),
         ).fetchone()['total']
+        game_prof = db.execute("SELECT * FROM game_profiles WHERE user_id = ?", (interaction.user.id,)).fetchone() if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='game_profiles'").fetchone() else None
+        gaming_line = ""
+        if game_prof and (game_prof["steam_id"] or game_prof["roblox_name"]):
+            tags = []
+            if game_prof["steam_id"]: tags.append(f"Steam: `{game_prof['steam_id']}`")
+            if game_prof["roblox_name"]: tags.append(f"Roblox: `{game_prof['roblox_name']}`")
+            gaming_line = f"\n🎮 **Gaming:** " + " · ".join(tags)
+
         view = discord.ui.LayoutView(timeout=180)
         container = discord.ui.Container(accent_color=discord.Color.blurple())
         text = (f"## 👤 {interaction.user.display_name}'s X BOT Profile\n"
@@ -735,7 +743,8 @@ def register_commands(bot, db, create_player) -> None:
                 f"🪙 **Wallet XC:** {player['xc']:,}\n"
                 f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
                 f"💵 **Cash:** {player['money']:,}\n"
-                f"💎 **XCrystals:** {player['xcrystals']:,}")
+                f"💎 **XCrystals:** {player['xcrystals']:,}"
+                f"{gaming_line}")
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=discord.ui.Thumbnail(interaction.user.display_avatar.url)))
         view.add_item(container)
         await interaction.response.send_message(view=view)

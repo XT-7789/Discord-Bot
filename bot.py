@@ -30,6 +30,7 @@ import tier8
 import system_ui
 import casual_games
 import deadzone
+import gaming
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -140,6 +141,7 @@ tier7.initialise(db)
 tier8.initialise(db)
 casual_games.initialise(db)
 deadzone.initialise(db)
+gaming.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -1729,6 +1731,7 @@ tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for
 tier8.register_commands(bot, db, create_player)
 casual_games.register(bot, db, create_player)
 system_ui.register(bot, db, create_player)
+gaming.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 
 # Seed server-only Tier 1.6 commands before applying their Council/Admin
