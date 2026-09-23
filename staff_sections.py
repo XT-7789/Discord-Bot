@@ -101,7 +101,17 @@ def build(panel, content):
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))
         for field in fields:section(field.name,field.value)
         section('Armed Forces & Military Manager','Select a commander to inspect or edit army, air, navy, capital health and resources.',user_select+war_actions+legacy_tools)
-    elif panel.page=='server':
+    elif panel.page == 'panels':
+        channel_select = take(lambda c: isinstance(c, AdminChannelSelect))
+        form_select = listing(ApplicationFormSelect, 'forms')
+        panel_actions = action(
+            'post_verification', 'post_application', 'server_post_deadzone',
+            'server_post_gaming_roles', 'server_post_lounge_lobby', 'post_tester_feedback'
+        )
+        for field in fields: section(field.name, field.value)
+        section('Target Destination Channel', 'Choose the channel where you want to deploy the panel.', channel_select)
+        section('Deploy Server Panels', 'Select an application form if needed, then click any button to deploy.', form_select + panel_actions)
+    elif panel.page == 'server':
         channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
         server_actions=action('server_post_gaming_roles','post_verification','post_tester_feedback','server_post_deadzone','server_post_lounge_lobby','server_say','server_toggle_level','server_set_level_channel','server_edit_template','server_lottery_draw')
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))

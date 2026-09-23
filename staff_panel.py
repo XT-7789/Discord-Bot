@@ -15,7 +15,7 @@ import deadzone
 
 
 PAGES = {
-    'home': 'Control Centre', 'members': 'Members', 'assets': 'Player Assets',
+    'home': 'Control Centre', 'panels': 'Post Panels', 'members': 'Members', 'assets': 'Player Assets',
     'deadzone': 'Deadzone', 'server': 'Server Tools', 'war_tools': 'Alliance War',
     'applications': 'Applications', 'tester': 'Tester Reports', 'verification': 'Verification',
     'codes': 'Reward Codes', 'economy': 'Economy Status', 'maintenance': 'Maintenance',
@@ -742,6 +742,19 @@ class AdminPanel(discord.ui.LayoutView):
             self.add_item(AdminActionButton("war_edit_capital", "Set Capital HP", emoji="🏰", style=discord.ButtonStyle.secondary, row=3))
             self.add_item(AdminActionButton("war_edit_resources", "Edit Resources", emoji="⛏️", style=discord.ButtonStyle.secondary, row=3))
             self.add_item(AdminActionButton("war_toggle_status", "War Status", emoji="⚔️", style=discord.ButtonStyle.danger, row=3))
+        elif self.page == "panels":
+            forms = self.application_forms()
+            if forms:
+                if self.selected_form_id is None:
+                    self.selected_form_id = forms[0]['id']
+                self.add_item(ApplicationFormSelect(self._page_rows(forms, "forms"), self.selected_form_id))
+            self.add_item(AdminChannelSelect(placeholder="Target channel to deploy panel…", default_channel_id=self.target_channel_id, row=2))
+            self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=3))
+            self.add_item(AdminActionButton("post_application", "Post Application Form", emoji="📨", style=discord.ButtonStyle.primary, row=3))
+            self.add_item(AdminActionButton("server_post_deadzone", "Post Deadzone", emoji="⚰️", style=discord.ButtonStyle.secondary, row=3))
+            self.add_item(AdminActionButton("server_post_gaming_roles", "Post Gaming Roles", emoji="🎮", style=discord.ButtonStyle.success, row=4))
+            self.add_item(AdminActionButton("server_post_lounge_lobby", "Post Lounge Lobby", emoji="🛋️", style=discord.ButtonStyle.primary, row=4))
+            self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel", emoji="🧪", style=discord.ButtonStyle.secondary, row=4))
         elif self.page == "server":
             self.add_item(AdminChannelSelect(placeholder="Choose destination channel to deploy panels…", default_channel_id=self.target_channel_id, row=2))
             self.add_item(AdminActionButton("server_post_gaming_roles", "Post Gaming Roles", emoji="🎮", style=discord.ButtonStyle.success, row=3))
@@ -797,7 +810,7 @@ class AdminPanel(discord.ui.LayoutView):
                 self.add_item(AdminActionButton("toggle_code", "Disable Code" if self.selected_code()['enabled'] else "Enable Code", emoji="🔁", row=2))
         elif self.page == "home":
             pending=len(self.pending_applications());reports=len(self.pending_feedback())
-            for row,pages in ((0,('applications','tester')),(1,('members','assets','deadzone')),(2,('server','war_tools')),(3,('verification','codes')),(4,('economy','maintenance'))):
+            for row,pages in ((0,('panels','applications','tester')),(1,('members','assets','deadzone')),(2,('server','war_tools')),(3,('verification','codes')),(4,('economy','maintenance'))):
                 for page in pages:
                     count={'applications':pending,'tester':reports}.get(page)
                     label=PAGES[page]+(f' · {count}' if count is not None else '')
@@ -945,6 +958,23 @@ class AdminPanel(discord.ui.LayoutView):
                     f"🛢️ **Oil:** {player['oil']:,}"
                 ),
                 inline=True,
+            )
+        elif self.page == "panels":
+            target_ch_text = f"<#{self.target_channel_id}>" if self.target_channel_id else "*Current Channel*"
+            selected_form = self.selected_form()
+            form_name = selected_form['name'] if selected_form else "Default Form"
+            embed.title = "📢 Post & Deploy Interactive Panels"
+            embed.description = (
+                f"Deploy interactive server panels into any channel with 1-click.\n"
+                f"📍 **Target Destination:** {target_ch_text}\n"
+                f"📝 **Selected Application Form:** `{form_name}`\n\n"
+                f"Choose the target channel from the picker, then click any button to deploy:\n"
+                f"• ✅ **Verification:** Onboarding verification gate & member role assignment\n"
+                f"• 📨 **Application Form:** Interactive submission form button\n"
+                f"• ⚰️ **Deadzone:** Live Crypt status board & member rescue breakout\n"
+                f"• 🎮 **Gaming Roles:** Steam, Roblox & Mobile role toggles\n"
+                f"• 🛋️ **Lounge Lobby:** 5 dynamic voice lounges reservation hub\n"
+                f"• 🧪 **Tester Feedback:** Beta testing & bug report panel"
             )
         elif self.page == "server":
             enabled = leveling.setting(self.db, "xp_announcement_enabled") == "1"
@@ -1094,7 +1124,11 @@ class AdminPanel(discord.ui.LayoutView):
             offsets[kind] = max(0, offsets.get(kind, 0) + int(direction) * 25)
             await self._edit(interaction, self.clone(offsets=offsets))
             return
-        if action in {"system_status", "tier5_repair", "tier6_repair", "backup_now", "post_application", "post_verification", "post_tester_feedback"}:
+        if action in {
+            "system_status", "tier5_repair", "tier6_repair", "backup_now",
+            "post_application", "post_verification", "post_tester_feedback",
+            "server_post_gaming_roles", "server_post_deadzone", "server_post_lounge_lobby",
+        }:
             await interaction.response.defer()
         if action == "close":
             closed = discord.ui.LayoutView()
