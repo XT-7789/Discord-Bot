@@ -15,6 +15,8 @@ DEFAULTS = {
     "xp_message_cooldown": "60", "xp_voice_enabled": "1", "xp_voice_per_minute": "5",
     "xp_ignored_channel_ids": "", "xp_ignored_role_ids": "", "xp_announcement_enabled": "1",
     "xp_announcement_channel_id": "0", "xp_announcement_template": "🎉 **LEVEL UP!** {mention} reached **Level {level}**! {reward}",
+    "xp_message_cash_min": "100", "xp_message_cash_max": "300",
+    "xp_message_lucky_chance_percent": "5", "xp_message_lucky_xc_min": "1", "xp_message_lucky_xc_max": "5",
 }
 
 def initialise(db):
@@ -253,6 +255,29 @@ async def handle_message(bot, db, message):
     low = int(setting(db, "xp_message_min")); high = max(low, int(setting(db, "xp_message_max")))
     await grant_xp(bot, db, message.author, random.randint(low, high), "message")
 
+    # Award Chat Cash Drop
+    _ensure_economy_player(db, message.author)
+    cash_low = int(setting(db, "xp_message_cash_min") or 100)
+    cash_high = max(cash_low, int(setting(db, "xp_message_cash_max") or 300))
+    cash_reward = random.randint(cash_low, cash_high)
+    db.execute("UPDATE players SET money=money+? WHERE user_id=?", (cash_reward, message.author.id))
+
+    # 5% Lucky Drop (1~5 XC)
+    lucky_chance = int(setting(db, "xp_message_lucky_chance_percent") or 5)
+    if lucky_chance > 0 and random.randint(1, 100) <= lucky_chance:
+        xc_low = int(setting(db, "xp_message_lucky_xc_min") or 1)
+        xc_high = max(xc_low, int(setting(db, "xp_message_lucky_xc_max") or 5))
+        xc_reward = random.randint(xc_low, xc_high)
+        db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (xc_reward, message.author.id))
+        db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)",
+                   (message.author.id, "chat_lucky_drop", f"+{xc_reward} XC (Chat Lucky Drop)", int(time.time())))
+        try:
+            await message.add_reaction("🪙")
+        except (discord.HTTPException, discord.Forbidden):
+            pass
+
+    db.commit()
+
 def start_voice_task(bot, db):
     if not voice_xp_loop.is_running():
         voice_xp_loop.bot = bot; voice_xp_loop.db = db; voice_xp_loop.start()
@@ -377,7 +402,8 @@ def register_commands(bot, db, is_council_or_admin=None):
             await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         count = await sync_guild_member_levels(bot, db, interaction.guild)
         await interaction.followup.send(f"✅ **Level Synchronization Complete!** Checked all members and updated `{count}` profiles to match their highest Discord level roles.", ephemeral=True)
 

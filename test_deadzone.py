@@ -24,6 +24,7 @@ def make_role(role_id, name):
 
 class DummyGuild:
     def __init__(self):
+        self.id = 1505437941647015980
         self.name = "Test Server"
         self.roles = {
             1505437941647015986: make_role(1505437941647015986, "Member"),
@@ -261,11 +262,15 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.db.execute("UPDATE players SET xc=xc+50 WHERE user_id=?", (999,))
         self.db.commit()
 
-        # Verify sleeper restored
+        # Verify sleeper restored and received Welcome Back Stimulus (100,000 Cash, 150 XC, 100 XP)
         status = deadzone.member_status(self.db, 888)
         self.assertEqual(status["is_in_deadzone"], 0)
         self.assertEqual(status["thaw_count"], 0)
         self.assertIn(member_role, sleeper.roles)
+
+        sleeper_row = self.db.execute("SELECT xc, money FROM players WHERE user_id=?", (888,)).fetchone()
+        self.assertEqual(sleeper_row["xc"], 200)  # 50 + 150
+        self.assertEqual(sleeper_row["money"], 100000)
 
         # Verify rescuer got 50 XC reward (100 + 50 = 150)
         rescuer_xc = self.db.execute("SELECT xc FROM players WHERE user_id=?", (999,)).fetchone()["xc"]
@@ -324,6 +329,63 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_status["last_haunt_at"], now)
         player_xc = self.db.execute("SELECT xc FROM players WHERE user_id=?", (555666,)).fetchone()["xc"]
         self.assertEqual(player_xc, 80)  # 50 + 30 = 80
+
+    async def test_resurrection_welcome_party(self):
+        """Verify 5-minute welcome party activates on revive and awards 2,000 Cash to active chatters."""
+        guild_id = 999888
+        self.guild.id = guild_id
+        dummy_channel = MagicMock(spec=discord.TextChannel)
+        dummy_channel.id = 12345
+        dummy_channel.mention = "<#12345>"
+        dummy_channel.send = AsyncMock()
+        self.guild.system_channel = dummy_channel
+        self.guild.text_channels = [dummy_channel]
+
+        dummy_bot = SimpleNamespace(get_channel=lambda *a: dummy_channel)
+
+        revived_member = make_member(444111, self.guild, display_name="RevivedSoldier")
+        self.db.execute("INSERT OR IGNORE INTO players(user_id, nation_name, capital_name, money) VALUES(?,?,?,?)", (444111, "R", "RC", 0))
+        self.db.execute("INSERT INTO deadzone_members(user_id, is_in_deadzone) VALUES(?, 1)", (444111,))
+        self.db.commit()
+
+        await deadzone.revive_member(dummy_bot, self.db, revived_member)
+        self.assertIn(guild_id, deadzone.active_parties)
+        party = deadzone.active_parties[guild_id]
+        self.assertEqual(party["reward_cash"], 2000)
+        self.assertEqual(party["revived_user_id"], 444111)
+
+        # Another member chats during party
+        chatter = make_member(444222, self.guild, display_name="PartyChatter")
+        self.db.execute("INSERT OR IGNORE INTO players(user_id, nation_name, capital_name, money) VALUES(?,?,?,?)", (444222, "P", "PC", 0))
+        self.db.commit()
+
+        msg = SimpleNamespace(guild=self.guild, author=chatter, channel=dummy_channel, add_reaction=AsyncMock())
+        await deadzone.handle_message(dummy_bot, self.db, msg)
+
+        # Verfiy 2,000 Cash awarded and reaction added
+        money = self.db.execute("SELECT money FROM players WHERE user_id=?", (444222,)).fetchone()["money"]
+        self.assertEqual(money, 2000)
+        msg.add_reaction.assert_called_with("🎉")
+
+        # Second message should not award duplicate
+        await deadzone.handle_message(dummy_bot, self.db, msg)
+        money_after = self.db.execute("SELECT money FROM players WHERE user_id=?", (444222,)).fetchone()["money"]
+        self.assertEqual(money_after, 2000)
+
+    async def test_chat_cash_drop_and_lucky_drop(self):
+        """Verify chat activity in leveling.py awards Cash and respects cooldown."""
+        member = make_member(777111, self.guild, display_name="Talker")
+        dummy_channel = MagicMock(spec=discord.TextChannel)
+        dummy_channel.id = 54321
+        msg = SimpleNamespace(guild=self.guild, author=member, channel=dummy_channel, add_reaction=AsyncMock(), roles=[])
+
+        dummy_bot = SimpleNamespace(get_channel=lambda *a: None)
+        await leveling.handle_message(dummy_bot, self.db, msg)
+
+        player = self.db.execute("SELECT money, xc FROM players WHERE user_id=?", (777111,)).fetchone()
+        self.assertIsNotNone(player)
+        self.assertGreaterEqual(player["money"], 100)
+        self.assertLessEqual(player["money"], 300)
 
 
 if __name__ == "__main__":

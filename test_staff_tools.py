@@ -233,5 +233,21 @@ class StaffToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.calls),1)
 
 
+    async def test_staff_tool_defer_and_followup_support(self):
+        async def mock_callback(interaction: discord.Interaction):
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            await interaction.response.defer()
+            await interaction.followup.send("Operation finished smoothly")
+
+        cmd = app_commands.Command(name="test_defer", description="Test", callback=mock_callback)
+        res = tools.ResultResponse(self.interaction(), self.root)
+        ctx = tools.Context(self.interaction(), cmd, self.actor, res)
+        await ctx.response.defer()
+        self.assertTrue(ctx.response.is_done())
+        await ctx.followup.send("Success!")
+        self.assertTrue(res.interaction.edit_original_response.awaited)
+
+
 if __name__=='__main__':
     unittest.main()

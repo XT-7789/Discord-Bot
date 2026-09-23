@@ -45,6 +45,17 @@ class Context:
         self.user = user or interaction.user
         self.response = response or interaction.response
 
+    @property
+    def followup(self):
+        class FollowupProxy:
+            def __init__(self, res):
+                self.res = res
+
+            async def send(self, content=None, *, view=None, embed=None, ephemeral=True, **kwargs):
+                return await self.res.send_message(content=content, view=view, embed=embed, ephemeral=ephemeral, **kwargs)
+
+        return FollowupProxy(self.response)
+
     def __getattr__(self, key):
         return getattr(self.original, key)
 
@@ -56,7 +67,10 @@ class ResultResponse:
         self.root = root
 
     def is_done(self):
-        return False
+        return True
+
+    async def defer(self, *args, **kwargs):
+        pass
 
     async def send_message(self, content=None, *, view=None, embed=None, ephemeral=True, **kwargs):
         if view is None:

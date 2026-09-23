@@ -19,12 +19,15 @@ DEFAULTS = {
     "deadzone_crypt_channel_id": "0",
     "deadzone_lounge_channel_id": "0",
     "deadzone_notification_channel_id": "0",
+    "deadzone_revive_bonus_cash": "100000",
     "deadzone_revive_bonus_xc": "150",
-    "deadzone_revive_bonus_xp": "50",
+    "deadzone_revive_bonus_xp": "100",
     "deadzone_scavenge_cooldown": "72000",
     "deadzone_rescue_reward_xc": "100",
     "deadzone_haunt_reward_xc": "30",
     "deadzone_haunt_cooldown": "7200",
+    "deadzone_party_duration": "300",
+    "deadzone_party_reward_cash": "2000",
 }
 
 RESURRECTION_QUOTES = [
@@ -55,6 +58,7 @@ GHOST_HAUNT_QUOTES = [
 
 _bot = None
 _db = None
+active_parties = {}
 
 
 def initialise(db):
@@ -296,9 +300,12 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     level = current_level
 
     # Award revival bonus
-    bonus_xc = int(setting(db, "deadzone_revive_bonus_xc") or 0)
-    bonus_xp = int(setting(db, "deadzone_revive_bonus_xp") or 0)
+    bonus_cash = int(setting(db, "deadzone_revive_bonus_cash") or 100000)
+    bonus_xc = int(setting(db, "deadzone_revive_bonus_xc") or 150)
+    bonus_xp = int(setting(db, "deadzone_revive_bonus_xp") or 100)
 
+    if bonus_cash > 0:
+        db.execute("UPDATE players SET money=money+? WHERE user_id=?", (bonus_cash, member.id))
     if bonus_xc > 0:
         db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (bonus_xc, member.id))
     if bonus_xp > 0:
@@ -318,7 +325,9 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     lounge_channel_id = int(setting(db, "deadzone_lounge_channel_id") or 0)
     target_id = notif_channel_id or lounge_channel_id
 
-    target_channel = bot.get_channel(target_id) if target_id else member.guild.system_channel
+    target_channel = (bot.get_channel(target_id) if target_id and hasattr(bot, "get_channel") else None) or getattr(member.guild, "system_channel", None)
+    if target_channel is None and getattr(member.guild, "text_channels", None):
+        target_channel = member.guild.text_channels[0]
 
     welcome_quote = random.choice(RESURRECTION_QUOTES)
     embed = discord.Embed(
@@ -326,7 +335,7 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
         description=(
             f"🎉 {member.mention} **has broken out of their coffin and returned to the living!**\n\n"
             f"🛡️ **Status Restored:** Member, Music, and Level {level} perks are active.\n"
-            f"🎁 **Survival Bonus:** Received `+{bonus_xc} XC` and `+{bonus_xp} XP`!\n\n"
+            f"🎁 **Survival Bonus:** Received `💵 +{bonus_cash:,} Cash`, `🪙 +{bonus_xc} XC`, and `⭐ +{bonus_xp} XP`!\n\n"
             f"*{welcome_quote}*"
         ),
         color=0x2ECC71,
@@ -336,6 +345,33 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     if target_channel:
         try:
             await target_channel.send(embed=embed)
+        except discord.HTTPException:
+            pass
+
+    # Start 5-minute Resurrection Welcome Party in target_channel
+    party_duration = int(setting(db, "deadzone_party_duration") or 300)
+    party_reward = int(setting(db, "deadzone_party_reward_cash") or 2000)
+    if target_channel and party_duration > 0 and getattr(member, "guild", None):
+        active_parties[member.guild.id] = {
+            "expires_at": time.time() + party_duration,
+            "revived_user_id": member.id,
+            "revived_name": member.display_name,
+            "channel_id": target_channel.id,
+            "reward_cash": party_reward,
+            "claimed_users": set(),
+        }
+        party_embed = discord.Embed(
+            title="🎊 [WELCOME PARTY STARTED — 5 MINUTES]",
+            description=(
+                f"A celebration party has started for {member.mention}!\n\n"
+                f"💬 **Chat in {target_channel.mention}** within the next **5 minutes** to claim your **💵 {party_reward:,} Cash** welcome bonus!\n"
+                f"-# One claim per member · Say hi and celebrate their return!"
+            ),
+            color=0xF1C40F,
+        )
+        party_embed.set_footer(text="X BOT · Deadzone Division · Welcome Party")
+        try:
+            await target_channel.send(embed=party_embed)
         except discord.HTTPException:
             pass
 
@@ -441,13 +477,13 @@ class DeadzoneReviveView(discord.ui.View):
         await interaction.response.send_message(
             f"### 🤝 Operatives Ready for Rescue:\n"
             + "\n".join(lines)
-            + f"\n\nRun **`/deadzone rescue member:@user`** to pull them out and earn **+50 XC**!",
+            + f"\n\nRun **`/deadzone rescue member:@user`** to pull them out and earn **+100 XC**!",
             ephemeral=True,
         )
 
 
 async def handle_message(bot, db, message: discord.Message):
-    """Listen for chat messages to update activity timestamps and track cryo-thaw progress."""
+    """Listen for chat messages to update activity timestamps, track cryo-thaw, and award welcome party bonuses."""
     if not message.guild or message.author.bot:
         return
 
@@ -455,6 +491,25 @@ async def handle_message(bot, db, message: discord.Message):
         return
 
     touch_activity(db, message.author.id)
+
+    # Check Resurrection Welcome Party participation
+    guild_id = getattr(message.guild, "id", None)
+    if guild_id and guild_id in active_parties:
+        party = active_parties[guild_id]
+        now = time.time()
+        if now <= party["expires_at"]:
+            if message.channel.id == party["channel_id"] and message.author.id != party["revived_user_id"]:
+                if message.author.id not in party["claimed_users"]:
+                    party["claimed_users"].add(message.author.id)
+                    cash_reward = party["reward_cash"]
+                    db.execute("UPDATE players SET money=money+? WHERE user_id=?", (cash_reward, message.author.id))
+                    db.commit()
+                    try:
+                        await message.add_reaction("🎉")
+                    except (discord.HTTPException, discord.Forbidden):
+                        pass
+        else:
+            del active_parties[guild_id]
 
     status = member_status(db, message.author.id)
     if status and status["is_in_deadzone"]:
@@ -471,7 +526,7 @@ async def handle_message(bot, db, message: discord.Message):
                             f"🎉 {message.author.mention} **has fully melted their cryo-stasis seal!**\n\n"
                             f"🤝 **Next Step (Condition 2):** An active comrade can now run:\n"
                             f"`/deadzone rescue member:{message.author.mention}`\n\n"
-                            f"*(Rescuers receive a **+50 XC bounty** for pulling you out of the crypt!)*"
+                            f"*(Rescuers receive a **+100 XC bounty** for pulling you out of the crypt!)*"
                         ),
                         color=0x3498DB,
                     )
@@ -865,7 +920,8 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Staff can manage Deadzone members."), ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         success = await demote_to_deadzone(bot, db, member, reason=reason)
         if success:
             await interaction.followup.send(f"✅ Successfully demoted {member.mention} to Deadzone. Member/Music/Rank roles removed.", ephemeral=True)
@@ -879,7 +935,8 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Staff can manage Deadzone members."), ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         success = await revive_member(bot, db, member, triggered_by="admin")
         if success:
             await interaction.followup.send(f"✅ Successfully restored {member.mention} from Deadzone. All privileges restored.", ephemeral=True)
@@ -892,7 +949,8 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can trigger inactivity scans."), ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         demoted = await scan_guild_inactivity(bot, db, interaction.guild)
         names = ", ".join(m.display_name for m in demoted) if demoted else "None"
         await interaction.followup.send(f"🔍 **Deadzone Scan Complete.** Demoted `{len(demoted)}` members: {names}", ephemeral=True)
