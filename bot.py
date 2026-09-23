@@ -32,6 +32,7 @@ import casual_games
 import deadzone
 import gaming
 import lounges
+import suites
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -442,6 +443,16 @@ class XBot(discord.Client):
         self.add_view(lounges.LoungeHostControlView())
         for lid in range(1, 6):
             self.add_view(lounges.LoungeSquadJoinView(lid))
+        suites._bot = self
+        suites._db = db
+        suites.initialise(db)
+        try:
+            for req in db.execute("SELECT id FROM suite_requests WHERE status='pending'").fetchall():
+                self.add_view(suites.SuiteAdminReviewView(req["id"]))
+            for s in db.execute("SELECT id FROM suite_requests WHERE status='approved'").fetchall():
+                self.add_view(suites.SuiteHostControlView(s["id"]))
+        except Exception:
+            pass
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
 
         def hide_panel_commands(command_guild, allowed_names):
@@ -498,6 +509,38 @@ class XBot(discord.Client):
         leveling.start_voice_task(self, db)
         tier4.start_backup_task(self, db)
         deadzone.start_deadzone_task(self, db)
+
+    async def on_interaction(self, interaction: discord.Interaction):
+        if interaction.type == discord.InteractionType.component and interaction.data:
+            custom_id = str(interaction.data.get("custom_id", ""))
+            if custom_id.startswith("xbot:suite:approve:"):
+                req_id = int(custom_id.split(":")[-1])
+                view = suites.SuiteAdminReviewView(req_id)
+                btn = [c for c in view.children if getattr(c, "custom_id", None) == custom_id]
+                if btn:
+                    await btn[0].callback(interaction)
+                    return
+            elif custom_id.startswith("xbot:suite:reject:"):
+                req_id = int(custom_id.split(":")[-1])
+                view = suites.SuiteAdminReviewView(req_id)
+                btn = [c for c in view.children if getattr(c, "custom_id", None) == custom_id]
+                if btn:
+                    await btn[0].callback(interaction)
+                    return
+            elif custom_id.startswith("xbot:suite:invite:"):
+                suite_id = int(custom_id.split(":")[-1])
+                view = suites.SuiteHostControlView(suite_id)
+                btn = [c for c in view.children if getattr(c, "custom_id", None) == custom_id]
+                if btn:
+                    await btn[0].callback(interaction)
+                    return
+            elif custom_id.startswith("xbot:suite:kick:"):
+                suite_id = int(custom_id.split(":")[-1])
+                view = suites.SuiteHostControlView(suite_id)
+                btn = [c for c in view.children if getattr(c, "custom_id", None) == custom_id]
+                if btn:
+                    await btn[0].callback(interaction)
+                    return
 
 
 bot = XBot()

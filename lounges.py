@@ -348,7 +348,8 @@ def build_lobby_embed(db):
         f"• **Privacy:** Host can invite/kick members and toggle Private/Public anytime.\n"
         f"• **Voice Rewards:** Active chatters in Lounge 1~5 VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
         f"• **Cryo-Thaw:** Deadzone members in VC defrost **+1** every 3 minutes!\n"
-        f"• **Auto-Clean:** When the timer expires, the bot kicks VC, clears chat history, and resets permissions!"
+        f"• **Auto-Clean:** When the timer expires, the bot kicks VC, clears chat history, and resets permissions!\n"
+        f"• **👑 Private Suites (Lv.10+):** Want a custom, long-term private sanctuary? Click **[👑 Request Suite]** to apply to Server Administration!"
     )
 
     embed = discord.Embed(
@@ -356,7 +357,7 @@ def build_lobby_embed(db):
         description=desc,
         color=0x5865F2 if available_count > 0 else 0xE74C3C,
     )
-    embed.set_footer(text="X BOT · Click [🛎️ Request Lounge] below to reserve")
+    embed.set_footer(text="X BOT · Click [🛎️ Request Lounge] or [👑 Request Suite] below")
     return embed
 
 
@@ -520,6 +521,11 @@ class LoungeLobbyView(discord.ui.View):
 
         embed = build_lobby_embed(_db)
         await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Request Private Suite", emoji="👑", style=discord.ButtonStyle.success, custom_id="lounge_lobby_request_suite")
+    async def request_suite_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        import suites
+        await suites.handle_suite_request_start(interaction)
 
 
 class LoungeBookingSelectView(discord.ui.View):
@@ -1363,5 +1369,42 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
             await clear_and_reopen_lounge(bot, db, interaction.guild, i, reason=f"Admin clear_all by {interaction.user.display_name}")
 
         await interaction.followup.send("✅ **All 5 Lounges have been purged, permissions reset, and reopened!**", ephemeral=True)
+
+    @lounge_group.command(name="my_suite", description="View your active Private Suite and channel links")
+    async def lounge_my_suite(interaction: discord.Interaction):
+        import suites
+        suite = suites.get_active_suite_by_host(db, interaction.user.id)
+        if not suite:
+            await interaction.response.send_message("ℹ️ You do not currently have an active Private Suite.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"👑 Your Private Suite: {suite['custom_name']}",
+            description=(
+                f"• 🔊 **Voice Channel:** <#{suite['voice_channel_id']}>\n"
+                f"• 💬 **Text Channel:** <#{suite['text_channel_id']}>\n"
+                f"• ⏳ **Duration:** `{suite['duration_str']}`\n"
+                f"• 📅 **Approved:** <t:{suite['reviewed_at']}:R>"
+            ),
+            color=0x2ECC71,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @lounge_group.command(name="delete_suite", description="Admin: Delete a private suite and its channels")
+    @app_commands.describe(suite_id="The ID of the private suite application")
+    async def lounge_delete_suite(interaction: discord.Interaction, suite_id: int):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message("🔒 Only Administrators can delete Private Suites.", ephemeral=True)
+            return
+
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        import suites
+        success = await suites.delete_suite_channels(bot, db, interaction.guild, suite_id, reason=f"Deleted by admin {interaction.user.display_name}")
+        if success:
+            await interaction.followup.send(f"✅ **Private Suite #{suite_id}** and its channels have been deleted.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"⚠️ Suite #{suite_id} not found.", ephemeral=True)
 
     bot.tree.add_command(lounge_group)
