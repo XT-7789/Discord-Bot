@@ -748,6 +748,7 @@ class AdminPanel(discord.ui.LayoutView):
             self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=3))
             self.add_item(AdminActionButton("post_tester_feedback", "Post Feedback", emoji="🧪", style=discord.ButtonStyle.primary, row=3))
             self.add_item(AdminActionButton("server_post_deadzone", "Post Deadzone", emoji="⚰️", style=discord.ButtonStyle.secondary, row=3))
+            self.add_item(AdminActionButton("server_post_lounge_lobby", "Post Lounge Lobby", emoji="🛋️", style=discord.ButtonStyle.primary, row=3))
             self.add_item(AdminActionButton("server_say", "Post /say", emoji="📢", style=discord.ButtonStyle.primary, row=4))
             self.add_item(AdminActionButton("server_toggle_level", "Toggle Notices", emoji="🔔", style=discord.ButtonStyle.secondary, row=4))
             self.add_item(AdminActionButton("server_set_level_channel", "Set Level Channel", emoji="📌", style=discord.ButtonStyle.secondary, row=4))
@@ -1276,6 +1277,19 @@ class AdminPanel(discord.ui.LayoutView):
             embed = deadzone.build_deadzone_board_embed()
             await target_ch.send(embed=embed, view=deadzone.DeadzoneReviveView())
             await self.refresh(interaction, notice=f"✅ Deadzone Revival board posted in <#{target_cid}>!")
+            return
+        if action == "server_post_lounge_lobby":
+            target_cid, target_ch = self._resolve_target_channel(interaction)
+            if not target_ch:
+                await self.refresh(interaction, notice="❌ Target channel was not found.")
+                return
+            import lounges
+            embed = lounges.build_lobby_embed(self.db)
+            view = lounges.LoungeLobbyView()
+            msg = await target_ch.send(embed=embed, view=view)
+            lounges.set_setting(self.db, "lounge_lobby_channel_id", str(target_cid))
+            lounges.set_setting(self.db, "lounge_lobby_message_id", str(msg.id))
+            await self.refresh(interaction, notice=f"✅ Lounge Lobby panel posted in <#{target_cid}>!")
             return
         if action == "server_say":
             await interaction.response.send_modal(ServerSayModal(self))

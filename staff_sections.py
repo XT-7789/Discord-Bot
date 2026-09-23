@@ -103,7 +103,7 @@ def build(panel, content):
         section('Armed Forces & Military Manager','Select a commander to inspect or edit army, air, navy, capital health and resources.',user_select+war_actions+legacy_tools)
     elif panel.page=='server':
         channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
-        server_actions=action('server_post_gaming_roles','post_verification','post_tester_feedback','server_post_deadzone','server_say','server_toggle_level','server_set_level_channel','server_edit_template','server_lottery_draw')
+        server_actions=action('server_post_gaming_roles','post_verification','post_tester_feedback','server_post_deadzone','server_post_lounge_lobby','server_say','server_toggle_level','server_set_level_channel','server_edit_template','server_lottery_draw')
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))
         for field in fields:section(field.name,field.value)
         section('Server Channel & Action Controls','Select a channel above, then choose a setting or panel action below.',channel_select+server_actions+legacy_tools)

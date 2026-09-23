@@ -31,6 +31,7 @@ import system_ui
 import casual_games
 import deadzone
 import gaming
+import lounges
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -142,6 +143,7 @@ tier8.initialise(db)
 casual_games.initialise(db)
 deadzone.initialise(db)
 gaming.initialise(db)
+lounges.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -289,6 +291,8 @@ PUBLIC_PLAYER_COMMANDS = {
     "coinflip", "blackjack", "slot", "dice", "roulette", "scratch",
     # Gaming Zone & LFG squad recruitment
     "gaming", "lfg",
+    # Dynamic 5 Lounges reservation and management
+    "lounge",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -434,6 +438,8 @@ class XBot(discord.Client):
         applications.setup_persistent_views(self, db)
         tester_feedback.setup_persistent_views(self, db)
         self.add_view(deadzone.DeadzoneReviveView())
+        self.add_view(lounges.LoungeLobbyView())
+        self.add_view(lounges.LoungeHostControlView())
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
 
         def hide_panel_commands(command_guild, allowed_names):
@@ -700,6 +706,7 @@ async def on_ready():
         print(f"Season settlement: {summary}")
     if not season_settlement_loop.is_running():
         season_settlement_loop.start()
+    lounges.start_lounge_loop(bot, db)
 
 
 @bot.event
@@ -1042,6 +1049,8 @@ for _retired_command in (
     "setannouncement", "announcementshow", "setannouncementchat",
 ):
     bot.tree.remove_command(_retired_command)
+
+lounges.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 # Mark all registered commands as wrapped for consistency and testing
 for _cmd in bot.tree.get_commands():
