@@ -707,6 +707,10 @@ async def on_ready():
     if not season_settlement_loop.is_running():
         season_settlement_loop.start()
     lounges.start_lounge_loop(bot, db)
+    try:
+        await deadzone.update_crypt_board(bot, db)
+    except Exception:
+        pass
     # Startup audit: remove regular Music role from members who have Premium Music
     for guild in bot.guilds:
         for member in guild.members:

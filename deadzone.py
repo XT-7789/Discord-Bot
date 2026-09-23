@@ -1,6 +1,7 @@
 """Deadzone inactivity, role demotion, and resurrection system for X BOT."""
 import json
 import random
+import sqlite3
 import time
 from typing import Optional
 
@@ -84,6 +85,13 @@ def initialise(db):
     for key, value in DEFAULTS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, value))
 
+    # Migration: Update existing database entries that have old deprecated defaults
+    db.execute("UPDATE economy_settings SET value='250' WHERE key='deadzone_rescue_reward_xc' AND value in ('50', '100')")
+    db.execute("UPDATE economy_settings SET value='100' WHERE key='deadzone_revive_bonus_xp' AND value='50'")
+    db.execute("UPDATE economy_settings SET value='50000' WHERE key='deadzone_rescue_reward_cash' AND value in ('0', '')")
+    db.execute("UPDATE economy_settings SET value='150' WHERE key='deadzone_rescue_reward_xp' AND value in ('0', '')")
+    db.commit()
+
     db.execute("""CREATE TABLE IF NOT EXISTS deadzone_members (
         user_id INTEGER PRIMARY KEY,
         last_active_at INTEGER NOT NULL DEFAULT 0,
@@ -114,13 +122,16 @@ def initialise(db):
         rows = db.execute("SELECT user_id, last_message_xp, last_voice_xp FROM xp_profiles").fetchall()
         now = int(time.time())
         for r in rows:
-            latest = max(r["last_message_xp"] or 0, r["last_voice_xp"] or 0)
+            uid = r[0] if isinstance(r, tuple) else r["user_id"]
+            msg_xp = r[1] if isinstance(r, tuple) else (r["last_message_xp"] or 0)
+            vc_xp = r[2] if isinstance(r, tuple) else (r["last_voice_xp"] or 0)
+            latest = max(msg_xp or 0, vc_xp or 0)
             ts = latest if latest > 0 else now
             db.execute(
                 "INSERT OR IGNORE INTO deadzone_members(user_id, last_active_at) VALUES(?,?)",
-                (r["user_id"], ts),
+                (uid, ts),
             )
-    except sqlite3.OperationalError:
+    except Exception:
         pass
 
     db.execute("""CREATE TABLE IF NOT EXISTS command_permissions (
@@ -430,8 +441,17 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     return True
 
 
-def build_deadzone_board_embed():
+def build_deadzone_board_embed(db=None):
     """Build the official crypt announcement embed displayed with the revival button."""
+    database = db or _db
+    bonus_cash = int(setting(database, "deadzone_revive_bonus_cash") or 100000) if database else 100000
+    bonus_xc = int(setting(database, "deadzone_revive_bonus_xc") or 150) if database else 150
+    bonus_xp = int(setting(database, "deadzone_revive_bonus_xp") or 100) if database else 100
+
+    rescue_cash = int(setting(database, "deadzone_rescue_reward_cash") or 50000) if database else 50000
+    rescue_xc = int(setting(database, "deadzone_rescue_reward_xc") or 250) if database else 250
+    rescue_xp = int(setting(database, "deadzone_rescue_reward_xp") or 150) if database else 150
+
     embed = discord.Embed(
         title="💀 [THE DEADZONE CRYPT]",
         description=(
@@ -444,18 +464,43 @@ def build_deadzone_board_embed():
             "• Tag assigned: **Deadzone**.\n\n"
             "───\n\n"
             "### ⚡ HOW TO RESURRECT (1+2 RESPAWN PROTOCOL):\n"
-            "1. **Condition 1 (Thaw Out):** Send **5 chat messages** (e.g. in `#general`) to melt your cryo-stasis seal.\n"
-            "2. **Condition 2 (Teammate Rescue):** Once thawed (5/5), have an active comrade rescue you with **`/deadzone rescue member:@you`** or click **`[ 🤝 Rescue Teammate ]`** below.\n\n"
-            "🎁 **Resurrection Rewards:**\n"
-            "• Instant restoration of **Member**, **Music**, and all earned **Level rank tags**.\n"
-            "• **`+150 XC`** survival bonus added to your balance.\n"
-            "• **`+50 XP`** activity boost!\n"
-            "• Rescuer receives a **`+50 XC`** bounty for pulling you out!"
+            "1. **Condition 1 (Thaw Out):**\n"
+            "   • **Chat:** Send **5 messages** in text channels to melt your seal, **OR**\n"
+            "   • **Lounge Voice:** Hang out in **Lounge 1~5 VC** (defrosts **+1** every 3 minutes)!\n"
+            "2. **Condition 2 (Teammate Rescue):**\n"
+            "   • Once thawed (**5/5**), have an active comrade rescue you with:\n"
+            "     **`/deadzone rescue member:@you`** or click **`[ 🤝 Rescue Teammate ]`** below.\n\n"
+            "🎁 **Resurrection Rewards (For You):**\n"
+            "• Instant restoration of **Member**, **Music** *(or Premium Music)*, and all earned **Level rank tags**.\n"
+            f"• **`+${bonus_cash:,} Cash`** & **`+{bonus_xc} XC`** survival bonus added to your balance!\n"
+            f"• **`+{bonus_xp} XP`** activity boost!\n\n"
+            "💰 **Hero Rescue Bounty (For Rescuer):**\n"
+            f"• Rescuer receives **`+${rescue_cash:,} Cash`**, **`+{rescue_xc} XC`**, and **`+{rescue_xp} XP`** bounty!"
         ),
         color=0x4A4D52,
     )
     embed.set_footer(text="X BOT · Deadzone Division · 1+2 Respawn Protocol")
     return embed
+
+
+async def update_crypt_board(bot, db):
+    """Update existing crypt announcement message if recorded in economy_settings."""
+    channel_id = int(setting(db, "deadzone_crypt_channel_id") or 0)
+    message_id = int(setting(db, "deadzone_crypt_message_id") or 0)
+    if not channel_id or not message_id:
+        return False
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        return False
+    try:
+        msg = await channel.fetch_message(message_id)
+        if msg:
+            embed = build_deadzone_board_embed(db)
+            await msg.edit(embed=embed, view=DeadzoneReviveView())
+            return True
+    except (discord.HTTPException, discord.NotFound):
+        pass
+    return False
 
 
 class DeadzoneReviveView(discord.ui.View):
@@ -999,8 +1044,9 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(crypt_channel.id),))
             updates.append(f"🪦 **Crypt Channel:** {crypt_channel.mention}")
             try:
-                embed = build_deadzone_board_embed()
-                await crypt_channel.send(embed=embed, view=DeadzoneReviveView())
+                embed = build_deadzone_board_embed(db)
+                msg = await crypt_channel.send(embed=embed, view=DeadzoneReviveView())
+                db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_message_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(msg.id),))
                 updates.append("⚡ *Resurrection board automatically posted in crypt channel!*")
             except discord.HTTPException:
                 pass

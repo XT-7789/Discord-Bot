@@ -1274,8 +1274,11 @@ class AdminPanel(discord.ui.LayoutView):
             if not target_ch:
                 await self.refresh(interaction, notice="❌ Target channel was not found.")
                 return
-            embed = deadzone.build_deadzone_board_embed()
-            await target_ch.send(embed=embed, view=deadzone.DeadzoneReviveView())
+            embed = deadzone.build_deadzone_board_embed(self.db)
+            msg = await target_ch.send(embed=embed, view=deadzone.DeadzoneReviveView())
+            self.db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(target_cid),))
+            self.db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_message_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(msg.id),))
+            self.db.commit()
             await self.refresh(interaction, notice=f"✅ Deadzone Revival board posted in <#{target_cid}>!")
             return
         if action == "server_post_lounge_lobby":
