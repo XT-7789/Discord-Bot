@@ -9,6 +9,7 @@ Manages 5 dedicated server Lounges (Text + Voice channels):
 - Provides a persistent Public Lounge Lobby Panel for easy one-click booking.
 """
 
+import asyncio
 import json
 import random
 import time
@@ -40,6 +41,7 @@ DEFAULT_SETTINGS = {
     "lounge_cooldown_seconds": "900",  # 15 minutes cooldown after hosting
     "lounge_lobby_channel_id": "0",
     "lounge_lobby_message_id": "0",
+    "verification_member_role_id": "1505437941647015986",
 }
 
 _bot = None
@@ -339,9 +341,12 @@ def build_lobby_embed(db):
         + "\n\n".join(lines)
         + "\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📜 **Reservation Rules:**\n"
+        f"📜 **Reservation Rules & Requirements:**\n"
+        f"• **Eligibility:** Requires the <@&1505437941647015986> role (Level 2+ or verified Member) to request.\n"
         f"• **Duration:** Choose 30m, 1h, 2h, or 3h initial booking (Extendable up to 5h max!).\n"
         f"• **Privacy:** Host can invite/kick members and toggle Private/Public anytime.\n"
+        f"• **Voice Rewards:** Active chatters in Lounge 1~5 VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
+        f"• **Cryo-Thaw:** Deadzone members in VC defrost **+1** every 3 minutes!\n"
         f"• **Auto-Clean:** When the timer expires, the bot kicks VC, clears chat history, and resets permissions!"
     )
 
@@ -427,6 +432,32 @@ class LoungeLobbyView(discord.ui.View):
         global _db
         if not _db:
             await interaction.response.send_message("Database unavailable. Please try again shortly.", ephemeral=True)
+            return
+
+        # Check Member role requirement
+        val = setting(_db, "verification_member_role_id")
+        member_role_id = int(val) if val and val.isdigit() and int(val) > 0 else 1505437941647015986
+        user_roles = getattr(interaction.user, "roles", [])
+        is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
+        has_member = any(r.id == member_role_id for r in user_roles) or is_admin
+
+        # Check Deadzone stasis
+        dz_status = deadzone.member_status(_db, interaction.user.id)
+        if dz_status and dz_status["is_in_deadzone"]:
+            await interaction.response.send_message(
+                "💀 **Access Denied:** You are currently trapped in cryogenic stasis in the **Deadzone**!\n"
+                "You must thaw out and have a comrade rescue you back to life before requesting a private lounge.",
+                ephemeral=True,
+            )
+            return
+
+        if not has_member:
+            await interaction.response.send_message(
+                f"🔒 **Member Role Required:**\n"
+                f"You need the <@&{member_role_id}> role (Level 2+ or verified Member) to request a Lounge!\n"
+                f"Please verify or participate in chat to unlock Lounge booking.",
+                ephemeral=True,
+            )
             return
 
         # Check if user already hosts a lounge
@@ -572,6 +603,15 @@ class LoungeBookingSelectView(discord.ui.View):
 
         if not _db:
             await interaction.followup.send("Database error.", ephemeral=True)
+            return
+
+        # Double check Member role
+        val = setting(_db, "verification_member_role_id")
+        member_role_id = int(val) if val and val.isdigit() and int(val) > 0 else 1505437941647015986
+        user_roles = getattr(interaction.user, "roles", [])
+        is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
+        if not is_admin and not any(r.id == member_role_id for r in user_roles):
+            await interaction.followup.send("🔒 You need the Member role to reserve a lounge.", ephemeral=True)
             return
 
         # Double check if lounge is still free
@@ -1023,6 +1063,13 @@ def start_lounge_loop(bot: discord.Client, db):
     _db = db
     if not lounge_check_loop.is_running():
         lounge_check_loop.start()
+
+
+@lounge_check_loop.before_loop
+async def before_lounge_check():
+    if _bot:
+        await _bot.wait_until_ready()
+        await refresh_lobby_message(_bot, _db)
 
 
 # ---------- Slash Commands ----------

@@ -7,6 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import deadzone
 import discord
 import lounges
 
@@ -70,9 +71,12 @@ class LoungesTests(unittest.IsolatedAsyncioTestCase):
         self.db.row_factory = sqlite3.Row
         self.db.execute("CREATE TABLE economy_settings (key TEXT PRIMARY KEY, value TEXT)")
         lounges.initialise(self.db)
+        deadzone.initialise(self.db)
         self.guild = DummyGuild()
         self.bot = MagicMock(spec=discord.Client)
         self.bot.get_channel = self.guild.get_channel
+        lounges._db = self.db
+        lounges._bot = self.bot
 
     def tearDown(self):
         self.db.close()
@@ -168,6 +172,7 @@ class LoungesTests(unittest.IsolatedAsyncioTestCase):
         lobby_embed = lounges.build_lobby_embed(self.db)
         self.assertIn("RESERVATION LOBBY", lobby_embed.title)
         self.assertIn("Lounge 1", lobby_embed.description)
+        self.assertIn("1505437941647015986", lobby_embed.description)
 
         host_embed = lounges.build_host_control_embed({
             "name": "Lounge 1",
@@ -178,6 +183,43 @@ class LoungesTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertIn("LOUNGE 1 HOST CONTROL HUB", host_embed.title)
         self.assertIn("Private", host_embed.description)
+
+    async def test_request_lounge_requires_member_role(self):
+        view = lounges.LoungeLobbyView()
+        request_btn = next(x for x in view.children if getattr(x, "custom_id", None) == "lounge_lobby_request")
+
+        # 1. Non-member (e.g. Guest or unverified)
+        guest_user = MagicMock(spec=discord.Member)
+        guest_user.id = 999111
+        guest_user.roles = []
+        guest_user.guild_permissions = SimpleNamespace(administrator=False)
+
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.user = guest_user
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+
+        await request_btn.callback(interaction)
+        interaction.response.send_message.assert_called_once()
+        call_args = interaction.response.send_message.call_args[0][0]
+        self.assertIn("Member Role Required", call_args)
+
+        # 2. Member with Member role (1505437941647015986)
+        member_role = MagicMock(spec=discord.Role)
+        member_role.id = 1505437941647015986
+        valid_user = MagicMock(spec=discord.Member)
+        valid_user.id = 999222
+        valid_user.roles = [member_role]
+        valid_user.guild_permissions = SimpleNamespace(administrator=False)
+
+        interaction_valid = MagicMock(spec=discord.Interaction)
+        interaction_valid.user = valid_user
+        interaction_valid.response = MagicMock()
+        interaction_valid.response.send_message = AsyncMock()
+
+        await request_btn.callback(interaction_valid)
+        interaction_valid.response.send_message.assert_called_once()
+        self.assertIn("Select your Lounge & Booking Details", interaction_valid.response.send_message.call_args[0][0])
 
 
 if __name__ == "__main__":
