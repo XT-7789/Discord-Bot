@@ -336,20 +336,22 @@ def build_lobby_embed(db):
             )
 
     desc = (
-        f"Welcome to the **X BOT Lounge System**! Members can reserve a dedicated private "
-        f"Lounge for study groups, gaming squads, or private hangs.\n\n"
-        f"**Live Availability:** `{available_count}/5 Lounges Free`\n\n"
+        f"### 🛋️ Welcome to Server Lounges & Suites\n"
+        f"Reserve an instant private lounge for squad gaming and study sessions, or apply for an exclusive long-term Private Suite.\n\n"
+        f"📊 **Live Status:** `{available_count}/5 Lounges Free`\n\n"
         + "\n\n".join(lines)
         + "\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📜 **Reservation Rules & Requirements:**\n"
-        f"• **Eligibility:** Requires the <@&1505437941647015986> role (Level 2+ or verified Member) to request.\n"
-        f"• **Duration:** Choose 30m, 1h, 2h, or 3h initial booking (Extendable up to 5h max!).\n"
-        f"• **Privacy:** Host can invite/kick members and toggle Private/Public anytime.\n"
-        f"• **Voice Rewards:** Active chatters in Lounge 1~5 VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
-        f"• **Cryo-Thaw:** Deadzone members in VC defrost **+1** every 3 minutes!\n"
-        f"• **Auto-Clean:** When the timer expires, the bot kicks VC, clears chat history, and resets permissions!\n"
-        f"• **👑 Private Suites (Lv.10+):** Want a custom, long-term private sanctuary? Click **[👑 Request Suite]** to apply to Server Administration!"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"### 📜 Booking Rules & Access\n"
+        f"> 🛡️ **Eligibility:** Requires <@&1505437941647015986> (`Level 2+` or verified Member)\n"
+        f"> ⏱️ **Duration:** Initial 30m ~ 3h booking · Extendable up to 5h max\n"
+        f"> 🔒 **Host Controls:** Whitelist friends, kick trolls, toggle Private/Public & call Squads\n"
+        f"> 🧹 **Auto-Clean:** Bot automatically clears chat, disconnects VC & resets permissions on expiry\n\n"
+        f"### 🎁 Voice Perks & Activity Rewards\n"
+        f"> 💰 **Voice Rewards:** Active chatters in VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
+        f"> 🧊 **Cryo-Thaw:** Deadzone sleepers defrost **+1** every 3 minutes in Lounge VC!\n\n"
+        f"### 👑 Exclusive Private Suites (Level 10+)\n"
+        f"> Want a permanent, custom-named sanctuary? Level 10+ Elite members can click **[👑 Request Private Suite]** below to apply to Server Administration!"
     )
 
     embed = discord.Embed(
@@ -357,7 +359,7 @@ def build_lobby_embed(db):
         description=desc,
         color=0x5865F2 if available_count > 0 else 0xE74C3C,
     )
-    embed.set_footer(text="X BOT · Click [🛎️ Request Lounge] or [👑 Request Suite] below")
+    embed.set_footer(text="X BOT · Select an action button below to proceed")
     return embed
 
 
@@ -429,7 +431,7 @@ class LoungeLobbyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Request Lounge", emoji="🛎️", style=discord.ButtonStyle.primary, custom_id="lounge_lobby_request")
+    @discord.ui.button(label="Request Lounge (1~3h)", emoji="🛎️", style=discord.ButtonStyle.primary, row=0, custom_id="lounge_lobby_request")
     async def request_lounge_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         if not _db:
@@ -488,7 +490,12 @@ class LoungeLobbyView(discord.ui.View):
         view = LoungeBookingSelectView(free_lounges)
         await interaction.response.send_message("🛋️ **Select your Lounge & Booking Details:**", view=view, ephemeral=True)
 
-    @discord.ui.button(label="My Active Lounge", emoji="📋", style=discord.ButtonStyle.secondary, custom_id="lounge_lobby_mystatus")
+    @discord.ui.button(label="Request Private Suite (Lv.10+)", emoji="👑", style=discord.ButtonStyle.success, row=0, custom_id="lounge_lobby_request_suite")
+    async def request_suite_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        import suites
+        await suites.handle_suite_request_start(interaction)
+
+    @discord.ui.button(label="My Active Lounge", emoji="📋", style=discord.ButtonStyle.secondary, row=1, custom_id="lounge_lobby_mystatus")
     async def my_status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         if not _db:
@@ -512,7 +519,7 @@ class LoungeLobbyView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="Refresh Lobby", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="lounge_lobby_refresh")
+    @discord.ui.button(label="Refresh Lobby", emoji="🔄", style=discord.ButtonStyle.secondary, row=1, custom_id="lounge_lobby_refresh")
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         if not _db:
@@ -521,11 +528,6 @@ class LoungeLobbyView(discord.ui.View):
 
         embed = build_lobby_embed(_db)
         await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="Request Private Suite", emoji="👑", style=discord.ButtonStyle.success, custom_id="lounge_lobby_request_suite")
-    async def request_suite_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        import suites
-        await suites.handle_suite_request_start(interaction)
 
 
 class LoungeBookingSelectView(discord.ui.View):
