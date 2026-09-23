@@ -730,6 +730,14 @@ async def server_settings(interaction: discord.Interaction):
     if not is_council_or_admin(interaction):
         await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Moderators can manage server settings."), ephemeral=True)
         return
+    try:
+        import staff_panel
+        panel = staff_panel.AdminPanel(bot, db, is_council_or_admin, interaction.user.id, page="server")
+        embed = panel.build_embed()
+        await interaction.response.send_message(embed=embed, view=panel, ephemeral=True)
+        return
+    except Exception:
+        pass
     await interaction.response.send_message(embed=_server_settings_embed(), view=ServerSettingsView(interaction.user.id), ephemeral=True)
 
 

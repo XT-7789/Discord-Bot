@@ -12,6 +12,7 @@ import re
 import logging
 from pathlib import Path
 from contextvars import ContextVar
+from types import SimpleNamespace
 import svip
 import player_overview
 import casual_games
@@ -235,6 +236,14 @@ def register(bot, db, create_player):
 
     def render_page(owner,key='menu',notice='',member=None):
         player=db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
+        if not player:
+            user_obj = member or SimpleNamespace(id=owner, display_name=f"Player {owner}")
+            try:
+                player = create_player(user_obj)
+            except Exception:
+                db.execute("INSERT OR IGNORE INTO players (user_id, nation_name, capital_name, display_name) VALUES (?, 'New Nation', 'New Capital', ?)", (owner, f"Player {owner}"))
+                db.commit()
+                player = db.execute('SELECT * FROM players WHERE user_id=?',(owner,)).fetchone()
         if key=='overview':return player_overview.OverviewView(bot,db,owner,notice=notice)
         if key=='mission_weekly' and tier5.profile_summary(db,owner)['level']<2:
             return page(owner,'missions','Weekly missions unlock at Nation Level 2.')

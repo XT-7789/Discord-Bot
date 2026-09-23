@@ -3608,6 +3608,14 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
         if not is_war_staff(interaction):
             await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Moderators can inspect another member's armed forces."), ephemeral=True)
             return
+        try:
+            import staff_panel
+            panel = staff_panel.AdminPanel(bot, db, is_war_staff, interaction.user.id, page="war_tools", target_user_id=user.id)
+            embed = panel.build_embed()
+            await interaction.response.send_message(embed=embed, view=panel, ephemeral=True)
+            return
+        except Exception:
+            pass
         target = create_player(user)
         units = [u for u in war_system.units_for_player(db, user.id, enabled_only=True) if int(u["quantity"] or 0) > 0]
         groups = {"land": [], "air": [], "navy": []}

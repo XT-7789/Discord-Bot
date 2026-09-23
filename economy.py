@@ -654,7 +654,15 @@ def register_commands(bot, db, create_player) -> None:
     @app_commands.choices(currency=[app_commands.Choice(name="XC Wallet", value="xc"), app_commands.Choice(name="XC Bank", value="bank_xc"), app_commands.Choice(name="Cash", value="money"), app_commands.Choice(name="XCrystals", value="xcrystals")])
     async def economy_adjust(interaction: discord.Interaction, user: discord.Member, currency: app_commands.Choice[str], amount: app_commands.Range[int, -100000000, 100000000], reason: str):
         if amount == 0:
-            await interaction.response.send_message("Amount cannot be 0.", ephemeral=True); return
+            try:
+                import staff_panel
+                panel = staff_panel.AdminPanel(bot, db, is_economy_staff, interaction.user.id, page="assets", target_user_id=user.id)
+                embed = panel.build_embed()
+                await interaction.response.send_message(embed=embed, view=panel, ephemeral=True)
+                return
+            except Exception:
+                await interaction.response.send_message("Amount cannot be 0.", ephemeral=True)
+                return
         player = create_player(user); column = currency.value
         if player[column] + amount < 0:
             await interaction.response.send_message(view=xbot_ui.danger("Adjustment Rejected", "This adjustment would make the balance negative."), ephemeral=True); return

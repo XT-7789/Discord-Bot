@@ -8,6 +8,9 @@ from discord import app_commands
 
 import applications
 import tester_feedback
+import gaming
+import leveling
+import war_system
 
 
 PAGES = {
@@ -133,6 +136,43 @@ class TesterFeedbackSelect(discord.ui.Select):
         await self.view.refresh(interaction)
 
 
+class AdminUserSelect(discord.ui.UserSelect):
+    def __init__(self, placeholder="Select a player…", default_user_id=None, row=None):
+        kwargs = {"placeholder": placeholder, "min_values": 1, "max_values": 1}
+        if default_user_id and int(default_user_id) > 0:
+            kwargs["default_values"] = [discord.Object(id=int(default_user_id))]
+        if row is not None:
+            kwargs["row"] = row
+        super().__init__(**kwargs)
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await self.view.interaction_check(interaction):
+            return
+        self.view.target_user_id = self.values[0].id
+        await self.view.refresh(interaction)
+
+
+class AdminChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, placeholder="Select a text channel…", default_channel_id=None, row=None):
+        kwargs = {
+            "placeholder": placeholder,
+            "channel_types": [discord.ChannelType.text],
+            "min_values": 1,
+            "max_values": 1,
+        }
+        if default_channel_id and str(default_channel_id).isdigit() and int(default_channel_id) > 0:
+            kwargs["default_values"] = [discord.Object(id=int(default_channel_id))]
+        if row is not None:
+            kwargs["row"] = row
+        super().__init__(**kwargs)
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await self.view.interaction_check(interaction):
+            return
+        self.view.target_channel_id = self.values[0].id
+        await self.view.refresh(interaction)
+
+
 class StaffModal(discord.ui.Modal):
     async def on_error(self, interaction, error):
         self.panel.db.rollback()
@@ -232,14 +272,350 @@ class RewardCodeModal(StaffModal, title="Create reward code"):
         await interaction.response.edit_message(embed=None, view=replacement)
 
 
+class AssetEditMoneyModal(StaffModal, title="Edit Player Currency"):
+    currency = discord.ui.TextInput(
+        label="Currency (money, xc, bank_xc, xcrystals)",
+        default="money",
+        placeholder="money (Cash), xc, bank_xc, or xcrystals",
+        max_length=20,
+    )
+    amount = discord.ui.TextInput(
+        label="Amount (+ to add, - to deduct)",
+        placeholder="Example: +5000 or -200",
+        max_length=20,
+    )
+    reason = discord.ui.TextInput(
+        label="Reason / Audit Note",
+        placeholder="Staff adjustment",
+        required=False,
+        max_length=200,
+    )
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        raw_curr = str(self.currency).strip().lower()
+        curr_map = {
+            "money": "money",
+            "cash": "money",
+            "wc": "money",
+            "xc": "xc",
+            "wallet": "xc",
+            "bank": "bank_xc",
+            "bank_xc": "bank_xc",
+            "xcrystals": "xcrystals",
+            "crystals": "xcrystals",
+        }
+        if raw_curr not in curr_map:
+            await interaction.response.send_message("❌ Invalid currency. Use `money` (Cash), `xc`, `bank_xc`, or `xcrystals`.", ephemeral=True)
+            return
+        col = curr_map[raw_curr]
+        raw_amt = str(self.amount).strip().replace(",", "")
+        try:
+            val = int(raw_amt)
+        except ValueError:
+            await interaction.response.send_message("❌ Amount must be an integer (e.g. +500 or -200).", ephemeral=True)
+            return
+
+        target_uid = self.panel.target_user_id or self.panel.owner_id
+        self.panel.db.execute("INSERT OR IGNORE INTO players (user_id, nation_name, display_name, money, xc) VALUES (?, 'New Nation', ?, 1000, 100)", (target_uid, f"User {target_uid}"))
+        self.panel.db.execute(f"UPDATE players SET {col} = MAX(0, {col} + ?) WHERE user_id = ?", (val, target_uid))
+        now = int(time.time())
+        note = str(self.reason).strip() or "Staff adjustment"
+        self.panel.db.execute(
+            "INSERT INTO economy_logs (user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+            (target_uid, "staff_economy_adjust", f"{col} adjusted by {val:+,} ({note})", now),
+        )
+        self.panel.db.commit()
+        await interaction.response.defer()
+        notice = f"✅ Adjusted `{col}` for <@{target_uid}> by **{val:+,}**. Reason: {note}"
+        await self.panel.refresh(interaction, notice=notice)
+
+
+class AssetSpawnItemModal(StaffModal, title="Spawn Item to Player"):
+    item_id = discord.ui.TextInput(
+        label="Item ID",
+        placeholder="e.g. iron_sword, first_aid_kit",
+        max_length=50,
+    )
+    quantity = discord.ui.TextInput(
+        label="Quantity",
+        default="1",
+        max_length=10,
+    )
+    reason = discord.ui.TextInput(
+        label="Reason / Audit Note",
+        placeholder="Staff grant",
+        required=False,
+        max_length=200,
+    )
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        clean_item = str(self.item_id).strip()
+        if not clean_item:
+            await interaction.response.send_message("❌ Item ID is required.", ephemeral=True)
+            return
+        try:
+            qty = max(1, int(str(self.quantity).strip()))
+        except ValueError:
+            await interaction.response.send_message("❌ Quantity must be a positive whole number.", ephemeral=True)
+            return
+
+        target_uid = self.panel.target_user_id or self.panel.owner_id
+        self.panel.db.execute(
+            "INSERT INTO inventories (user_id, item_id, quantity) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + excluded.quantity",
+            (target_uid, clean_item, qty),
+        )
+        now = int(time.time())
+        note = str(self.reason).strip() or "Staff spawn"
+        self.panel.db.execute(
+            "INSERT INTO economy_logs (user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+            (target_uid, "staff_spawn_item", f"Spawned {qty}x {clean_item} ({note})", now),
+        )
+        self.panel.db.commit()
+        await interaction.response.defer()
+        await self.panel.refresh(interaction, notice=f"✅ Spawned **{qty}× `{clean_item}`** for <@{target_uid}>.")
+
+
+class AssetRemoveItemModal(StaffModal, title="Remove Item from Player"):
+    item_id = discord.ui.TextInput(
+        label="Item ID",
+        placeholder="e.g. iron_sword",
+        max_length=50,
+    )
+    quantity = discord.ui.TextInput(
+        label="Quantity to remove",
+        default="1",
+        max_length=10,
+    )
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        clean_item = str(self.item_id).strip()
+        try:
+            qty = max(1, int(str(self.quantity).strip()))
+        except ValueError:
+            await interaction.response.send_message("❌ Quantity must be a positive whole number.", ephemeral=True)
+            return
+
+        target_uid = self.panel.target_user_id or self.panel.owner_id
+        row = self.panel.db.execute("SELECT quantity FROM inventories WHERE user_id=? AND item_id=?", (target_uid, clean_item)).fetchone()
+        if not row:
+            await interaction.response.send_message(f"❌ Player does not have `{clean_item}` in their backpack.", ephemeral=True)
+            return
+
+        current_qty = row["quantity"]
+        new_qty = current_qty - qty
+        if new_qty <= 0:
+            self.panel.db.execute("DELETE FROM inventories WHERE user_id=? AND item_id=?", (target_uid, clean_item))
+        else:
+            self.panel.db.execute("UPDATE inventories SET quantity=? WHERE user_id=? AND item_id=?", (new_qty, target_uid, clean_item))
+        now = int(time.time())
+        self.panel.db.execute(
+            "INSERT INTO economy_logs (user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+            (target_uid, "staff_remove_item", f"Removed {qty}x {clean_item} (was {current_qty})", now),
+        )
+        self.panel.db.commit()
+        await interaction.response.defer()
+        await self.panel.refresh(interaction, notice=f"✅ Removed **{qty}× `{clean_item}`** from <@{target_uid}> (Remaining: `{max(0, new_qty)}`).")
+
+
+class WarEditTroopsModal(StaffModal, title="Edit Armed Forces Troops"):
+    branch = discord.ui.TextInput(
+        label="Branch (land, air, navy)",
+        default="land",
+        max_length=10,
+    )
+    amount = discord.ui.TextInput(
+        label="Adjustment (+/- amount or set count)",
+        placeholder="e.g. +50 or -10 or 100",
+        max_length=15,
+    )
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        b = str(self.branch).strip().lower()
+        branch_map = {"land": "land_army", "air": "air_army", "navy": "navy"}
+        if b not in branch_map:
+            await interaction.response.send_message("❌ Invalid branch. Choose `land`, `air`, or `navy`.", ephemeral=True)
+            return
+        col = branch_map[b]
+        raw = str(self.amount).strip()
+        try:
+            val = int(raw)
+        except ValueError:
+            await interaction.response.send_message("❌ Amount must be an integer.", ephemeral=True)
+            return
+
+        target_uid = self.panel.target_user_id or self.panel.owner_id
+        self.panel.db.execute("INSERT OR IGNORE INTO players (user_id, nation_name, display_name, money, xc) VALUES (?, 'New Nation', ?, 1000, 100)", (target_uid, f"User {target_uid}"))
+        if raw.startswith(("+", "-")):
+            self.panel.db.execute(f"UPDATE players SET {col} = MAX(0, {col} + ?) WHERE user_id = ?", (val, target_uid))
+        else:
+            self.panel.db.execute(f"UPDATE players SET {col} = MAX(0, ?) WHERE user_id = ?", (val, target_uid))
+        now = int(time.time())
+        self.panel.db.execute(
+            "INSERT INTO economy_logs (user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
+            (target_uid, "staff_forces_adjust", f"{col} set/adjusted by {raw}", now),
+        )
+        self.panel.db.commit()
+        await interaction.response.defer()
+        await self.panel.refresh(interaction, notice=f"✅ Updated **{b.title()}** for <@{target_uid}> with `{raw}` units.")
+
+
+class WarEditCapitalModal(StaffModal, title="Set Capital Health & Name"):
+    health = discord.ui.TextInput(
+        label="Capital Health HP (0 to 100)",
+        default="100",
+        max_length=3,
+    )
+    capital_name = discord.ui.TextInput(
+        label="Capital Name",
+        placeholder="Leave blank to keep current name",
+        required=False,
+        max_length=50,
+    )
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        try:
+            hp = max(0, min(100, int(str(self.health).strip())))
+        except ValueError:
+            await interaction.response.send_message("❌ Capital health must be 0 to 100.", ephemeral=True)
+            return
+        target_uid = self.panel.target_user_id or self.panel.owner_id
+        cname = str(self.capital_name).strip()
+        if cname:
+            self.panel.db.execute("UPDATE players SET capital_health=?, capital_name=? WHERE user_id=?", (hp, cname, target_uid))
+        else:
+            self.panel.db.execute("UPDATE players SET capital_health=? WHERE user_id=?", (hp, target_uid))
+        self.panel.db.commit()
+        await interaction.response.defer()
+        await self.panel.refresh(interaction, notice=f"✅ Set Capital Health for <@{target_uid}> to **{hp}%**.")
+
+
+class WarEditResourcesModal(StaffModal, title="Adjust Strategic Resources"):
+    iron = discord.ui.TextInput(label="Iron (+/- or amount)", default="+0", max_length=15)
+    gold = discord.ui.TextInput(label="Gold (+/- or amount)", default="+0", max_length=15)
+    oil = discord.ui.TextInput(label="Oil (+/- or amount)", default="+0", max_length=15)
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        target_uid = self.panel.target_user_id or self.panel.owner_id
+        for field, col in ((self.iron, "iron"), (self.gold, "gold"), (self.oil, "oil")):
+            raw = str(field).strip()
+            try:
+                v = int(raw)
+                if raw.startswith(("+", "-")):
+                    self.panel.db.execute(f"UPDATE players SET {col} = MAX(0, {col} + ?) WHERE user_id = ?", (v, target_uid))
+                elif v != 0 or raw == "0":
+                    self.panel.db.execute(f"UPDATE players SET {col} = MAX(0, ?) WHERE user_id = ?", (v, target_uid))
+            except ValueError:
+                pass
+        self.panel.db.commit()
+        await interaction.response.defer()
+        await self.panel.refresh(interaction, notice=f"✅ Updated strategic resources for <@{target_uid}>.")
+
+
+class ServerLevelTemplateModal(StaffModal, title="Level-Up Announcement Template"):
+    message = discord.ui.TextInput(
+        label="Message template",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        placeholder="Use {mention}, {user}, {level}, {reward}",
+    )
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+        self.message.default = leveling.setting(panel.db, "xp_announcement_template")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        clean_msg = str(self.message).strip()
+        _set_setting(self.panel.db, "xp_announcement_template", clean_msg)
+        await interaction.response.defer()
+        await self.panel.refresh(interaction, notice="✅ Level-up announcement template updated.")
+
+
+class ServerSayModal(StaffModal, title="Post Announcement as X BOT"):
+    message = discord.ui.TextInput(
+        label="Announcement Message",
+        style=discord.TextStyle.paragraph,
+        max_length=2000,
+        placeholder="Type the announcement to post...",
+    )
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.panel.interaction_check(interaction):
+            return
+        text = str(self.message).strip()
+        if not text:
+            await interaction.response.send_message("❌ Message cannot be empty.", ephemeral=True)
+            return
+
+        target_cid = self.panel.target_channel_id or interaction.channel_id
+        target_ch = self.panel.bot.get_channel(int(target_cid)) or interaction.channel
+        if not target_ch:
+            await interaction.response.send_message("❌ Target channel not found.", ephemeral=True)
+            return
+
+        try:
+            await target_ch.send(text)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Failed to post message: {e}", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        await self.panel.refresh(interaction, notice=f"✅ Announcement posted in <#{target_cid}>!")
+
+
 class AdminPanel(discord.ui.LayoutView):
-    def __init__(self, bot, db, staff_check, owner_id, *, page="home", selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice="", history=(), offsets=None, pending_action=None, code_filter='all'):
+    def __init__(self, bot, db, staff_check, owner_id, *, page="home", target_user_id=None, target_channel_id=None, selected_form_id=None, selected_application_id=None, selected_code_id=None, selected_feedback_id=None, notice="", history=(), offsets=None, pending_action=None, code_filter='all'):
         super().__init__(timeout=900)
         self.bot = bot
         self.db = db
         self.staff_check = staff_check
         self.owner_id = owner_id
         self.page = page
+        self.target_user_id = int(target_user_id) if target_user_id else owner_id
+        self.target_channel_id = int(target_channel_id) if target_channel_id else 0
         self.selected_form_id = selected_form_id
         self.selected_application_id = selected_application_id
         self.selected_code_id = selected_code_id
@@ -271,13 +647,14 @@ class AdminPanel(discord.ui.LayoutView):
             control.row = None
             rows.setdefault(row, []).append(control)
         if self.page == "home":
-            sections = ((0,'📥 Needs attention','Review applications and Tester reports.'),
-                        (1,'🛡️ Manage players','Roles, inventories, Deadzone crypt and account adjustments.'),
-                        (2,'📣 Manage server','Announcements, lottery and alliance wars.'),
-                        (3,'🔑 Access & rewards','Verification and redemption codes.'),
-                        (4,'⚙️ System','Read-only economy status and maintenance.'))
+            sections = ((0,'📥 Applications & Feedback','Review pending submissions and tester reports.'),
+                        (1,'🛡️ Players & Economy','Manage economy assets, military forces, roles and Deadzone.'),
+                        (2,'⚙️ Server Settings & Gaming','Level-up notices, announcements, and Gaming Zone panels.'),
+                        (3,'🔑 Access & Reward Codes','Verification panels and reward codes.'),
+                        (4,'🛠️ System & Status','Live economy status and system maintenance.'))
             for row, title, hint in sections:
-                parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f'### {title}\n{hint}'),discord.ui.ActionRow(*rows.pop(row))))
+                if row in rows:
+                    parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f'### {title}\n{hint}'),discord.ui.ActionRow(*rows.pop(row))))
         super().add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
         super().add_item(discord.ui.ActionRow(
             AdminActionButton("back", "‹ Back"), AdminActionButton("page:home", "⌂ Home"),
@@ -291,6 +668,8 @@ class AdminPanel(discord.ui.LayoutView):
     def clone(self, **changes):
         values = {
             "page": self.page,
+            "target_user_id": self.target_user_id,
+            "target_channel_id": self.target_channel_id,
             "selected_form_id": self.selected_form_id,
             "selected_application_id": self.selected_application_id,
             "selected_code_id": self.selected_code_id,
@@ -343,7 +722,27 @@ class AdminPanel(discord.ui.LayoutView):
                 if group == TOOL_GROUPS[self.page]:
                     control=staff_tools.ToolButton(self,name);control.row=1;self.add_item(control)
 
-        if self.page == "applications":
+        if self.page == "assets":
+            self.add_item(AdminUserSelect(placeholder="Select player to manage economy & inventory…", default_user_id=self.target_user_id, row=2))
+            self.add_item(AdminActionButton("asset_edit_money", "Edit Money", emoji="💵", style=discord.ButtonStyle.primary, row=3))
+            self.add_item(AdminActionButton("asset_spawn_item", "Spawn Item", emoji="📦", style=discord.ButtonStyle.success, row=3))
+            self.add_item(AdminActionButton("asset_remove_item", "Remove Item", emoji="🗑️", style=discord.ButtonStyle.danger, row=3))
+            self.add_item(AdminActionButton("refresh", "Refresh Inventory", emoji="🔄", style=discord.ButtonStyle.secondary, row=3))
+        elif self.page == "war_tools":
+            self.add_item(AdminUserSelect(placeholder="Select player to manage armed forces…", default_user_id=self.target_user_id, row=2))
+            self.add_item(AdminActionButton("war_edit_troops", "Edit Troops", emoji="🪖", style=discord.ButtonStyle.primary, row=3))
+            self.add_item(AdminActionButton("war_edit_capital", "Set Capital HP", emoji="🏰", style=discord.ButtonStyle.secondary, row=3))
+            self.add_item(AdminActionButton("war_edit_resources", "Edit Resources", emoji="⛏️", style=discord.ButtonStyle.secondary, row=3))
+            self.add_item(AdminActionButton("war_toggle_status", "War Status", emoji="⚔️", style=discord.ButtonStyle.danger, row=3))
+        elif self.page == "server":
+            self.add_item(AdminChannelSelect(placeholder="Choose target channel for notices / panels…", default_channel_id=self.target_channel_id, row=2))
+            self.add_item(AdminActionButton("server_toggle_level", "Toggle Notices", emoji="🔔", style=discord.ButtonStyle.secondary, row=3))
+            self.add_item(AdminActionButton("server_set_level_channel", "Set Level Channel", emoji="📌", style=discord.ButtonStyle.primary, row=3))
+            self.add_item(AdminActionButton("server_edit_template", "Edit Level Msg", emoji="✏️", style=discord.ButtonStyle.secondary, row=3))
+            self.add_item(AdminActionButton("server_post_gaming_roles", "Post Gaming Roles Panel", emoji="🎮", style=discord.ButtonStyle.success, row=4))
+            self.add_item(AdminActionButton("server_say", "Post /say", emoji="📢", style=discord.ButtonStyle.primary, row=4))
+            self.add_item(AdminActionButton("server_lottery_draw", "Draw Lottery", emoji="🎲", style=discord.ButtonStyle.secondary, row=4))
+        elif self.page == "applications":
             forms = self.application_forms()
             if forms:
                 if self.selected_form_id is None:
@@ -352,8 +751,10 @@ class AdminPanel(discord.ui.LayoutView):
             pending = self.pending_applications()
             if pending:
                 self.add_item(PendingApplicationSelect(self._page_rows(pending, "applications"), self.selected_application_id))
-            self.add_item(AdminActionButton("post_application", "Post Selected Form Here", emoji="📨", style=discord.ButtonStyle.primary, row=3))
-            self.add_item(AdminActionButton("toggle_applications", "Close Applications" if _setting(self.db,'applications_enabled','1')=='1' else "Open Applications", emoji="🔁", row=3))
+            self.add_item(AdminChannelSelect(placeholder="Target channel to deploy form / verification…", default_channel_id=self.target_channel_id, row=3))
+            self.add_item(AdminActionButton("post_application", "Post Selected Form", emoji="📨", style=discord.ButtonStyle.primary, row=4))
+            self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=4))
+            self.add_item(AdminActionButton("toggle_applications", "Close Applications" if _setting(self.db,'applications_enabled','1')=='1' else "Open Applications", emoji="🔁", row=4))
             if self.selected_application():
                 self.add_item(AdminActionButton("review:accepted", "Accept", emoji="✅", style=discord.ButtonStyle.success, row=4))
                 self.add_item(AdminActionButton("review:hold", "Hold", emoji="⏸️", row=4))
@@ -458,6 +859,113 @@ class AdminPanel(discord.ui.LayoutView):
             embed.description = f"**{pending}** applications · **{reports}** reports\n**{active_codes}** active codes · Verification **{verification}**"
         elif self.page == "maintenance":
             embed.description = "Check system health or create a backup.\nRepair buttons change stored data — use only when needed."
+        elif self.page == "assets":
+            target_uid = self.target_user_id or self.owner_id
+            player = self.db.execute("SELECT * FROM players WHERE user_id=?", (target_uid,)).fetchone()
+            if not player:
+                self.db.execute("INSERT OR IGNORE INTO players (user_id, nation_name, display_name, money, xc) VALUES (?, 'New Nation', ?, 1000, 100)", (target_uid, f"User {target_uid}"))
+                self.panel.db.commit() if hasattr(self, 'panel') else self.db.commit()
+                player = self.db.execute("SELECT * FROM players WHERE user_id=?", (target_uid,)).fetchone()
+            embed.title = "💰 Player Economy & Asset Manager"
+            embed.description = f"Managing economy assets for <@{target_uid}> (`{target_uid}`). Choose a player below, then click any action button."
+            embed.add_field(
+                name="💵 Currency Balances",
+                value=(
+                    f"🪙 **Wallet XC:** {player['xc']:,}\n"
+                    f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
+                    f"💵 **Cash:** {player['money']:,}\n"
+                    f"💎 **XCrystals:** {player['xcrystals']:,}"
+                ),
+                inline=False,
+            )
+            inv_rows = self.db.execute(
+                "SELECT i.item_id, i.quantity, COALESCE(it.name, i.item_id) as item_name FROM inventories i LEFT JOIN items it ON i.item_id = it.id WHERE i.user_id=? ORDER BY i.quantity DESC",
+                (target_uid,)
+            ).fetchall()
+            if inv_rows:
+                inv_text = "\n".join(f"• **{r['item_name']}** (`{r['item_id']}`): {r['quantity']:,}" for r in inv_rows[:15])
+                if len(inv_rows) > 15:
+                    inv_text += f"\n*...and {len(inv_rows) - 15} more items*"
+            else:
+                inv_text = "*Backpack is currently empty.*"
+            embed.add_field(name=f"🎒 Backpack Inventory ({len(inv_rows)} items)", value=inv_text[:1024], inline=False)
+        elif self.page == "war_tools":
+            target_uid = self.target_user_id or self.owner_id
+            player = self.db.execute("SELECT * FROM players WHERE user_id=?", (target_uid,)).fetchone()
+            if not player:
+                self.db.execute("INSERT OR IGNORE INTO players (user_id, nation_name, display_name, money, xc) VALUES (?, 'New Nation', ?, 1000, 100)", (target_uid, f"User {target_uid}"))
+                self.panel.db.commit() if hasattr(self, 'panel') else self.db.commit()
+                player = self.db.execute("SELECT * FROM players WHERE user_id=?", (target_uid,)).fetchone()
+            total_pwr = war_system.total_power(self.db, target_uid) if hasattr(war_system, "total_power") else 0
+            alliance = self.db.execute(
+                "SELECT a.name FROM alliances a JOIN alliance_members m ON a.id=m.alliance_id WHERE m.user_id=?",
+                (target_uid,)
+            ).fetchone()
+            alliance_name = alliance['name'] if alliance else "*No Alliance*"
+            embed.title = "⚔️ Armed Forces & Military Manager"
+            embed.description = f"Managing armed forces for <@{target_uid}> (`{target_uid}`). Choose a player below, then click any action button."
+            embed.add_field(
+                name="🛡️ Nation & Power",
+                value=(
+                    f"🏛️ **Nation:** {player['nation_name'] or 'Unnamed Nation'}\n"
+                    f"🏰 **Capital:** {player['capital_name']} ({player['capital_health']}% HP)\n"
+                    f"⚡ **Total Military Power:** {total_pwr:,}\n"
+                    f"🚩 **Alliance:** {alliance_name}"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="🪖 Armed Forces Roster",
+                value=(
+                    f"🪖 **Land Army:** {player['land_army']:,} units\n"
+                    f"✈️ **Air Force:** {player['air_army']:,} squadrons\n"
+                    f"⚓ **Navy:** {player['navy']:,} warships"
+                ),
+                inline=True,
+            )
+            embed.add_field(
+                name="⛏️ Strategic Stockpile",
+                value=(
+                    f"⚙️ **Iron:** {player['iron']:,}\n"
+                    f"🪙 **Gold:** {player['gold']:,}\n"
+                    f"🛢️ **Oil:** {player['oil']:,}"
+                ),
+                inline=True,
+            )
+        elif self.page == "server":
+            enabled = leveling.setting(self.db, "xp_announcement_enabled") == "1"
+            channel_id = leveling.setting(self.db, "xp_announcement_channel_id")
+            channel_text = f"<#{channel_id}>" if channel_id.isdigit() and channel_id != "0" else "*Not configured*"
+            template = leveling.setting(self.db, "xp_announcement_template")
+
+            steam_role = gaming.setting(self.db, "game_role_steam_id")
+            roblox_role = gaming.setting(self.db, "game_role_roblox_id")
+            mobile_role = gaming.setting(self.db, "game_role_mobile_id")
+            steam_ch = gaming.setting(self.db, "game_channel_steam_id")
+            roblox_ch = gaming.setting(self.db, "game_channel_roblox_id")
+            mobile_ch = gaming.setting(self.db, "game_channel_mobile_id")
+
+            embed.title = "⚙️ Server Settings & Gaming Zone"
+            embed.description = "Configure level-up broadcast notices, post announcements, or deploy the Gaming Zone roles panel."
+            embed.add_field(
+                name="📢 Level-Up Chat Notices",
+                value=(
+                    f"• **Status:** {'🟢 Enabled' if enabled else '🔴 Disabled'}\n"
+                    f"• **Channel:** {channel_text}\n"
+                    f"• **Template:** `{template[:300]}`"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="🎮 Gaming Zone Setup",
+                value=(
+                    f"• 🎮 **Steam:** Role <@&{steam_role}> · Channel <#{steam_ch}>\n"
+                    f"• 🟥 **Roblox:** Role <@&{roblox_role}> · Channel <#{roblox_ch}>\n"
+                    f"• 📱 **Mobile:** Role <@&{mobile_role}> · Channel <#{mobile_ch}>\n"
+                    f"-# Select a channel below and click **Post Gaming Roles Panel** to deploy."
+                ),
+                inline=False,
+            )
         elif self.page in TOOL_GROUPS:
             embed.description = {
                 'members':'Inspect a player or manage roles and activity level.',
@@ -653,6 +1161,78 @@ class AdminPanel(discord.ui.LayoutView):
             self.db.execute("UPDATE reward_codes SET enabled=? WHERE id=?", (enabled, selected["id"]))
             self.db.commit()
             await self.refresh(interaction, notice=f"✅ `{selected['code']}` is now {'enabled' if enabled else 'disabled'}.")
+            return
+        if action == "asset_edit_money":
+            await interaction.response.send_modal(AssetEditMoneyModal(self))
+            return
+        if action == "asset_spawn_item":
+            await interaction.response.send_modal(AssetSpawnItemModal(self))
+            return
+        if action == "asset_remove_item":
+            await interaction.response.send_modal(AssetRemoveItemModal(self))
+            return
+        if action == "war_edit_troops":
+            await interaction.response.send_modal(WarEditTroopsModal(self))
+            return
+        if action == "war_edit_capital":
+            await interaction.response.send_modal(WarEditCapitalModal(self))
+            return
+        if action == "war_edit_resources":
+            await interaction.response.send_modal(WarEditResourcesModal(self))
+            return
+        if action == "war_toggle_status":
+            war = self.db.execute("SELECT * FROM wars WHERE active=1 ORDER BY id DESC LIMIT 1").fetchone()
+            if war:
+                await self.refresh(interaction, notice=f"⚔️ Active War #{war['id']} ongoing. End war via `/war_end`.")
+            else:
+                await self.refresh(interaction, notice="🕊️ No active war currently ongoing. Start war via `/war_start`.")
+            return
+        if action == "server_toggle_level":
+            current = leveling.setting(self.db, "xp_announcement_enabled") == "1"
+            new_val = "0" if current else "1"
+            _set_setting(self.db, "xp_announcement_enabled", new_val)
+            await self.refresh(interaction, notice=f"✅ Level-up notices are now {'enabled' if new_val == '1' else 'disabled'}.")
+            return
+        if action == "server_set_level_channel":
+            target_cid = self.target_channel_id or interaction.channel_id
+            _set_setting(self.db, "xp_announcement_channel_id", str(target_cid))
+            await self.refresh(interaction, notice=f"✅ Level-up announcement channel set to <#{target_cid}>.")
+            return
+        if action == "server_edit_template":
+            await interaction.response.send_modal(ServerLevelTemplateModal(self))
+            return
+        if action == "server_post_gaming_roles":
+            target_cid = self.target_channel_id or interaction.channel_id
+            target_ch = self.bot.get_channel(int(target_cid)) or interaction.channel
+            if not target_ch:
+                await self.refresh(interaction, notice="❌ Target channel was not found.")
+                return
+            embed = discord.Embed(
+                title="🎮 [GAMING ZONE · SELECT YOUR GAMES]",
+                description=(
+                    "Choose the games you play to unlock discussion channels and receive LFG party pings!\n\n"
+                    "• **🎮 Steam**: PC games, Counter-Strike, Lethal Company, Steam discussions\n"
+                    "• **🟥 Roblox**: Blox Fruits, Doors, Brookhaven, Roblox teaming\n"
+                    "• **📱 Mobile**: Mobile Legends, PUBG Mobile, Brawl Stars, Gacha games\n\n"
+                    "-# Click a button below to toggle the role on or off at any time."
+                ),
+                color=0x3498DB,
+            )
+            embed.set_footer(text="X BOT · Gaming Community")
+            await target_ch.send(embed=embed, view=gaming.GameRolesView())
+            await self.refresh(interaction, notice=f"✅ Gaming Roles panel posted in <#{target_cid}>!")
+            return
+        if action == "server_say":
+            await interaction.response.send_modal(ServerSayModal(self))
+            return
+        if action == "server_lottery_draw":
+            draw_func = getattr(self.bot, "xbot_lottery_draw", None)
+            if draw_func:
+                res = draw_func()
+                await self.refresh(interaction, notice=f"✅ Lottery drawn: {res}")
+            else:
+                await self.refresh(interaction, notice="✅ Lottery draw requested.")
+            return
 
     async def review_application(self, interaction, decision, reason):
         row = self.selected_application()
