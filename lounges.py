@@ -205,10 +205,10 @@ async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
             for target in list(text_ch.overwrites.keys()):
                 if isinstance(target, (discord.Member, discord.User)):
                     await text_ch.set_permissions(target, overwrite=None)
-            # Reset @everyone: can view & chat
+            # Normal idle state: hide from @everyone so idle lounges do not clutter members' sidebars
             await text_ch.set_permissions(
                 guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                overwrite=discord.PermissionOverwrite(view_channel=False, send_messages=False, read_message_history=False),
             )
         except discord.HTTPException:
             pass
@@ -218,10 +218,10 @@ async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
             for target in list(vc_ch.overwrites.keys()):
                 if isinstance(target, (discord.Member, discord.User)):
                     await vc_ch.set_permissions(target, overwrite=None)
-            # Reset @everyone: can view & connect
+            # Normal idle state: hide from @everyone
             await vc_ch.set_permissions(
                 guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=True, connect=True, speak=True),
+                overwrite=discord.PermissionOverwrite(view_channel=False, connect=False, speak=False),
             )
         except discord.HTTPException:
             pass
