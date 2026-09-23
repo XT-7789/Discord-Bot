@@ -11,6 +11,16 @@ from discord.ext import tasks
 import leveling
 import xbot_ui
 
+DEFAULT_GENERAL_CHANNEL_ID = 1524716540988231820
+DEFAULT_NOTIF_CHANNEL_ID = 1526521131048370217
+LOUNGE_TEXT_CHANNEL_IDS = {
+    1538463993910403074,  # Lounge 1
+    1544726174083846244,  # Lounge 2
+    1551191838780559460,  # Lounge 3
+    1544735099877064865,  # Lounge 4
+    1544735123596120125,  # Lounge 5
+}
+
 DEFAULTS = {
     "deadzone_enabled": "1",
     "deadzone_days": "7",
@@ -18,7 +28,8 @@ DEFAULTS = {
     "deadzone_guest_role_id": "1524715220365217842",
     "deadzone_crypt_channel_id": "0",
     "deadzone_lounge_channel_id": "0",
-    "deadzone_notification_channel_id": "0",
+    "deadzone_notification_channel_id": "1526521131048370217",
+    "deadzone_party_channel_id": "1524716540988231820",
     "deadzone_revive_bonus_cash": "100000",
     "deadzone_revive_bonus_xc": "150",
     "deadzone_revive_bonus_xp": "100",
@@ -121,6 +132,29 @@ def initialise(db):
 def setting(db, key):
     row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row else DEFAULTS.get(key, "0")
+
+
+def get_party_channel(bot, db, guild=None):
+    cid = int(setting(db, "deadzone_party_channel_id") or setting(db, "general_channel_id") or DEFAULT_GENERAL_CHANNEL_ID)
+    ch = getattr(bot, "get_channel", lambda _id: None)(cid) if cid and hasattr(bot, "get_channel") else None
+    if not ch and guild and hasattr(guild, "get_channel"):
+        try:
+            ch = guild.get_channel(cid)
+        except Exception:
+            ch = None
+    return ch or getattr(guild, "system_channel", None)
+
+
+def get_notif_channel(bot, db, guild=None):
+    cid = int(setting(db, "deadzone_notification_channel_id") or DEFAULT_NOTIF_CHANNEL_ID)
+    ch = getattr(bot, "get_channel", lambda _id: None)(cid) if cid and hasattr(bot, "get_channel") else None
+    if not ch and guild and hasattr(guild, "get_channel"):
+        try:
+            ch = guild.get_channel(cid)
+        except Exception:
+            ch = None
+    return ch or getattr(guild, "system_channel", None)
+
 
 
 def touch_activity(db, user_id: int):
@@ -320,43 +354,38 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     )
     db.commit()
 
-    # Announce resurrection in notification channel or lounge
-    notif_channel_id = int(setting(db, "deadzone_notification_channel_id") or 0)
-    lounge_channel_id = int(setting(db, "deadzone_lounge_channel_id") or 0)
-    target_id = notif_channel_id or lounge_channel_id
-
-    target_channel = (bot.get_channel(target_id) if target_id and hasattr(bot, "get_channel") else None) or getattr(member.guild, "system_channel", None)
-    if target_channel is None and getattr(member.guild, "text_channels", None):
-        target_channel = member.guild.text_channels[0]
-
-    welcome_quote = random.choice(RESURRECTION_QUOTES)
-    embed = discord.Embed(
-        title="⚡ [RESURRECTION ALERT]",
-        description=(
-            f"🎉 {member.mention} **has broken out of their coffin and returned to the living!**\n\n"
-            f"🛡️ **Status Restored:** Member, Music, and Level {level} perks are active.\n"
-            f"🎁 **Survival Bonus:** Received `💵 +{bonus_cash:,} Cash`, `🪙 +{bonus_xc} XC`, and `⭐ +{bonus_xp} XP`!\n\n"
-            f"*{welcome_quote}*"
-        ),
-        color=0x2ECC71,
-    )
-    embed.set_footer(text="X BOT · Deadzone Division")
-
-    if target_channel:
+    # Announce resurrection technical alert in notification channel (bot-notifications)
+    notif_channel = get_notif_channel(bot, db, getattr(member, "guild", None))
+    if notif_channel:
+        welcome_quote = random.choice(RESURRECTION_QUOTES)
+        embed = discord.Embed(
+            title="⚡ [RESURRECTION ALERT]",
+            description=(
+                f"🎉 {member.mention} **has broken out of their coffin and returned to the living!**\n\n"
+                f"🛡️ **Status Restored:** Member, Music, and Level {level} perks are active.\n"
+                f"🎁 **Survival Bonus:** Received `💵 +{bonus_cash:,} Cash`, `🪙 +{bonus_xc} XC`, and `⭐ +{bonus_xp} XP`!\n\n"
+                f"*{welcome_quote}*"
+            ),
+            color=0x2ECC71,
+        )
+        embed.set_footer(text="X BOT · Deadzone Division")
         try:
-            await target_channel.send(embed=embed)
+            await notif_channel.send(embed=embed)
         except discord.HTTPException:
             pass
 
-    # Start 5-minute Resurrection Welcome Party in target_channel
+    # Start 5-minute Resurrection Welcome Party in general channel (Picture 1)
+    party_channel = get_party_channel(bot, db, getattr(member, "guild", None)) or notif_channel
     party_duration = int(setting(db, "deadzone_party_duration") or 300)
     party_reward = int(setting(db, "deadzone_party_reward_cash") or 2000)
-    if target_channel and party_duration > 0 and getattr(member, "guild", None):
+    if party_channel and party_duration > 0 and getattr(member, "guild", None):
+        allowed_channels = {party_channel.id, *LOUNGE_TEXT_CHANNEL_IDS}
         active_parties[member.guild.id] = {
             "expires_at": time.time() + party_duration,
             "revived_user_id": member.id,
             "revived_name": member.display_name,
-            "channel_id": target_channel.id,
+            "channel_id": party_channel.id,
+            "allowed_channel_ids": allowed_channels,
             "reward_cash": party_reward,
             "claimed_users": set(),
         }
@@ -364,14 +393,14 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
             title="🎊 [WELCOME PARTY STARTED — 5 MINUTES]",
             description=(
                 f"A celebration party has started for {member.mention}!\n\n"
-                f"💬 **Chat in {target_channel.mention}** within the next **5 minutes** to claim your **💵 {party_reward:,} Cash** welcome bonus!\n"
+                f"💬 **Chat in {party_channel.mention}** within the next **5 minutes** to claim your **💵 {party_reward:,} Cash** welcome bonus!\n"
                 f"-# One claim per member · Say hi and celebrate their return!"
             ),
             color=0xF1C40F,
         )
         party_embed.set_footer(text="X BOT · Deadzone Division · Welcome Party")
         try:
-            await target_channel.send(embed=party_embed)
+            await party_channel.send(embed=party_embed)
         except discord.HTTPException:
             pass
 
@@ -498,7 +527,8 @@ async def handle_message(bot, db, message: discord.Message):
         party = active_parties[guild_id]
         now = time.time()
         if now <= party["expires_at"]:
-            if message.channel.id == party["channel_id"] and message.author.id != party["revived_user_id"]:
+            allowed_channels = party.get("allowed_channel_ids", {party["channel_id"]})
+            if message.channel.id in allowed_channels and message.author.id != party["revived_user_id"]:
                 if message.author.id not in party["claimed_users"]:
                     party["claimed_users"].add(message.author.id)
                     cash_reward = party["reward_cash"]
@@ -531,7 +561,13 @@ async def handle_message(bot, db, message: discord.Message):
                         color=0x3498DB,
                     )
                     embed.set_footer(text="X BOT · Deadzone Division · 1+2 Respawn Protocol")
-                    await message.channel.send(embed=embed)
+                    notif_channel = get_notif_channel(bot or _bot, db, message.guild)
+                    # Picture 2: Do NOT post to general; post to notif_channel
+                    if notif_channel:
+                        await notif_channel.send(embed=embed)
+                    elif message.channel.id != DEFAULT_GENERAL_CHANNEL_ID:
+                        await message.channel.send(embed=embed)
+                    await message.add_reaction("🧊")
                 else:
                     await message.add_reaction("🔥")
             except (discord.HTTPException, discord.Forbidden):
@@ -833,7 +869,21 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             color=0x2ECC71,
         )
         embed.set_footer(text="X BOT · Deadzone Division · 1+2 Respawn System")
-        await interaction.followup.send(embed=embed)
+
+        notif_ch = get_notif_channel(bot, db, interaction.guild)
+        if interaction.channel_id == DEFAULT_GENERAL_CHANNEL_ID and notif_ch:
+            try:
+                await notif_ch.send(embed=embed)
+            except discord.HTTPException:
+                pass
+            await interaction.followup.send(f"✅ Successfully rescued {member.mention}! Rescue log posted in {notif_ch.mention}.", ephemeral=True)
+        else:
+            await interaction.followup.send(embed=embed)
+            if notif_ch and notif_ch.id != interaction.channel_id:
+                try:
+                    await notif_ch.send(embed=embed)
+                except discord.HTTPException:
+                    pass
 
     @deadzone_group.command(name="restore", description="Admin: Restore a member from Deadzone and restore all perks")
     @app_commands.describe(member="Member to restore from Deadzone")
