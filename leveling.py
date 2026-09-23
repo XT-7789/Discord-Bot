@@ -10,6 +10,9 @@ from discord.ext import tasks
 
 import xbot_ui
 
+REGULAR_MUSIC_ROLE_ID = 1505437186219311236
+PREMIUM_MUSIC_ROLE_ID = 1526237128093339848
+
 DEFAULTS = {
     "xp_enabled": "1", "xp_message_enabled": "1", "xp_message_min": "15", "xp_message_max": "25",
     "xp_message_cooldown": "60", "xp_voice_enabled": "1", "xp_voice_per_minute": "5",
@@ -173,6 +176,12 @@ async def sync_reward_roles(db, member, level):
     desired_ids = {int(row["role_id"]) for row in permanent}
     if titles: desired_ids.add(int(titles[-1]["role_id"]))
     configured_ids = {int(row["role_id"]) for row in rows}
+
+    # If member holds Premium Music, regular Music is superseded and must be removed
+    if any(role.id == PREMIUM_MUSIC_ROLE_ID for role in member.roles):
+        desired_ids.discard(REGULAR_MUSIC_ROLE_ID)
+        configured_ids.add(REGULAR_MUSIC_ROLE_ID)
+
     remove = [role for role in member.roles if role.id in configured_ids and role.id not in desired_ids]
     add = [member.guild.get_role(role_id) for role_id in desired_ids if member.guild.get_role(role_id) and member.guild.get_role(role_id) not in member.roles]
     try:

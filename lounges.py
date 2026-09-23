@@ -18,6 +18,9 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+import deadzone
+import leveling
+
 # Configuration for the 5 server lounges
 LOUNGES = {
     1: {"name": "Lounge 1", "text_id": 1538463993910403074, "vc_id": 1538463656201945158},
@@ -41,6 +44,8 @@ DEFAULT_SETTINGS = {
 
 _bot = None
 _db = None
+_user_vc_duration = {}
+_user_dz_thaw_seconds = {}
 
 
 def setting(db, key):
@@ -932,6 +937,83 @@ async def lounge_check_loop():
         if rem <= 0:
             if guild:
                 await clear_and_reopen_lounge(_bot, _db, guild, lid, reason="Time limit reached")
+
+    # ---------- Lounge VC Rewards & Deadzone Thaw Protocol ----------
+    current_vc_members = set()
+    for lid, info in LOUNGES.items():
+        vc_id = info["vc_id"]
+        tc_id = info["text_id"]
+        vc = _bot.get_channel(vc_id)
+        if not vc or not hasattr(vc, "members") or not vc.members:
+            continue
+
+        tc = _bot.get_channel(tc_id)
+
+        for member in vc.members:
+            if getattr(member, "bot", False):
+                continue
+            vstate = getattr(member, "voice", None)
+            if vstate and (vstate.self_deaf or vstate.afk):
+                continue
+
+            uid = member.id
+            current_vc_members.add(uid)
+            _user_vc_duration[uid] = _user_vc_duration.get(uid, 0) + 30
+            _user_dz_thaw_seconds[uid] = _user_dz_thaw_seconds.get(uid, 0) + 30
+
+            # Keep active in deadzone activity tracker so VC chatter is never marked inactive
+            deadzone.touch_activity(_db, uid)
+
+            # 1. Deadzone VC Thaw: Every 3 minutes (180s) in Lounge VC melts +1 cryo-stasis seal
+            status = deadzone.member_status(_db, uid)
+            if status and status["is_in_deadzone"]:
+                if _user_dz_thaw_seconds[uid] >= 180:
+                    _user_dz_thaw_seconds[uid] = 0
+                    current_thaw = status["thaw_count"] if "thaw_count" in status.keys() else 0
+                    if current_thaw < 5:
+                        new_thaw = current_thaw + 1
+                        _db.execute("UPDATE deadzone_members SET thaw_count=? WHERE user_id=?", (new_thaw, uid))
+                        _db.commit()
+                        if tc:
+                            try:
+                                if new_thaw == 5:
+                                    embed = discord.Embed(
+                                        title="🧊 [CRYO-THAW COMPLETE (5/5)]",
+                                        description=(
+                                            f"🎉 {member.mention} **has fully melted their cryo-stasis seal in {vc.mention}!**\n\n"
+                                            f"🤝 **Next Step (Condition 2):** An active comrade can now run:\n"
+                                            f"`/deadzone rescue member:{member.mention}`\n\n"
+                                            f"*(Rescuers receive **+$50,000 Cash, +250 XC & +150 XP** for pulling you out of the crypt!)*"
+                                        ),
+                                        color=0x3498DB,
+                                    )
+                                    embed.set_footer(text="X BOT · Deadzone Division · Lounge Voice Protocol")
+                                    await tc.send(embed=embed)
+                                else:
+                                    await tc.send(f"🔥 **[Cryo-Thaw Warming]** {member.mention} is defrosting in voice chat! Progress: **{new_thaw}/5**")
+                            except Exception:
+                                pass
+
+            # 2. Lounge Voice Activity Rewards: Every 5 minutes (300s) of active voice chat
+            if _user_vc_duration[uid] >= 300:
+                _user_vc_duration[uid] = 0
+                leveling._ensure_economy_player(_db, member)
+                # Award +$1,000 Cash and +10 XC
+                _db.execute("UPDATE players SET money=money+1000, xc=xc+10 WHERE user_id=?", (uid,))
+                _db.commit()
+                # Award +25 XP
+                await leveling.grant_xp(_bot, _db, member, 25, "lounge_voice")
+                if tc:
+                    try:
+                        await tc.send(f"🎁 **[Lounge VC Perk]** {member.mention} earned **+$1,000 Cash**, **+10 XC**, and **+25 XP** for active voice chatting in {vc.mention}!")
+                    except Exception:
+                        pass
+
+    # Clean up tracking for members who disconnected from all lounge VCs
+    for uid in list(_user_vc_duration.keys()):
+        if uid not in current_vc_members:
+            _user_vc_duration.pop(uid, None)
+            _user_dz_thaw_seconds.pop(uid, None)
 
 
 def start_lounge_loop(bot: discord.Client, db):

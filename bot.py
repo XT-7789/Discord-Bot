@@ -707,6 +707,38 @@ async def on_ready():
     if not season_settlement_loop.is_running():
         season_settlement_loop.start()
     lounges.start_lounge_loop(bot, db)
+    # Startup audit: remove regular Music role from members who have Premium Music
+    for guild in bot.guilds:
+        for member in guild.members:
+            if not member.bot and any(r.id == PREMIUM_MUSIC_ROLE_ID for r in member.roles) and any(r.id == REGULAR_MUSIC_ROLE_ID for r in member.roles):
+                reg_role = guild.get_role(REGULAR_MUSIC_ROLE_ID)
+                if reg_role:
+                    try:
+                        await member.remove_roles(reg_role, reason="Startup audit: remove regular music from Premium Music holder")
+                        print(f"[Startup Audit] Stripped regular music from {member} ({member.id})")
+                    except discord.HTTPException:
+                        pass
+
+
+REGULAR_MUSIC_ROLE_ID = 1505437186219311236
+PREMIUM_MUSIC_ROLE_ID = 1526237128093339848
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    if after.bot:
+        return
+    # If a member holds or receives Premium Music, automatically strip regular Music
+    has_premium = any(r.id == PREMIUM_MUSIC_ROLE_ID for r in after.roles)
+    has_regular = any(r.id == REGULAR_MUSIC_ROLE_ID for r in after.roles)
+    if has_premium and has_regular:
+        reg_role = after.guild.get_role(REGULAR_MUSIC_ROLE_ID)
+        if reg_role and reg_role in after.roles:
+            try:
+                await after.remove_roles(reg_role, reason="Auto-upgrade: Premium Music replaces regular Music")
+                print(f"[Music Upgrade] Removed regular music role from {after} ({after.id})")
+            except discord.HTTPException:
+                pass
 
 
 @bot.event

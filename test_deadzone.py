@@ -29,6 +29,7 @@ class DummyGuild:
         self.roles = {
             1505437941647015986: make_role(1505437941647015986, "Member"),
             1505437186219311236: make_role(1505437186219311236, "Music"),
+            1526237128093339848: make_role(1526237128093339848, "Premium Music"),
             1524719900785119354: make_role(1524719900785119354, "Active"),
             1524715220365217842: make_role(1524715220365217842, "Guest"),
             1551839505168859196: make_role(1551839505168859196, "Deadzone"),
@@ -386,6 +387,51 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(player)
         self.assertGreaterEqual(player["money"], 100)
         self.assertLessEqual(player["money"], 300)
+
+    async def test_sync_reward_roles_with_premium_music(self):
+        """Verify Level 5+ leveling sync does NOT grant regular Music if member has Premium Music."""
+        premium_music_role = self.guild.get_role(1526237128093339848)
+        regular_music_role = self.guild.get_role(1505437186219311236)
+        member = make_member(888777, self.guild, roles=[premium_music_role])
+
+        await leveling.sync_reward_roles(self.db, member, level=5)
+        self.assertNotIn(regular_music_role, member.roles)
+        self.assertIn(premium_music_role, member.roles)
+
+        # Even if regular music was accidentally held, sync_reward_roles strips it
+        member.roles.append(regular_music_role)
+        await leveling.sync_reward_roles(self.db, member, level=5)
+        self.assertNotIn(regular_music_role, member.roles)
+
+    async def test_revival_with_premium_music_does_not_restore_regular_music(self):
+        """Verify Deadzone revival preserves Premium Music and skips regular Music."""
+        member_role = self.guild.get_role(1505437941647015986)
+        premium_music_role = self.guild.get_role(1526237128093339848)
+        regular_music_role = self.guild.get_role(1505437186219311236)
+        dz_role = self.guild.get_role(1551839505168859196)
+
+        # User had both regular and premium music before demotion
+        member = make_member(999666, self.guild, roles=[member_role, premium_music_role, regular_music_role])
+        dummy_bot = SimpleNamespace(get_channel=lambda *a: None)
+
+        await deadzone.demote_to_deadzone(dummy_bot, self.db, member)
+        self.assertIn(dz_role, member.roles)
+
+        # Re-give premium music directly (as sponsor/admin grant)
+        member.roles.append(premium_music_role)
+
+        revived = await deadzone.revive_member(dummy_bot, self.db, member, triggered_by="button")
+        self.assertTrue(revived)
+        self.assertNotIn(dz_role, member.roles)
+        self.assertIn(member_role, member.roles)
+        self.assertIn(premium_music_role, member.roles)
+        self.assertNotIn(regular_music_role, member.roles)
+
+    def test_deadzone_rescue_reward_defaults(self):
+        """Verify Deadzone rescue bounty defaults to $50,000 Cash, 250 XC, and 150 XP."""
+        self.assertEqual(deadzone.DEFAULTS["deadzone_rescue_reward_cash"], "50000")
+        self.assertEqual(deadzone.DEFAULTS["deadzone_rescue_reward_xc"], "250")
+        self.assertEqual(deadzone.DEFAULTS["deadzone_rescue_reward_xp"], "150")
 
 
 if __name__ == "__main__":

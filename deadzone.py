@@ -21,6 +21,9 @@ LOUNGE_TEXT_CHANNEL_IDS = {
     1544735123596120125,  # Lounge 5
 }
 
+REGULAR_MUSIC_ROLE_ID = 1505437186219311236
+PREMIUM_MUSIC_ROLE_ID = 1526237128093339848
+
 DEFAULTS = {
     "deadzone_enabled": "1",
     "deadzone_days": "7",
@@ -34,7 +37,9 @@ DEFAULTS = {
     "deadzone_revive_bonus_xc": "150",
     "deadzone_revive_bonus_xp": "100",
     "deadzone_scavenge_cooldown": "72000",
-    "deadzone_rescue_reward_xc": "100",
+    "deadzone_rescue_reward_cash": "50000",
+    "deadzone_rescue_reward_xc": "250",
+    "deadzone_rescue_reward_xp": "150",
     "deadzone_haunt_reward_xc": "30",
     "deadzone_haunt_cooldown": "7200",
     "deadzone_party_duration": "300",
@@ -326,8 +331,11 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
         current_level = max_role_level
 
     # 3. Restore all saved roles directly to the member
+    has_premium_music = any(r.id == PREMIUM_MUSIC_ROLE_ID for r in member.roles) or (PREMIUM_MUSIC_ROLE_ID in saved_role_ids)
     roles_to_add = []
     for rid in saved_role_ids:
+        if has_premium_music and rid == REGULAR_MUSIC_ROLE_ID:
+            continue
         role = member.guild.get_role(rid)
         if role and role not in member.roles and role not in roles_to_add:
             roles_to_add.append(role)
@@ -571,7 +579,7 @@ async def handle_message(bot, db, message: discord.Message):
                             f"🎉 {message.author.mention} **has fully melted their cryo-stasis seal!**\n\n"
                             f"🤝 **Next Step (Condition 2):** An active comrade can now run:\n"
                             f"`/deadzone rescue member:{message.author.mention}`\n\n"
-                            f"*(Rescuers receive a **+100 XC bounty** for pulling you out of the crypt!)*"
+                            f"*(Rescuers receive **+$50,000 Cash, +250 XC & +150 XP** for pulling you out of the crypt!)*"
                         ),
                         color=0x3498DB,
                     )
@@ -889,17 +897,24 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.followup.send(f"⚠️ Failed to rescue {member.mention}.", ephemeral=True)
             return
 
-        reward_xc = int(setting(db, "deadzone_rescue_reward_xc") or 100)
-        db.execute("UPDATE players SET xc = xc + ? WHERE user_id = ?", (reward_xc, interaction.user.id))
+        reward_cash = int(setting(db, "deadzone_rescue_reward_cash") or 50000)
+        reward_xc = int(setting(db, "deadzone_rescue_reward_xc") or 250)
+        reward_xp = int(setting(db, "deadzone_rescue_reward_xp") or 150)
+        leveling._ensure_economy_player(db, interaction.user)
+        db.execute("UPDATE players SET xc = xc + ?, money = money + ? WHERE user_id = ?", (reward_xc, reward_cash, interaction.user.id))
         touch_activity(db, interaction.user.id)
         db.commit()
+        await leveling.grant_xp(bot, db, interaction.user, reward_xp, "rescue_comrade")
 
         embed = discord.Embed(
             title="🤝 [RESCUE OPERATION COMPLETE]",
             description=(
                 f"🎉 {interaction.user.mention} **bravely pulled** {member.mention} **out of the Deadzone crypt!**\n\n"
-                f"🛡️ **{member.mention}** has returned to the living! Perks and rank tags restored.\n"
-                f"💰 **Hero Reward:** {interaction.user.mention} received `+{reward_xc} XC` for the successful rescue!"
+                f"🛡️ **{member.mention}** has returned to the living! Perks and rank tags restored.\n\n"
+                f"💰 **Hero Rescue Rewards:**\n"
+                f"• 💵 **+${reward_cash:,} Cash**\n"
+                f"• 🪙 **+{reward_xc} XC**\n"
+                f"• ⭐ **+{reward_xp} XP**"
             ),
             color=0x2ECC71,
         )
