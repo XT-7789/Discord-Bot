@@ -11,6 +11,7 @@ import tester_feedback
 import gaming
 import leveling
 import war_system
+import deadzone
 
 
 PAGES = {
@@ -735,12 +736,15 @@ class AdminPanel(discord.ui.LayoutView):
             self.add_item(AdminActionButton("war_edit_resources", "Edit Resources", emoji="⛏️", style=discord.ButtonStyle.secondary, row=3))
             self.add_item(AdminActionButton("war_toggle_status", "War Status", emoji="⚔️", style=discord.ButtonStyle.danger, row=3))
         elif self.page == "server":
-            self.add_item(AdminChannelSelect(placeholder="Choose target channel for notices / panels…", default_channel_id=self.target_channel_id, row=2))
-            self.add_item(AdminActionButton("server_toggle_level", "Toggle Notices", emoji="🔔", style=discord.ButtonStyle.secondary, row=3))
-            self.add_item(AdminActionButton("server_set_level_channel", "Set Level Channel", emoji="📌", style=discord.ButtonStyle.primary, row=3))
-            self.add_item(AdminActionButton("server_edit_template", "Edit Level Msg", emoji="✏️", style=discord.ButtonStyle.secondary, row=3))
-            self.add_item(AdminActionButton("server_post_gaming_roles", "Post Gaming Roles Panel", emoji="🎮", style=discord.ButtonStyle.success, row=4))
+            self.add_item(AdminChannelSelect(placeholder="Choose destination channel to deploy panels…", default_channel_id=self.target_channel_id, row=2))
+            self.add_item(AdminActionButton("server_post_gaming_roles", "Post Gaming Roles", emoji="🎮", style=discord.ButtonStyle.success, row=3))
+            self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=3))
+            self.add_item(AdminActionButton("post_tester_feedback", "Post Feedback", emoji="🧪", style=discord.ButtonStyle.primary, row=3))
+            self.add_item(AdminActionButton("server_post_deadzone", "Post Deadzone", emoji="⚰️", style=discord.ButtonStyle.secondary, row=3))
             self.add_item(AdminActionButton("server_say", "Post /say", emoji="📢", style=discord.ButtonStyle.primary, row=4))
+            self.add_item(AdminActionButton("server_toggle_level", "Toggle Notices", emoji="🔔", style=discord.ButtonStyle.secondary, row=4))
+            self.add_item(AdminActionButton("server_set_level_channel", "Set Level Channel", emoji="📌", style=discord.ButtonStyle.secondary, row=4))
+            self.add_item(AdminActionButton("server_edit_template", "Edit Level Msg", emoji="✏️", style=discord.ButtonStyle.secondary, row=4))
             self.add_item(AdminActionButton("server_lottery_draw", "Draw Lottery", emoji="🎲", style=discord.ButtonStyle.secondary, row=4))
         elif self.page == "applications":
             forms = self.application_forms()
@@ -760,16 +764,18 @@ class AdminPanel(discord.ui.LayoutView):
                 self.add_item(AdminActionButton("review:hold", "Hold", emoji="⏸️", row=4))
                 self.add_item(AdminActionButton("review:denied", "Deny", emoji="❌", style=discord.ButtonStyle.danger, row=4))
         elif self.page == "verification":
-            self.add_item(AdminActionButton("post_verification", "Post Verification Here", emoji="✅", style=discord.ButtonStyle.success, row=1))
-            self.add_item(AdminActionButton("toggle_verification", "Close Verification" if _setting(self.db,'verification_enabled','1')=='1' else "Open Verification", emoji="🔁", row=1))
+            self.add_item(AdminChannelSelect(placeholder="Target channel to deploy verification…", default_channel_id=self.target_channel_id, row=1))
+            self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=2))
+            self.add_item(AdminActionButton("toggle_verification", "Close Verification" if _setting(self.db,'verification_enabled','1')=='1' else "Open Verification", emoji="🔁", row=2))
         elif self.page == "tester":
             reports = self.pending_feedback()
             if reports:
                 self.add_item(TesterFeedbackSelect(self._page_rows(reports, "reports"), self.selected_feedback_id))
-            self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel Here", emoji="📨", style=discord.ButtonStyle.primary, row=2))
+            self.add_item(AdminChannelSelect(placeholder="Target channel to deploy feedback panel…", default_channel_id=self.target_channel_id, row=2))
+            self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel", emoji="📨", style=discord.ButtonStyle.primary, row=3))
             if self.selected_feedback():
-                self.add_item(AdminActionButton("accept_feedback", "Accept + Reward", emoji="🎁", style=discord.ButtonStyle.success, row=2))
-                self.add_item(AdminActionButton("reject_feedback", "Reject", emoji="❌", style=discord.ButtonStyle.danger, row=2))
+                self.add_item(AdminActionButton("accept_feedback", "Accept + Reward", emoji="🎁", style=discord.ButtonStyle.success, row=3))
+                self.add_item(AdminActionButton("reject_feedback", "Reject", emoji="❌", style=discord.ButtonStyle.danger, row=3))
         elif self.page == "codes":
             codes = self.reward_codes()
             for value,label in (('all','All codes'),('enabled','Enabled'),('disabled','Disabled')):
@@ -961,8 +967,19 @@ class AdminPanel(discord.ui.LayoutView):
                 value=(
                     f"• 🎮 **Steam:** Role <@&{steam_role}> · Channel <#{steam_ch}>\n"
                     f"• 🟥 **Roblox:** Role <@&{roblox_role}> · Channel <#{roblox_ch}>\n"
-                    f"• 📱 **Mobile:** Role <@&{mobile_role}> · Channel <#{mobile_ch}>\n"
-                    f"-# Select a channel below and click **Post Gaming Roles Panel** to deploy."
+                    f"• 📱 **Mobile:** Role <@&{mobile_role}> · Channel <#{mobile_ch}>"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="📢 Deploy Public Interactive Panels",
+                value=(
+                    "Select a target channel from the picker, then click any button to deploy:\n"
+                    "• 🎮 **Gaming Roles:** Steam, Roblox & Mobile role picker\n"
+                    "• ✅ **Verification:** Server onboarding gate\n"
+                    "• 🧪 **Tester Feedback:** Bug report & feedback panel\n"
+                    "• ⚰️ **Deadzone:** Resurrection breakout status & rescue board\n"
+                    "• 📢 **Post Announcement:** Post custom message as X BOT via `/say`"
                 ),
                 inline=False,
             )
@@ -1029,6 +1046,17 @@ class AdminPanel(discord.ui.LayoutView):
             return
         replacement = self.clone(notice=notice)
         await self._edit(interaction, replacement)
+
+    def _resolve_target_channel(self, interaction):
+        target_cid = self.target_channel_id or getattr(interaction, "channel_id", None)
+        get_ch = getattr(self.bot, "get_channel", None)
+        target_ch = None
+        if get_ch and target_cid:
+            try:
+                target_ch = get_ch(int(target_cid))
+            except Exception:
+                target_ch = None
+        return target_cid, target_ch or getattr(interaction, "channel", None)
 
     async def handle_action(self, interaction, action):
         if not await self.interaction_check(interaction):
@@ -1115,9 +1143,13 @@ class AdminPanel(discord.ui.LayoutView):
             if not form:
                 await self.refresh(interaction, notice="❌ No open Application Form was found.")
                 return
+            target_cid, target_ch = self._resolve_target_channel(interaction)
+            if not target_ch:
+                await self.refresh(interaction, notice="❌ Target channel was not found.")
+                return
             embed = discord.Embed(title=f"{form['emoji']} {form['name']}", description=form["description"], colour=discord.Color.blue())
-            await interaction.channel.send(embed=embed, view=applications.ApplicationStartView(self.bot, self.db, form))
-            await self.refresh(interaction, notice=f"✅ {form['name']} posted in <#{interaction.channel_id}>.")
+            await target_ch.send(embed=embed, view=applications.ApplicationStartView(self.bot, self.db, form))
+            await self.refresh(interaction, notice=f"✅ {form['name']} posted in <#{target_cid}>.")
             return
         if action.startswith("review:"):
             if not self.selected_application():
@@ -1131,13 +1163,21 @@ class AdminPanel(discord.ui.LayoutView):
             await self.refresh(interaction, notice=f"✅ Verification is now {'open' if value == '1' else 'closed'}.")
             return
         if action == "post_verification":
-            await interaction.channel.send(view=applications.VerificationView(self.bot, self.db))
-            await self.refresh(interaction, notice=f"✅ Verification panel posted in <#{interaction.channel_id}>.")
+            target_cid, target_ch = self._resolve_target_channel(interaction)
+            if not target_ch:
+                await self.refresh(interaction, notice="❌ Target channel was not found.")
+                return
+            await target_ch.send(view=applications.VerificationView(self.bot, self.db))
+            await self.refresh(interaction, notice=f"✅ Verification panel posted in <#{target_cid}>.")
             return
         if action == "post_tester_feedback":
+            target_cid, target_ch = self._resolve_target_channel(interaction)
+            if not target_ch:
+                await self.refresh(interaction, notice="❌ Target channel was not found.")
+                return
             embed = discord.Embed(title="🧪 X BOT Tester Feedback", description="Testers: report a bug or suggest an improvement. Staff review every report in `/admin`.", colour=discord.Color.teal())
-            await interaction.channel.send(embed=embed, view=tester_feedback.TesterFeedbackView(self.db))
-            await self.refresh(interaction, notice=f"✅ Tester feedback panel posted in <#{interaction.channel_id}>.")
+            await target_ch.send(embed=embed, view=tester_feedback.TesterFeedbackView(self.db))
+            await self.refresh(interaction, notice=f"✅ Tester feedback panel posted in <#{target_cid}>.")
             return
         if action == "accept_feedback":
             if not self.selected_feedback():
@@ -1202,8 +1242,7 @@ class AdminPanel(discord.ui.LayoutView):
             await interaction.response.send_modal(ServerLevelTemplateModal(self))
             return
         if action == "server_post_gaming_roles":
-            target_cid = self.target_channel_id or interaction.channel_id
-            target_ch = self.bot.get_channel(int(target_cid)) or interaction.channel
+            target_cid, target_ch = self._resolve_target_channel(interaction)
             if not target_ch:
                 await self.refresh(interaction, notice="❌ Target channel was not found.")
                 return
@@ -1221,6 +1260,15 @@ class AdminPanel(discord.ui.LayoutView):
             embed.set_footer(text="X BOT · Gaming Community")
             await target_ch.send(embed=embed, view=gaming.GameRolesView())
             await self.refresh(interaction, notice=f"✅ Gaming Roles panel posted in <#{target_cid}>!")
+            return
+        if action == "server_post_deadzone":
+            target_cid, target_ch = self._resolve_target_channel(interaction)
+            if not target_ch:
+                await self.refresh(interaction, notice="❌ Target channel was not found.")
+                return
+            embed = deadzone.build_deadzone_board_embed()
+            await target_ch.send(embed=embed, view=deadzone.DeadzoneReviveView())
+            await self.refresh(interaction, notice=f"✅ Deadzone Revival board posted in <#{target_cid}>!")
             return
         if action == "server_say":
             await interaction.response.send_modal(ServerSayModal(self))

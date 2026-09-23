@@ -7,10 +7,13 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
+import applications
+import deadzone
 import discord
 import gaming
 import leveling
 import staff_panel
+import tester_feedback
 import war_system
 import war_tier
 
@@ -225,6 +228,36 @@ class StaffPanelV2Tests(unittest.IsolatedAsyncioTestCase):
         post_roles_interaction.channel.send.assert_awaited_once()
         sent_view = post_roles_interaction.channel.send.call_args.kwargs.get("view")
         self.assertIsInstance(sent_view, gaming.GameRolesView)
+
+    async def test_deploy_panels_to_target_channel(self):
+        target_channel_id = 888999
+        target_channel = SimpleNamespace(id=target_channel_id, send=AsyncMock())
+        self.mock_bot.get_channel = Mock(return_value=target_channel)
+
+        panel = staff_panel.AdminPanel(self.mock_bot, self.db, lambda i: True, self.owner_id, page="server", target_channel_id=target_channel_id)
+
+        # 1. Deadzone panel deployment
+        i_deadzone = self.make_interaction()
+        await panel.handle_action(i_deadzone, "server_post_deadzone")
+        target_channel.send.assert_awaited_once()
+        sent_view = target_channel.send.call_args.kwargs.get("view")
+        self.assertIsInstance(sent_view, deadzone.DeadzoneReviveView)
+
+        # 2. Verification panel deployment
+        target_channel.send.reset_mock()
+        i_verify = self.make_interaction()
+        await panel.handle_action(i_verify, "post_verification")
+        target_channel.send.assert_awaited_once()
+        sent_view = target_channel.send.call_args.kwargs.get("view")
+        self.assertIsInstance(sent_view, applications.VerificationView)
+
+        # 3. Tester feedback panel deployment
+        target_channel.send.reset_mock()
+        i_tester = self.make_interaction()
+        await panel.handle_action(i_tester, "post_tester_feedback")
+        target_channel.send.assert_awaited_once()
+        sent_view = target_channel.send.call_args.kwargs.get("view")
+        self.assertIsInstance(sent_view, tester_feedback.TesterFeedbackView)
 
     async def test_command_routing_to_admin_panel(self):
         guild_id = int(os.getenv("DISCORD_GUILD_ID", "0") or 0)

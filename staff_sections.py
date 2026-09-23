@@ -41,12 +41,13 @@ def build(panel, content):
 
     fields=[f for f in content.fields if f.name!='Latest action']
     if panel.page=='applications':
+        channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
         form=panel.selected_form()
         form_text=f"**{form['name']}**\n{form['description'] or 'No description.'}" if form else 'No open form is available. Open or configure forms in Dashboard.'
-        post=action('post_application','toggle_applications')
+        post=action('post_application','post_verification','toggle_applications')
         for c in post:
             if c.action=='post_application':c.disabled=form is None
-        section('Post a form',form_text[:850]+'\n'+panel.list_pages.get('forms',''),listing(ApplicationFormSelect,'forms')+post)
+        section('Post a form / verification',form_text[:850]+'\n'+panel.list_pages.get('forms',''),listing(ApplicationFormSelect,'forms')+channel_select+post)
         selected=panel.selected_application()
         preview=next((f for f in fields if f.name.startswith('#')),None)
         text=(f'**{preview.name}**\n{preview.value[:450]}\nRead the full answers before deciding.' if preview else 'Choose a pending application below to review its answers.')
@@ -55,12 +56,13 @@ def build(panel, content):
         items+=action('review:accepted','review:hold','review:denied')
         section('Review an application',text+'\n'+panel.list_pages.get('applications','No pending applications.'),items)
     elif panel.page=='tester':
+        channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
         selected=panel.selected_feedback()
         section('Choose a report',panel.list_pages.get('reports','No pending reports.'),listing(TesterFeedbackSelect,'reports'))
         if selected:
             section('Selected report',f"**#{selected['id']} · {selected['user_name']}**\n{selected['kind'].title()} · **{selected['title']}**\n{selected['details'][:450]}\nRead the full report before deciding.",[DetailsButton(panel),*action('accept_feedback','reject_feedback')])
         else:section('Review','Select a report to see its details and available actions.')
-        section('Collect feedback','Post the feedback entry in this channel.',action('post_tester_feedback'))
+        section('Collect feedback','Select destination channel and post the feedback entry.',channel_select+action('post_tester_feedback'))
     elif panel.page=='codes':
         filters=take(lambda c:getattr(c,'action','').startswith('filter_codes:'))
         section('Find a code',panel.list_pages.get('codes','No codes match this filter.')+'\nSelecting only previews a code; no reward is issued.')
@@ -74,9 +76,10 @@ def build(panel, content):
         else:section('Selected code','No code selected. Change the filter or create a new code.')
         section('Create a code','Set rewards and usage limits in the form.',action('create_code'))
     elif panel.page=='verification':
+        channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
         roles='\n'.join(f"**{f.name}** · {f.value if f.value!='<@&0>' else 'Not configured'}" for f in fields)
         section('Role mapping',roles or 'No roles configured.')
-        section('Manage verification','Post the entry here or change whether verification is open.',action('post_verification','toggle_verification'))
+        section('Manage verification','Select destination channel and post or toggle verification status.',channel_select+action('post_verification','toggle_verification'))
     elif panel.page=='maintenance':
         if panel.pending_action:
             summary={'backup_now':'Create a database backup. No player assets are changed.','tier5_repair':'Repair stored mission data.','tier6_repair':'Repair stored economy data.'}[panel.pending_action]
@@ -101,7 +104,7 @@ def build(panel, content):
         if legacy_tools:section('Alliance War Tools','Guided war controls.',legacy_tools)
     elif panel.page=='server':
         channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
-        server_actions=action('server_toggle_level','server_set_level_channel','server_edit_template','server_post_gaming_roles','server_say','server_lottery_draw')
+        server_actions=action('server_post_gaming_roles','post_verification','post_tester_feedback','server_post_deadzone','server_say','server_toggle_level','server_set_level_channel','server_edit_template','server_lottery_draw')
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))
         for field in fields:section(field.name,field.value)
         section('Server Channel & Action Controls','Select a channel above, then choose a setting or panel action below.',channel_select+server_actions)
