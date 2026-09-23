@@ -406,12 +406,16 @@ class XCommandTree(app_commands.CommandTree):
 
     async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         original = getattr(error, "original", error)
-        print(f"Slash command error in /{interaction.command.name if interaction.command else 'unknown'}: {original}")
+        cmd_name = interaction.command.name if interaction.command else "unknown"
+        print(f"Slash command error in /{cmd_name}: {original}")
         traceback.print_exception(type(original), original, original.__traceback__)
-        message = xbot_ui.danger(
-            "⚠️ Command Error",
-            "Open /menu to refresh your panel. If this involved a payment or reward, check your balance and items before trying again. The issue has been logged for the administrator.",
-        )
+        if isinstance(error, app_commands.errors.MissingApplicationCommandParameter):
+            detail = f"Missing required parameter: `{error.param.name}`. Please specify this parameter when running `/{cmd_name}`."
+        elif isinstance(error, (app_commands.errors.MissingPermissions, app_commands.errors.MissingRole, app_commands.errors.CheckFailure)):
+            detail = "You do not have permission to execute this command."
+        else:
+            detail = "Open /menu to refresh your panel. If this involved a payment or reward, check your balance and items before trying again. The issue has been logged for the administrator."
+        message = xbot_ui.danger("⚠️ Command Error", detail)
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(view=message, ephemeral=True)

@@ -130,12 +130,23 @@ def initialise(db):
 
 
 def setting(db, key):
-    row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
-    return row["value"] if row else DEFAULTS.get(key, "0")
+    try:
+        row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
+        if not row:
+            return DEFAULTS.get(key, "0")
+        if hasattr(row, "keys"):
+            return str(row["value"])
+        return str(row[0])
+    except Exception:
+        return DEFAULTS.get(key, "0")
 
 
 def get_party_channel(bot, db, guild=None):
-    cid = int(setting(db, "deadzone_party_channel_id") or setting(db, "general_channel_id") or DEFAULT_GENERAL_CHANNEL_ID)
+    try:
+        cid_val = setting(db, "deadzone_party_channel_id") or setting(db, "general_channel_id") or str(DEFAULT_GENERAL_CHANNEL_ID)
+        cid = int(cid_val) if str(cid_val).isdigit() else DEFAULT_GENERAL_CHANNEL_ID
+    except Exception:
+        cid = DEFAULT_GENERAL_CHANNEL_ID
     ch = getattr(bot, "get_channel", lambda _id: None)(cid) if cid and hasattr(bot, "get_channel") else None
     if not ch and guild and hasattr(guild, "get_channel"):
         try:
@@ -146,7 +157,11 @@ def get_party_channel(bot, db, guild=None):
 
 
 def get_notif_channel(bot, db, guild=None):
-    cid = int(setting(db, "deadzone_notification_channel_id") or DEFAULT_NOTIF_CHANNEL_ID)
+    try:
+        cid_val = setting(db, "deadzone_notification_channel_id") or str(DEFAULT_NOTIF_CHANNEL_ID)
+        cid = int(cid_val) if str(cid_val).isdigit() else DEFAULT_NOTIF_CHANNEL_ID
+    except Exception:
+        cid = DEFAULT_NOTIF_CHANNEL_ID
     ch = getattr(bot, "get_channel", lambda _id: None)(cid) if cid and hasattr(bot, "get_channel") else None
     if not ch and guild and hasattr(guild, "get_channel"):
         try:
@@ -788,39 +803,59 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         await interaction.response.send_message(content=f"🔔 {target.mention}" if target else None, embed=embed)
 
     @deadzone_group.command(name="wake", description="Wake up or revive a sleeping member from the Deadzone")
-    @app_commands.describe(member="Member currently sleeping in the Deadzone")
-    async def dz_wake(interaction: discord.Interaction, member: discord.Member):
-        status = member_status(db, member.id)
+    @app_commands.describe(member="Member currently sleeping in the Deadzone (optional: defaults to yourself)")
+    async def dz_wake(interaction: discord.Interaction, member: Optional[discord.Member] = None):
+        target = member or interaction.user
+        if not isinstance(target, discord.Member) and interaction.guild:
+            target = interaction.guild.get_member(target.id) or target
+
+        status = member_status(db, target.id)
         if not status or not status["is_in_deadzone"]:
-            await interaction.response.send_message(f"{member.mention} is not in the Deadzone! They are already active.", ephemeral=True)
+            msg = f"{target.mention} is not in the Deadzone! They are already active." if member else "You are not in the Deadzone! You are already active."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
 
         touch_activity(db, interaction.user.id)
 
         # If Admin or Staff: directly wake up and revive them!
         if is_council_or_admin(interaction):
-            await interaction.response.defer(ephemeral=True)
-            success = await revive_member(bot, db, member, triggered_by="admin_wake")
-            if success:
-                await interaction.followup.send(f"⚡ **Wake Up Successful!** Revived {member.mention} from Deadzone. All Member, Music, and Level perks restored.", ephemeral=True)
-            else:
-                await interaction.followup.send(f"⚠️ Failed to revive {member.mention}.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            try:
+                success = await revive_member(bot, db, target, triggered_by="admin_wake")
+                if success:
+                    await interaction.followup.send(f"⚡ **Wake Up Successful!** Revived {target.mention} from Deadzone. All Member, Music, and Level perks restored.", ephemeral=True)
+                else:
+                    await interaction.followup.send(f"⚠️ Failed to revive {target.mention}.", ephemeral=True)
+            except Exception as e:
+                await interaction.followup.send(f"⚠️ Error while reviving {target.mention}: {e}", ephemeral=True)
             return
 
-        # For regular members: send wake-up notification/DM
+        # For regular members:
         thaw = status["thaw_count"] if "thaw_count" in status.keys() else 0
+        if target.id == interaction.user.id:
+            await interaction.response.send_message(
+                f"🧊 **You are resting in the Deadzone crypt!**\n"
+                f"Thaw progress: **{thaw}/5 messages**.\n"
+                f"Chat **{max(0, 5 - thaw)} more time(s)** in #general or Lounges to thaw, then have a comrade rescue you with `/deadzone rescue`!",
+                ephemeral=True,
+            )
+            return
+
         try:
-            await member.send(
+            await target.send(
                 f"📢 **WAKE UP CALL FROM {interaction.user.display_name}!**\n"
                 f"You are resting in the Deadzone in **{interaction.guild.name}**.\n"
                 f"Thaw progress: **{thaw}/5 messages**.\n"
                 f"Post {max(0, 5 - thaw)} more message(s) in chat to thaw, then have a comrade rescue you with `/deadzone rescue`!"
             )
-            await interaction.response.send_message(f"🔔 Sent a direct wake-up call to {member.mention} (Thaw progress: {thaw}/5)!", ephemeral=True)
+            await interaction.response.send_message(f"🔔 Sent a direct wake-up call to {target.mention} (Thaw progress: {thaw}/5)!", ephemeral=True)
         except discord.Forbidden:
             await interaction.response.send_message(
-                f"📢 {member.mention}, wake up! {interaction.user.mention} is calling you from #general! Send messages in chat to thaw ({thaw}/5) then get rescued!",
+                f"📢 {target.mention}, wake up! {interaction.user.mention} is calling you from #general! Send messages in chat to thaw ({thaw}/5) then get rescued!",
             )
+        except Exception:
+            await interaction.response.send_message(f"🔔 Sent a direct wake-up call to {target.mention}!", ephemeral=True)
 
     @deadzone_group.command(name="rescue", description="Rescue a thawed teammate from the Deadzone and earn +50 XC")
     @app_commands.describe(member="Thawed teammate currently sleeping in the Deadzone")

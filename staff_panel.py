@@ -41,8 +41,15 @@ class AdminPageSelect(discord.ui.Select):
 
 
 def _setting(db, key, default="0"):
-    row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
-    return row["value"] if row else default
+    try:
+        row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
+        if not row:
+            return default
+        if hasattr(row, "keys"):
+            return str(row["value"])
+        return str(row[0])
+    except Exception:
+        return default
 
 
 def _set_setting(db, key, value):
