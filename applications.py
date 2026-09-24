@@ -470,7 +470,7 @@ def register_commands(bot, db, is_staff=None, staff_kwargs=None):
             except discord.HTTPException: pass
         await interaction.response.send_message(view=xbot_ui.success("Application Reviewed", body), ephemeral=True)
 
-    @bot.tree.command(name="verify", description="Admin: Manually verify a new member and grant Guest role", **kwargs)
+    @bot.tree.command(name="verify", description="Admin: Manually verify a new member and grant Guest role")
     @app_commands.describe(member="The new member to manually verify")
     async def verify_cmd(interaction: discord.Interaction, member: discord.Member):
         if not interaction.guild:

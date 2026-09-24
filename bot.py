@@ -308,6 +308,7 @@ STAFF_SLASH_COMMANDS = {
     "level",
     "deadzone_restore", "deadzone_scan", "deadzone_send", "level_sync",
     "war_start", "war_end",
+    "verify",
 }
 
 
@@ -454,7 +455,9 @@ class XBot(discord.Client):
                 self.add_view(suites.SuiteHostControlView(s["id"]))
         except Exception:
             pass
-        published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS
+        published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS | {
+            "lounge_admin", "code_create", "code_disable", "application_review", "verify"
+        }
 
         def hide_panel_commands(command_guild, allowed_names):
             hidden = []
@@ -502,7 +505,7 @@ class XBot(discord.Client):
             restore_panel_commands(None, removed_global)
         else:
             # Fallback for installations that have not configured a server ID.
-            global_hidden = hide_panel_commands(None, PUBLIC_PLAYER_COMMANDS)
+            global_hidden = hide_panel_commands(None, published)
             await self.tree.sync()
             report_sync(None, global_hidden)
             restore_panel_commands(None, global_hidden)
