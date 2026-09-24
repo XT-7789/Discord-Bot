@@ -3128,7 +3128,20 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             container.add_item(discord.ui.TextDisplay(
                 "-# A Template is a saved battle plan. It does not create or consume units."
             ))
+            container.add_item(discord.ui.ActionRow(DivisionBackButton(owner_id)))
             self.add_item(container)
+
+    class DivisionBackButton(discord.ui.Button):
+        def __init__(self, owner_id: int):
+            super().__init__(label="Back to Armed Forces", emoji="🪖", style=discord.ButtonStyle.secondary)
+            self.owner_id = owner_id
+
+        async def callback(self, interaction: discord.Interaction):
+            builder = getattr(bot, "xbot_armed_forces_builder", None)
+            if builder:
+                await interaction.response.edit_message(view=builder(self.owner_id))
+            else:
+                await interaction.response.send_message("Loading Armed Forces...", ephemeral=True)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
@@ -3410,7 +3423,12 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
                 WarQuickButton("rally", "Rally", "🔥"),
                 WarQuickButton("costs", "Costs", "🧾"),
             ))
-            container.add_item(discord.ui.ActionRow(WarBackButton(owner_id), WarLobbyButton(owner_id)))
+            container.add_item(discord.ui.ActionRow(
+                WarQuickButton("repair", "Repair Capital", "🔨", discord.ButtonStyle.secondary),
+                WarQuickButton("fortify", "Fortify", "🏰", discord.ButtonStyle.secondary),
+                WarBackButton(owner_id),
+                WarLobbyButton(owner_id),
+            ))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -3425,6 +3443,42 @@ def register_commands(bot, db, create_player, get_active_war, get_alliance_for_u
             self.action = action
 
         async def callback(self, interaction: discord.Interaction):
+            if self.action == "repair":
+                player = create_player(interaction.user)
+                if player["capital_health"] >= 100:
+                    await interaction.response.edit_message(view=WarDetailView(interaction.user.id, "🏛️ Capital In Peak Condition", "Your Capital Health is already at **100/100 HP**.", discord.Color.green()))
+                    return
+                cost_per_hp = setting(db, "repair_cost_per_hp")
+                missing_hp = 100 - player["capital_health"]
+                cost = missing_hp * cost_per_hp
+                if player["money"] < cost:
+                    affordable_hp = player["money"] // cost_per_hp
+                    if affordable_hp <= 0:
+                        await interaction.response.edit_message(view=WarDetailView(interaction.user.id, "❌ Not Enough War Credits", f"Repairing 1 HP costs **{cost_per_hp:,} War Credits**, but you have **{player['money']:,}**.", discord.Color.red()))
+                        return
+                    actual_hp = affordable_hp
+                    actual_cost = actual_hp * cost_per_hp
+                else:
+                    actual_hp = missing_hp
+                    actual_cost = cost
+                db.execute("UPDATE players SET capital_health=capital_health+?, money=money-? WHERE user_id=?", (actual_hp, actual_cost, interaction.user.id))
+                db.commit()
+                await interaction.response.edit_message(view=WarDetailView(interaction.user.id, "🔨 Capital Repaired", f"Restored **+{actual_hp} HP** for **{actual_cost:,} War Credits**.", discord.Color.green()))
+                return
+            if self.action == "fortify":
+                player = create_player(interaction.user)
+                fort_row = db.execute("SELECT fortification_level FROM player_war_settings WHERE user_id=?", (interaction.user.id,)).fetchone()
+                fort_level = int(fort_row["fortification_level"]) if fort_row else 0
+                fort_cost = setting(db, "fortify_base_cost") * (fort_level + 1)
+                if player["money"] < fort_cost:
+                    await interaction.response.edit_message(view=WarDetailView(interaction.user.id, "❌ Not Enough War Credits", f"Upgrading Fortification to Level {fort_level + 1} requires **{fort_cost:,} War Credits** (You have: {player['money']:,}).", discord.Color.red()))
+                    return
+                db.execute("INSERT OR IGNORE INTO player_war_settings(user_id) VALUES(?)", (interaction.user.id,))
+                db.execute("UPDATE player_war_settings SET fortification_level=fortification_level+1 WHERE user_id=?", (interaction.user.id,))
+                db.execute("UPDATE players SET money=money-? WHERE user_id=?", (fort_cost, interaction.user.id))
+                db.commit()
+                await interaction.response.edit_message(view=WarDetailView(interaction.user.id, "🏰 Fortifications Upgraded", f"Upgraded to **Fortification Level {fort_level + 1}** for **{fort_cost:,} War Credits**.", discord.Color.green()))
+                return
             if self.action == "supply":
                 await interaction.response.send_modal(SupplyPurchaseModal(interaction.user.id, interaction.message))
                 return

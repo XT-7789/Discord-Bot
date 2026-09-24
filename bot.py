@@ -285,7 +285,7 @@ PUBLIC_PLAYER_COMMANDS = {
     "warfront", "city", "army", "recruit", "diplomacy", "casino", "craft", "research",
     # Fast actions that are still useful without opening a panel first.
     "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
-    "declare_war", "attack", "balance", "code_redeem", "daily", "deadzone",
+    "attack", "balance", "code_redeem", "daily", "deadzone",
     "level", "rank",
     # Direct slash commands restored for convenient fast access without menu-clicking fatigue.
     "exchange", "pay", "bank", "leaderboard",
@@ -304,10 +304,10 @@ STAFF_SLASH_COMMANDS = {
     # must not disappear before their button-driven replacements are ready.
     "inrole", "role", "spawn", "remove_item", "economy_adjust",
     "inventory_check", "lottery_draw", "setlevel", "server_settings",
-    "war_start", "war_end", "forces_check",
+    "forces_check",
     "level",
     "deadzone_restore", "deadzone_scan", "deadzone_send", "level_sync",
-    "lounge_admin",
+    "war_start", "war_end",
 }
 
 
@@ -1141,8 +1141,17 @@ for _retired_command in (
     "role_shop", "role_buy",
     # Player market subcommands unified into /market
     "market_sell", "market_mine", "market_cancel",
+    # War & Military commands unified into /war, /army, /diplomacy, /city
+    "alliance_create", "alliance_join", "alliance_leave", "alliance_info",
+    "division_create", "division_add", "division_remove", "division_delete", "divisions",
+    "capital", "defense", "fortify", "repair", "scout", "mines",
+    "demobilize", "war_readiness", "war_history", "war_stats", "war_status",
+    "declare_war", "nation_war_status", "offer_peace",
+    "season", "war_objectives", "season_missions", "military_name",
 ):
     bot.tree.remove_command(_retired_command)
+    if _staff_guild_id:
+        bot.tree.remove_command(_retired_command, guild=discord.Object(id=_staff_guild_id))
 
 lounges.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
@@ -1204,176 +1213,7 @@ async def alliance_name_autocomplete(interaction: discord.Interaction, current: 
         ORDER BY name LIMIT 25""", (f"%{current}%", f"%{current}%")).fetchall()
     return [app_commands.Choice(name=f"[{row['tag']}] {row['name']}"[:100], value=row["name"]) for row in rows]
 
-@bot.tree.command(name="alliance_create", description="Create an Alliance")
-@app_commands.describe(name="Alliance name", tag="Short tag, for example XW")
-async def alliance_create(
-    interaction: discord.Interaction,
-    name: str,
-    tag: str
-):
-    create_player(interaction.user)
-    name = name.strip()
-    tag = tag.strip().upper()
 
-    if len(name) < 3 or len(name) > 30:
-        await interaction.response.send_message(
-            "❌ Alliance name must be between 3 and 30 characters.",
-            ephemeral=True
-        )
-        return
-
-    if not tag.isalnum() or len(tag) < 2 or len(tag) > 5:
-        await interaction.response.send_message(
-            "❌ Alliance tag must be 2–5 letters or numbers.",
-            ephemeral=True
-        )
-        return
-
-    if get_alliance_for_user(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ Leave your current Alliance first.",
-            ephemeral=True
-        )
-        return
-
-    try:
-        cursor = db.execute(
-            """
-            INSERT INTO alliances (name, tag, leader_id, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (name, tag, interaction.user.id, int(time.time()))
-        )
-
-        db.execute(
-            """
-            INSERT INTO alliance_members (user_id, alliance_id)
-            VALUES (?, ?)
-            """,
-            (interaction.user.id, cursor.lastrowid)
-        )
-        db.commit()
-
-    except sqlite3.IntegrityError:
-        await interaction.response.send_message(
-            "❌ That Alliance name or tag is already taken.",
-            ephemeral=True
-        )
-        return
-
-    await interaction.response.send_message(view=xbot_ui.success("🤝 Alliance Created", f"**[{tag}] {name}** is ready for members."))
-
-
-@bot.tree.command(name="alliance_join", description="Join an Alliance")
-@app_commands.describe(name="The exact Alliance name")
-@app_commands.autocomplete(name=alliance_name_autocomplete)
-async def alliance_join(interaction: discord.Interaction, name: str):
-    create_player(interaction.user)
-
-    if get_alliance_for_user(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ Leave your current Alliance first.",
-            ephemeral=True
-        )
-        return
-
-    alliance = get_alliance_by_name(name.strip())
-
-    if alliance is None:
-        await interaction.response.send_message(
-            "❌ Alliance not found.",
-            ephemeral=True
-        )
-        return
-
-    db.execute(
-        "INSERT INTO alliance_members (user_id, alliance_id) VALUES (?, ?)",
-        (interaction.user.id, alliance["id"])
-    )
-    db.commit()
-
-    await interaction.response.send_message(view=xbot_ui.success("🤝 Alliance Joined", f"You joined **[{alliance['tag']}] {alliance['name']}**!"))
-
-
-@bot.tree.command(name="alliance_leave", description="Leave your current Alliance")
-async def alliance_leave(interaction: discord.Interaction):
-    alliance = get_alliance_for_user(interaction.user.id)
-
-    if alliance is None:
-        await interaction.response.send_message(
-            "❌ You are not in an Alliance.",
-            ephemeral=True
-        )
-        return
-
-    members = db.execute(
-        "SELECT user_id FROM alliance_members WHERE alliance_id = ?",
-        (alliance["id"],)
-    ).fetchall()
-
-    message = ""
-
-    if alliance["leader_id"] == interaction.user.id:
-        other_members = [
-            member["user_id"]
-            for member in members
-            if member["user_id"] != interaction.user.id
-        ]
-
-        if other_members:
-            new_leader = other_members[0]
-            db.execute(
-                "UPDATE alliances SET leader_id = ? WHERE id = ?",
-                (new_leader, alliance["id"])
-            )
-            message = f" New leader: <@{new_leader}>."
-        else:
-            db.execute(
-                "DELETE FROM alliances WHERE id = ?",
-                (alliance["id"],)
-            )
-            message = " The Alliance was disbanded."
-
-    db.execute(
-        "DELETE FROM alliance_members WHERE user_id = ?",
-        (interaction.user.id,)
-    )
-    db.commit()
-
-    await interaction.response.send_message(view=xbot_ui.warning("👋 Alliance Left", f"You left **[{alliance['tag']}] {alliance['name']}**.{message}"))
-
-
-@bot.tree.command(name="alliance_info", description="View Alliance information")
-@app_commands.describe(name="Leave empty to view your own Alliance")
-@app_commands.autocomplete(name=alliance_name_autocomplete)
-async def alliance_info(
-    interaction: discord.Interaction,
-    name: Optional[str] = None
-):
-    alliance = (
-        get_alliance_for_user(interaction.user.id)
-        if name is None
-        else get_alliance_by_name(name.strip())
-    )
-
-    if alliance is None:
-        await interaction.response.send_message(
-            "❌ Alliance not found.",
-            ephemeral=True
-        )
-        return
-
-    members = db.execute(
-        "SELECT user_id FROM alliance_members WHERE alliance_id = ?",
-        (alliance["id"],)
-    ).fetchall()
-
-    member_mentions = ", ".join(
-        f"<@{member['user_id']}>"
-        for member in members
-    )
-
-    await interaction.response.send_message(view=xbot_ui.panel(f"🤝 [{alliance['tag']}] {alliance['name']}", f"👑 **Leader:** <@{alliance['leader_id']}>\n👥 **Members ({len(members)}):** {member_mentions}", colour=discord.Color.teal()))
 
 # ---------- Alliance War Events ----------
 
@@ -1435,25 +1275,6 @@ async def war_start(
     await interaction.response.send_message(view=xbot_ui.danger("⚔️ Alliance War Declared", f"## [{attacker['tag']}] {attacker['name']}\n### VS\n## [{defender['tag']}] {defender['name']}"))
 
 
-@bot.tree.command(name="war_status", description="View the current Alliance War")
-async def war_status(interaction: discord.Interaction):
-    war = get_active_war()
-
-    if war is None:
-        await interaction.response.send_message(view=xbot_ui.success("🕊️ World at Peace", "There is no active Alliance War."))
-        return
-
-    attacker = db.execute(
-        "SELECT * FROM alliances WHERE id = ?",
-        (war["attacker_alliance_id"],)
-    ).fetchone()
-
-    defender = db.execute(
-        "SELECT * FROM alliances WHERE id = ?",
-        (war["defender_alliance_id"],)
-    ).fetchone()
-
-    await interaction.response.send_message(view=xbot_ui.panel("⚔️ Active Alliance War", f"## [{attacker['tag']}] {attacker['name']}\n💥 Power: **{alliance_power(attacker['id']):,}**\n\n### VS\n\n## [{defender['tag']}] {defender['name']}\n💥 Power: **{alliance_power(defender['id']):,}**", colour=discord.Color.dark_red()))
 
 
 @bot.tree.command(name="war_end", description="Admin: end the current Alliance War")

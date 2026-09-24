@@ -233,6 +233,32 @@ class InboxSelect(discord.ui.Select):
         ))
 
 
+class AllianceJoinSelect(discord.ui.Select):
+    def __init__(self, panel):
+        self.panel = panel
+        rows = panel.db.execute("SELECT id, name, tag FROM alliances ORDER BY name LIMIT 25").fetchall()
+        options = [discord.SelectOption(label=f"[{row['tag']}] {row['name']}"[:100], value=str(row["id"]), emoji="🤝") for row in rows]
+        super().__init__(placeholder="Or choose an Alliance to join...", options=options or [discord.SelectOption(label="No Alliances available", value="0")])
+
+    async def callback(self, interaction):
+        if interaction.user.id != self.panel.owner_id:
+            await interaction.response.send_message("This menu belongs to another player.", ephemeral=True); return
+        if self.values[0] == "0":
+            await interaction.response.send_message("No Alliances available to join.", ephemeral=True); return
+        alliance_id = int(self.values[0])
+        alliance = self.panel.db.execute("SELECT * FROM alliances WHERE id=?", (alliance_id,)).fetchone()
+        if not alliance:
+            await interaction.response.send_message("❌ Alliance not found.", ephemeral=True); return
+        if _alliance(self.panel.db, self.panel.owner_id):
+            await interaction.response.send_message("❌ Leave your current Alliance first.", ephemeral=True); return
+        self.panel.db.execute("INSERT INTO alliance_members(user_id, alliance_id) VALUES(?, ?)", (self.panel.owner_id, alliance_id))
+        self.panel.db.commit()
+        await interaction.response.edit_message(view=DiplomacyView(
+            self.panel.bot, self.panel.db, self.panel.create_player, self.panel.owner_id,
+            page="alliance", notice=f"Joined [{alliance['tag']}] {alliance['name']}!"
+        ))
+
+
 class AllianceCreateModal(discord.ui.Modal, title="Create an Alliance"):
     name = discord.ui.TextInput(label="Alliance name", min_length=3, max_length=30)
     tag = discord.ui.TextInput(label="Alliance tag", placeholder="2–5 letters or numbers", min_length=2, max_length=5)
@@ -444,6 +470,8 @@ class DiplomacyView(discord.ui.LayoutView):
             alliance = _alliance(self.db, self.owner_id)
             if not alliance:
                 box.add_item(discord.ui.ActionRow(ActionButton("create_alliance", "Create Alliance", "➕", discord.ButtonStyle.success)))
+                if self.db.execute("SELECT 1 FROM alliances LIMIT 1").fetchone():
+                    box.add_item(discord.ui.ActionRow(AllianceJoinSelect(self)))
             else:
                 controls = []
                 if alliance["leader_id"] == self.owner_id:

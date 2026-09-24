@@ -1970,10 +1970,48 @@ def register_commands(bot, db, create_player) -> None:
 
     class OpenRecruitButton(discord.ui.Button):
         def __init__(self,owner_id,branch):
-            super().__init__(label='Recruit',style=discord.ButtonStyle.primary)
+            super().__init__(label='Recruit',emoji='🪖',style=discord.ButtonStyle.primary)
             self.owner_id,self.branch=owner_id,branch
         async def callback(self,i):
             await i.response.edit_message(view=ArmyShopView(self.owner_id,self.branch))
+
+    class OpenDivisionsButton(discord.ui.Button):
+        def __init__(self, owner_id: int):
+            super().__init__(label="Divisions", emoji="📐", style=discord.ButtonStyle.secondary)
+            self.owner_id = owner_id
+
+        async def callback(self, interaction: discord.Interaction):
+            rows = db.execute("SELECT * FROM division_templates WHERE user_id=? ORDER BY service,name", (self.owner_id,)).fetchall()
+            if not rows:
+                await interaction.response.send_message(view=xbot_ui.warning(
+                    "📐 No Division Templates",
+                    "You do not have any saved division templates yet. Create your templates in War Centre."
+                ), ephemeral=True)
+                return
+            import war_tier
+            await interaction.response.edit_message(view=war_tier.DivisionTemplateView(self.owner_id, rows, rows[0]["id"]))
+
+    class DemobilizeButton(discord.ui.Button):
+        def __init__(self, owner_id: int):
+            super().__init__(label="Demobilize", emoji="🔄", style=discord.ButtonStyle.secondary)
+            self.owner_id = owner_id
+
+        async def callback(self, interaction: discord.Interaction):
+            units = db.execute("""SELECT u.name, u.emoji, p.quantity FROM player_war_units p
+                JOIN war_unit_types u ON u.id=p.unit_type_id
+                WHERE p.user_id=? AND p.quantity>0 ORDER BY u.name""", (self.owner_id,)).fetchall()
+            if not units:
+                await interaction.response.send_message("❌ You have no military units to demobilize.", ephemeral=True)
+                return
+            lines = [f"• {u['emoji']} **{u['name']}**: {u['quantity']:,} units" for u in units]
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="🔄 Demobilize Units",
+                    description="To retire units and get a 50% War Credit refund, manage your armed forces:\n\n" + "\n".join(lines),
+                    color=discord.Color.dark_grey()
+                ),
+                ephemeral=True
+            )
 
     class ArmedForcesView(discord.ui.LayoutView):
         """The unified replacement for /army, /airforce and /navy viewing."""
@@ -2044,8 +2082,11 @@ def register_commands(bot, db, create_player) -> None:
                     container.add_item(discord.ui.TextDisplay(f"**{discord.utils.escape_markdown(selected['name'])}**\nOwned **{selected['quantity']:,}** · Unit Power **{selected['power']:,}**\nTotal Power **{selected['quantity']*selected['power']:,}**\n{discord.utils.escape_markdown(selected['description'][:250])}"))
             else:
                 container.add_item(discord.ui.TextDisplay(f"### No {names[branch]} units yet\nOpen Recruit to choose your first unit."))
-            container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.ActionRow(OpenRecruitButton(owner_id,branch)))
+            container.add_item(discord.ui.ActionRow(
+                OpenRecruitButton(owner_id, branch),
+                OpenDivisionsButton(owner_id),
+                DemobilizeButton(owner_id),
+            ))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
