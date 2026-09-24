@@ -12,6 +12,10 @@ def build(panel, content):
     parts=[discord.ui.TextDisplay(f'-# ✦ X SYSTEM · ADMIN\n# {PAGES[panel.page].upper()}\n{content.description or ""}')]
     if panel.notice:
         parts.append(discord.ui.TextDisplay('### Latest result\n'+panel.notice[:1800]))
+    switches = [c for c in controls if isinstance(c, AdminPageSelect)]
+    for s in switches: controls.remove(s)
+    if switches:
+        parts.append(discord.ui.ActionRow(*switches))
 
     def take(predicate):
         found=[c for c in controls if predicate(c)]
@@ -125,10 +129,7 @@ def build(panel, content):
         if changes:section('Manage','Choose targets and review details before confirming changes.',changes)
     else:
         for field in fields:section(field.name,field.value)
-    # Section navigation never sits between a record picker and its actions.
-    switches=take(lambda c:isinstance(c,AdminPageSelect))
     if controls:add_rows(controls)
-    add_rows(switches)
     return parts
 
 

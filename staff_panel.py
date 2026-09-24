@@ -16,11 +16,27 @@ import deadzone
 
 PAGES = {
     'home': 'Control Centre', 'panels': 'Post Panels', 'members': 'Members', 'assets': 'Player Assets',
-    'deadzone': 'Deadzone', 'server': 'Server Tools', 'war_tools': 'Alliance War',
+    'deadzone': 'Deadzone', 'server': 'Server Tools', 'war_tools': 'Armed Forces',
     'applications': 'Applications', 'tester': 'Tester Reports', 'verification': 'Verification',
     'codes': 'Reward Codes', 'economy': 'Economy Status', 'maintenance': 'Maintenance',
 }
 TOOL_GROUPS = {'members': 'Members', 'assets': 'Assets', 'deadzone': 'Deadzone', 'server': 'Server', 'war_tools': 'War'}
+
+PAGE_METADATA = {
+    'home': ('🏠', 'Control Centre', 'Main staff overview & navigation hub'),
+    'panels': ('📢', 'Post Panels', 'Deploy Verification, Application, Deadzone, Lounge, Gaming'),
+    'server': ('🔔', 'Server Tools', 'Post /say announcements and manage level-up notices'),
+    'codes': ('🎟️', 'Reward Codes', 'Create and manage gift redemption codes'),
+    'verification': ('🛡️', 'Verification', 'Role mapping and verification status toggle'),
+    'members': ('👥', 'Members', 'Give/remove roles, level sync, and inspect members'),
+    'assets': ('💰', 'Player Assets', 'Edit money, bank, cash, backpack items and inventory'),
+    'war_tools': ('⚔️', 'Armed Forces', 'Inspect military, troops, capital health & resources'),
+    'deadzone': ('💀', 'Deadzone', 'Send to Deadzone, revive members, scan inactive (7d)'),
+    'applications': ('📝', 'Applications', 'Review pending staff and role applications'),
+    'tester': ('🧪', 'Tester Reports', 'Review bug reports and issue tester rewards'),
+    'economy': ('📊', 'Economy Status', 'Read-only live economy inflation and financial metrics'),
+    'maintenance': ('🛠️', 'Maintenance', 'System diagnostics, database backups, and data repair'),
+}
 
 
 def code_status(row):
@@ -33,8 +49,17 @@ def code_status(row):
 
 class AdminPageSelect(discord.ui.Select):
     def __init__(self, page):
-        super().__init__(placeholder='Switch admin section…', row=0, options=[
-            discord.SelectOption(label=label, value=key, default=key == page) for key, label in PAGES.items()])
+        options = [
+            discord.SelectOption(
+                emoji=PAGE_METADATA.get(key, ('⚙️', ''))[0],
+                label=PAGES[key],
+                value=key,
+                description=PAGE_METADATA.get(key, ('', '', 'Admin section'))[2][:100],
+                default=(key == page),
+            )
+            for key in PAGES
+        ]
+        super().__init__(placeholder='📂 Jump directly to any section…', row=0, options=options)
 
     async def callback(self, interaction):
         await self.view.handle_action(interaction, 'page:' + self.values[0])
@@ -651,18 +676,21 @@ class AdminPanel(discord.ui.LayoutView):
             parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f"### {field.name}\n{field.value}")))
         rows = {}
         for control in self._controls:
-            row = control.row or 0
+            row = control.row if control.row is not None else 0
             control.row = None
             rows.setdefault(row, []).append(control)
         if self.page == "home":
-            sections = ((0,'📥 Applications & Feedback','Review pending submissions and tester reports.'),
-                        (1,'🛡️ Players & Economy','Manage economy assets, military forces, roles and Deadzone.'),
-                        (2,'⚙️ Server Settings & Gaming','Level-up notices, announcements, and Gaming Zone panels.'),
-                        (3,'🔑 Access & Reward Codes','Verification panels and reward codes.'),
-                        (4,'🛠️ System & Status','Live economy status and system maintenance.'))
+            if 99 in rows:
+                parts.extend((discord.ui.Separator(), discord.ui.ActionRow(*rows.pop(99))))
+            sections = (
+                (0, '📢 Channel Panels & Server Setup', 'Deploy public panels to channels, announcements & reward codes.'),
+                (1, '👥 Player & Moderation Manager', 'Manage member roles, player economy assets, armed forces & Deadzone.'),
+                (2, '📬 Submissions & Reviews', 'Review pending staff applications and beta tester bug reports.'),
+                (3, '🛠️ System Diagnostics & Health', 'Live economy status, system health checks & backups.'),
+            )
             for row, title, hint in sections:
                 if row in rows:
-                    parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f'### {title}\n{hint}'),discord.ui.ActionRow(*rows.pop(row))))
+                    parts.extend((discord.ui.Separator(), discord.ui.TextDisplay(f'### {title}\n{hint}'), discord.ui.ActionRow(*rows.pop(row))))
         super().add_item(discord.ui.Container(*parts, accent_colour=0x36CFC9))
         super().add_item(discord.ui.ActionRow(
             AdminActionButton("back", "‹ Back"), AdminActionButton("page:home", "⌂ Home"),
@@ -809,12 +837,36 @@ class AdminPanel(discord.ui.LayoutView):
             if self.selected_code():
                 self.add_item(AdminActionButton("toggle_code", "Disable Code" if self.selected_code()['enabled'] else "Enable Code", emoji="🔁", row=2))
         elif self.page == "home":
-            pending=len(self.pending_applications());reports=len(self.pending_feedback())
-            for row,pages in ((0,('panels','applications','tester')),(1,('members','assets','deadzone')),(2,('server','war_tools')),(3,('verification','codes')),(4,('economy','maintenance'))):
-                for page in pages:
-                    count={'applications':pending,'tester':reports}.get(page)
-                    label=PAGES[page]+(f' · {count}' if count is not None else '')
-                    self.add_item(AdminActionButton('page:'+page,label,style=discord.ButtonStyle.primary if count else discord.ButtonStyle.secondary,row=row))
+            quick_select = AdminPageSelect(self.page)
+            quick_select.row = 99
+            self.add_item(quick_select)
+
+            pending = len(self.pending_applications())
+            reports = len(self.pending_feedback())
+
+            # Row 0: 📢 Deploy Panels & Server Tools
+            for page in ('panels', 'server', 'codes', 'verification'):
+                emoji, label = PAGE_METADATA[page][0], PAGES[page]
+                style = discord.ButtonStyle.primary if page == 'panels' else discord.ButtonStyle.secondary
+                self.add_item(AdminActionButton('page:' + page, label, emoji=emoji, style=style, row=0))
+
+            # Row 1: 👥 Player & Moderation Manager
+            for page in ('members', 'assets', 'war_tools', 'deadzone'):
+                emoji, label = PAGE_METADATA[page][0], PAGES[page]
+                self.add_item(AdminActionButton('page:' + page, label, emoji=emoji, style=discord.ButtonStyle.secondary, row=1))
+
+            # Row 2: 📬 Submissions & Reviews
+            for page in ('applications', 'tester'):
+                count = {'applications': pending, 'tester': reports}.get(page, 0)
+                label = PAGES[page] + (f' · {count}' if count is not None else '')
+                emoji = PAGE_METADATA[page][0]
+                style = discord.ButtonStyle.primary if count else discord.ButtonStyle.secondary
+                self.add_item(AdminActionButton('page:' + page, label, emoji=emoji, style=style, row=2))
+
+            # Row 3: 🛠️ Diagnostics & Maintenance
+            for page in ('economy', 'maintenance'):
+                emoji, label = PAGE_METADATA[page][0], PAGES[page]
+                self.add_item(AdminActionButton('page:' + page, label, emoji=emoji, style=discord.ButtonStyle.secondary, row=3))
         elif self.page == "maintenance":
             if self.pending_action:
                 self.add_item(AdminActionButton('confirm_maintenance:'+self.pending_action,'Confirm action',style=discord.ButtonStyle.danger if 'repair' in self.pending_action else discord.ButtonStyle.primary,row=1))
@@ -883,7 +935,11 @@ class AdminPanel(discord.ui.LayoutView):
             active_codes = self.db.execute("SELECT COUNT(*) FROM reward_codes WHERE enabled=1").fetchone()[0]
             reports = self.db.execute("SELECT COUNT(*) FROM tester_feedback WHERE status='pending'").fetchone()[0]
             verification = "Open" if _setting(self.db, "verification_enabled", "1") == "1" else "Closed"
-            embed.description = f"**{pending}** applications · **{reports}** reports\n**{active_codes}** active codes · Verification **{verification}**"
+            embed.description = (
+                f"🟢 **System Operational** · 🛡️ Verification **{verification}**\n"
+                f"📬 **{pending}** Applications · 🐞 **{reports}** Reports · 🎟️ **{active_codes}** Active Codes\n\n"
+                f"-# 💡 Select any category below, or use the quick dropdown to jump directly to a tool."
+            )
         elif self.page == "maintenance":
             embed.description = "Check system health or create a backup.\nRepair buttons change stored data — use only when needed."
         elif self.page == "assets":
