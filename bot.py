@@ -307,6 +307,7 @@ STAFF_SLASH_COMMANDS = {
     "war_start", "war_end", "forces_check",
     "level",
     "deadzone_restore", "deadzone_scan", "deadzone_send", "level_sync",
+    "lounge_admin",
 }
 
 

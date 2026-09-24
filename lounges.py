@@ -252,10 +252,18 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
                 except Exception:
                     pass
 
-    # 2. Purge messages in the text channel
+    # 2. Purge messages and unpin in the text channel
     if guild:
         tc = guild.get_channel(info["text_id"])
         if tc:
+            try:
+                for p in await tc.pins():
+                    try:
+                        await p.unpin()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             try:
                 await tc.purge(limit=100)
             except Exception:
@@ -665,6 +673,10 @@ class LoungeBookingSelectView(discord.ui.View):
                         embed=embed,
                         view=view,
                     )
+                    try:
+                        await ctrl_msg.pin(reason="Lounge Host Control Panel")
+                    except Exception:
+                        pass
                     _db.execute("UPDATE server_lounges SET control_message_id=? WHERE lounge_id=?", (ctrl_msg.id, self.chosen_lounge_id))
                     _db.commit()
                 except Exception:
@@ -1363,19 +1375,14 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
     _bot = bot
     _db = db
 
-    lounge_group = app_commands.Group(name="lounge", description="X BOT Dynamic Lounge & Private Room System")
-
-    @lounge_group.command(name="menu", description="Open the Lounge Lobby & Reservation Panel")
-    async def lounge_menu(interaction: discord.Interaction):
+    @bot.tree.command(name="lounge", description="Open the Lounge Lobby & Reservation Panel")
+    async def lounge(interaction: discord.Interaction):
         embed = build_lobby_embed(db)
         await interaction.response.send_message(embed=embed, view=LoungeLobbyView(), ephemeral=True)
 
-    @lounge_group.command(name="status", description="Check current status of all 5 Lounges")
-    async def lounge_status(interaction: discord.Interaction):
-        embed = build_lobby_embed(db)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+    lounge_admin = app_commands.Group(name="lounge_admin", description="Admin: Manage Lounges & Private Suites")
 
-    @lounge_group.command(name="post_lobby", description="Admin: Post persistent Lounge Lobby panel in a channel")
+    @lounge_admin.command(name="post_lobby", description="Admin: Post persistent Lounge Lobby panel in a channel")
     @app_commands.describe(channel="Channel where the Lounge Lobby panel will live (optional: defaults to here)")
     async def lounge_post_lobby(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
         if not is_council_or_admin(interaction):
@@ -1392,7 +1399,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
 
         await interaction.response.send_message(f"✅ **Lounge Lobby successfully posted in {target_ch.mention}!**", ephemeral=True)
 
-    @lounge_group.command(name="clear", description="Admin: Force clear and reopen a lounge immediately")
+    @lounge_admin.command(name="clear", description="Admin: Force clear and reopen a lounge immediately")
     @app_commands.describe(lounge_number="Lounge number 1 to 5 to clear and reopen")
     @app_commands.choices(lounge_number=[
         app_commands.Choice(name=f"Lounge {i}", value=i) for i in range(1, 6)
@@ -1411,7 +1418,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         else:
             await interaction.followup.send(f"⚠️ Failed to clear Lounge {lounge_number}.", ephemeral=True)
 
-    @lounge_group.command(name="clear_all", description="Admin: Force clear and reopen all 5 lounges")
+    @lounge_admin.command(name="clear_all", description="Admin: Force clear and reopen all 5 lounges")
     async def lounge_clear_all(interaction: discord.Interaction):
         if not is_council_or_admin(interaction):
             await interaction.response.send_message("🔒 Only Administrators can force-clear lounges.", ephemeral=True)
@@ -1425,27 +1432,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
 
         await interaction.followup.send("✅ **All 5 Lounges have been purged, permissions reset, and reopened!**", ephemeral=True)
 
-    @lounge_group.command(name="my_suite", description="View your active Private Suite and channel links")
-    async def lounge_my_suite(interaction: discord.Interaction):
-        import suites
-        suite = suites.get_active_suite_by_host(db, interaction.user.id)
-        if not suite:
-            await interaction.response.send_message("ℹ️ You do not currently have an active Private Suite.", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title=f"👑 Your Private Suite: {suite['custom_name']}",
-            description=(
-                f"• 🔊 **Voice Channel:** <#{suite['voice_channel_id']}>\n"
-                f"• 💬 **Text Channel:** <#{suite['text_channel_id']}>\n"
-                f"• ⏳ **Duration:** `{suite['duration_str']}`\n"
-                f"• 📅 **Approved:** <t:{suite['reviewed_at']}:R>"
-            ),
-            color=0x2ECC71,
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @lounge_group.command(name="delete_suite", description="Admin: Delete a private suite and its channels")
+    @lounge_admin.command(name="delete_suite", description="Admin: Delete a private suite and its channels")
     @app_commands.describe(suite_id="The ID of the private suite application")
     async def lounge_delete_suite(interaction: discord.Interaction, suite_id: int):
         if not is_council_or_admin(interaction):
@@ -1462,4 +1449,4 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         else:
             await interaction.followup.send(f"⚠️ Suite #{suite_id} not found.", ephemeral=True)
 
-    bot.tree.add_command(lounge_group)
+    bot.tree.add_command(lounge_admin, **STAFF_COMMAND_KWARGS)
