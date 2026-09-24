@@ -586,7 +586,7 @@ def register_commands(bot, db, create_player, find_item):
             if not rows:
                 container.add_item(discord.ui.TextDisplay("No active listings. Open your Backpack from the Economy Centre to create one."))
             container.add_item(discord.ui.ActionRow(MarketPageButton(owner_id,page-1,'Previous',page==0),MarketPageButton(owner_id,page+1,'Next',page==pages-1),MarketPageButton(owner_id,page,'Refresh')))
-            container.add_item(discord.ui.ActionRow(MarketHubLink(owner_id,'market_mine','My Listings'),MarketHubLink(owner_id,'inventory','List from Backpack')))
+            container.add_item(discord.ui.ActionRow(MarketHubLink(owner_id,'market_mine','My Listings'),MarketHubLink(owner_id,'inventory','List from Backpack'),MarketHubLink(owner_id,'shop','Official Shop')))
             self.add_item(container)
 
         async def interaction_check(self,i):
@@ -619,30 +619,3 @@ def register_commands(bot, db, create_player, find_item):
         await interaction.response.defer()
         create_player(interaction.user)
         await interaction.edit_original_response(view=MarketView(interaction.user.id))
-
-    @bot.tree.command(name="market_mine", description="View and cancel your own active market listings")
-    async def market_mine(interaction: discord.Interaction):
-        create_player(interaction.user)
-        await interaction.response.send_message(view=MyListingsView(interaction.user.id), ephemeral=True)
-
-    @bot.tree.command(name="market_sell", description="List a tradeable item on the player market")
-    @app_commands.autocomplete(item=tradeable_backpack_autocomplete)
-    @svip.interaction_context
-    async def market_sell(interaction: discord.Interaction, item: str, quantity: int, price_each: int):
-        create_player(interaction.user)
-        expire_market_listings(db)
-        found=find_item(db,item,interaction.user.id)
-        if found is None:
-            await interaction.response.send_message('Item unavailable.',ephemeral=True);return
-        import economy_transactions
-        try:notice=economy_transactions.settle(db,interaction.user.id,'list',found['id'],quantity,price_each)
-        except ValueError as error:notice=str(error)
-        await interaction.response.send_message(view=xbot_ui.panel('Player Market',notice),ephemeral=True)
-
-    @bot.tree.command(name="market_cancel", description="Cancel your market listing")
-    async def market_cancel(interaction: discord.Interaction, listing_id: int):
-        import economy_transactions
-        expire_market_listings(db)
-        try:notice=economy_transactions.settle(db,interaction.user.id,'market_cancel',listing_id)
-        except ValueError as error:notice=str(error)
-        await interaction.response.send_message(view=xbot_ui.panel('My Listing',notice),ephemeral=True)

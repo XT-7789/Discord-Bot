@@ -894,18 +894,51 @@ def register_commands(bot, db, create_player) -> None:
         return db.execute("""SELECT * FROM items WHERE enabled=1 AND shop_visible=1 AND category_id=?
             ORDER BY price,name""", (category_id,)).fetchall()
 
+    class ShopMarketButton(discord.ui.Button):
+        def __init__(self, owner_id: int):
+            super().__init__(label="Player Market", emoji="🛒", style=discord.ButtonStyle.secondary)
+            self.owner_id = owner_id
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message("Open `/market` for your own panel.", ephemeral=True)
+                return
+            builder = getattr(bot, "xbot_player_panel_builders", {}).get("market")
+            if builder:
+                await interaction.response.defer()
+                await interaction.edit_original_response(view=builder(self.owner_id))
+            else:
+                await interaction.response.send_message("Player Market is loading.", ephemeral=True)
+
+    class ShopRoleBuyButton(discord.ui.Button):
+        def __init__(self, offer):
+            label = f"Buy ({offer['price']:,} {'XC' if offer['currency']=='xc' else 'XCrystals'})"
+            super().__init__(label=label[:80], emoji="🛍️", style=discord.ButtonStyle.success)
+            self.offer_id = offer["id"]
+
+        async def callback(self, interaction: discord.Interaction):
+            offer = db.execute("SELECT * FROM role_shop WHERE id=?", (self.offer_id,)).fetchone()
+            import advanced_systems
+            await advanced_systems.purchase_role(interaction, db, create_player, offer)
+
     class ShopCategorySelect(discord.ui.Select):
-        def __init__(self, owner_id: int, selected_category_id: int):
-            options = [discord.SelectOption(label=row['label'][:100], value=str(row['id']), emoji=row['emoji'], default=row['id'] == selected_category_id) for row in shop_categories()]
+        def __init__(self, owner_id: int, selected_category_id):
+            options = [discord.SelectOption(label=row['label'][:100], value=str(row['id']), emoji=row['emoji'], default=str(row['id']) == str(selected_category_id)) for row in shop_categories()]
+            options.append(discord.SelectOption(
+                label="Discord Roles",
+                value="roles",
+                emoji="🎭",
+                description="Purchase server Discord roles with XC",
+                default=str(selected_category_id) == "roles"
+            ))
             super().__init__(placeholder="Choose a shop category…", min_values=1, max_values=1, options=options)
             self.owner_id = owner_id
 
         async def callback(self, interaction: discord.Interaction):
-            category_id = int(self.values[0])
+            val = self.values[0]
+            category_id = val if val == "roles" else int(val)
             view = ShopView(self.owner_id, category_id, 0)
             await interaction.response.edit_message(view=view)
-
-
 
     class ShopBuyButton(discord.ui.Button):
         def __init__(self, item, disabled: bool):
@@ -919,7 +952,7 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.edit_message(view=TradeView(bot,db,owner,'shop',self.item_id,back=lambda:ShopView(owner,category,page)))
 
     class ShopPageButton(discord.ui.Button):
-        def __init__(self, owner_id: int, category_id: int, target_page: int, label: str, emoji: str, disabled: bool):
+        def __init__(self, owner_id: int, category_id, target_page: int, label: str, emoji: str, disabled: bool):
             super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.primary, disabled=disabled)
             self.owner_id, self.category_id, self.target_page = owner_id, category_id, target_page
 
@@ -944,38 +977,63 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.edit_message(view=builder(self.owner_id))
 
     class ShopView(discord.ui.LayoutView):
-        def __init__(self, owner_id: int, category_id: int, page: int = 0):
+        def __init__(self, owner_id: int, category_id, page: int = 0):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             self.category_id = category_id
             self.page = page
-            items = category_items(category_id)
-            pages = max(1, (len(items) + 4) // 5)
-            self.page = max(0, min(page, pages - 1))
-            category = db.execute("SELECT * FROM item_categories WHERE id=?", (category_id,)).fetchone()
             container = discord.ui.Container(accent_color=discord.Color.teal())
-            wallet=db.execute('SELECT xc,xcrystals FROM players WHERE user_id=?',(owner_id,)).fetchone()
-            container.add_item(discord.ui.TextDisplay(f"## 🏪 {category['label']} Shop\nWallet **{wallet['xc']:,} XC** · Crystals **{wallet['xcrystals']:,}**\nChoose an item below."))
-            container.add_item(discord.ui.Separator())
+            wallet = db.execute('SELECT xc,xcrystals FROM players WHERE user_id=?', (owner_id,)).fetchone()
             player = db.execute("SELECT * FROM players WHERE user_id=?", (owner_id,)).fetchone()
-            for item in items[self.page * 5:(self.page + 1) * 5]:
-                balance = player['xc'] if player and item['currency'] == 'xc' else player['xcrystals'] if player else 0
-                unavailable = item['stock'] == 0 or balance < item['price']
-                stock = "Unlimited" if item['stock'] < 0 else str(item['stock'])
-                currency = "XC" if item['currency'] == 'xc' else "XCrystals"
-                text = f"### {item['emoji']} {item['name']}\n📦 Stock: **{stock}**\n💰 Price: **{item['price']} {currency}**\n{item['description'][:180]}"
-                container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=ShopBuyButton(item, unavailable)))
+
+            if str(category_id) == "roles":
+                roles = db.execute("SELECT * FROM role_shop WHERE enabled=1 AND stock<>0 ORDER BY price,name").fetchall()
+                pages = max(1, (len(roles) + 4) // 5)
+                self.page = max(0, min(page, pages - 1))
+                container.add_item(discord.ui.TextDisplay(
+                    f"## 🎭 Discord Role Shop\n"
+                    f"Wallet **{wallet['xc']:,} XC** · Crystals **{wallet['xcrystals']:,}**\n"
+                    f"Unlock exclusive Discord server roles with your balance."
+                ))
                 container.add_item(discord.ui.Separator())
+                for role_row in roles[self.page * 5:(self.page + 1) * 5]:
+                    currency = "XC" if role_row["currency"] == "xc" else "XCrystals"
+                    stock = "Unlimited" if role_row["stock"] < 0 else str(role_row["stock"])
+                    text = f"### {role_row['emoji']} {role_row['name']}\n💰 Price: **{role_row['price']:,} {currency}** · 📦 Stock: **{stock}**\n{role_row['description'] or 'Official Discord role.'}"
+                    container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=ShopRoleBuyButton(role_row)))
+                    container.add_item(discord.ui.Separator())
+                if not roles:
+                    container.add_item(discord.ui.TextDisplay("No roles are currently for sale in the Role Shop."))
+                item_count = len(roles)
+            else:
+                cat_id_int = int(category_id)
+                items = category_items(cat_id_int)
+                pages = max(1, (len(items) + 4) // 5)
+                self.page = max(0, min(page, pages - 1))
+                category = db.execute("SELECT * FROM item_categories WHERE id=?", (cat_id_int,)).fetchone()
+                cat_label = category['label'] if category else 'Item'
+                container.add_item(discord.ui.TextDisplay(f"## 🏪 {cat_label} Shop\nWallet **{wallet['xc']:,} XC** · Crystals **{wallet['xcrystals']:,}**\nChoose an item below."))
+                container.add_item(discord.ui.Separator())
+                for item in items[self.page * 5:(self.page + 1) * 5]:
+                    balance = player['xc'] if player and item['currency'] == 'xc' else player['xcrystals'] if player else 0
+                    unavailable = item['stock'] == 0 or balance < item['price']
+                    stock = "Unlimited" if item['stock'] < 0 else str(item['stock'])
+                    currency = "XC" if item['currency'] == 'xc' else "XCrystals"
+                    text = f"### {item['emoji']} {item['name']}\n📦 Stock: **{stock}**\n💰 Price: **{item['price']} {currency}**\n{item['description'][:180]}"
+                    container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=ShopBuyButton(item, unavailable)))
+                    container.add_item(discord.ui.Separator())
+                item_count = len(items)
+
             navigation = discord.ui.ActionRow(
                 ShopPageButton(owner_id, category_id, 0, "", "⏪", self.page == 0),
                 ShopPageButton(owner_id, category_id, self.page - 1, "", "◀️", self.page == 0),
                 ShopPageButton(owner_id, category_id, self.page + 1, "", "▶️", self.page >= pages - 1),
                 ShopPageButton(owner_id, category_id, pages - 1, "", "⏩", self.page >= pages - 1),
-                EconomyCentreButton(owner_id, "Economy"),
+                ShopMarketButton(owner_id),
             )
             container.add_item(navigation)
             container.add_item(discord.ui.ActionRow(ShopCategorySelect(owner_id, category_id)))
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page + 1}/{pages} · {len(items)} item(s)"))
+            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page + 1}/{pages} · {item_count} item(s) · Switch categories or visit Player Market."))
             self.add_item(container)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -990,22 +1048,32 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message(view=xbot_ui.warning("🏪 Economy Shop Closed", "The Economy Shop is currently closed."), ephemeral=True)
             return
         categories = shop_categories()
-        if not categories:
-            await interaction.response.send_message("🏪 The Economy Shop is empty. An administrator can add shop-visible items in the Dashboard.")
+        first_cat = categories[0]['id'] if categories else "roles"
+        if not categories and not db.execute("SELECT 1 FROM role_shop WHERE enabled=1 AND stock<>0").fetchone():
+            await interaction.response.send_message("🏪 The Economy Shop is empty. An administrator can add shop-visible items or roles in the Dashboard.")
             return
         await interaction.response.defer()
         create_player(interaction.user)
-        view = ShopView(interaction.user.id, categories[0]['id'])
+        view = ShopView(interaction.user.id, first_cat)
         await interaction.edit_original_response(view=view)
+
+    bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
+    bot.xbot_player_panel_builders["shop"] = lambda owner_id: ShopView(owner_id, shop_categories()[0]['id'] if shop_categories() else "roles")
 
     @bot.tree.command(name="inventory", description="View your X BOT inventory")
     async def inventory(interaction: discord.Interaction):
         player = create_player(interaction.user)
         rows = db.execute("""SELECT items.*, inventories.quantity FROM inventories INNER JOIN items ON items.id = inventories.item_id WHERE inventories.user_id = ? AND inventories.quantity > 0 ORDER BY items.name""", (interaction.user.id,)).fetchall()
         if not rows:
-            await interaction.response.send_message("🎒 Your inventory is empty.")
+            if interaction.message is not None:
+                await interaction.response.edit_message(view=xbot_ui.warning("🎒 Backpack Empty", "Your inventory is empty."))
+            else:
+                await interaction.response.send_message("🎒 Your inventory is empty.")
             return
-        await interaction.response.send_message(view=InventoryView(interaction.user.id))
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=InventoryView(interaction.user.id))
+        else:
+            await interaction.response.send_message(view=InventoryView(interaction.user.id))
 
     @bot.tree.command(name="sell_item", description="Sell an inventory item back to X BOT")
     @app_commands.describe(name="Exact item name", amount="How many to sell")
@@ -1149,20 +1217,109 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message("This Backpack belongs to the player who opened it. Open `/menu` for your own Backpack.", ephemeral=True)
             return False
 
-    async def area_autocomplete(interaction: discord.Interaction, current: str):
-        rows = db.execute("SELECT name,emoji FROM mining_areas WHERE enabled=1 AND name LIKE ? ORDER BY required_level,position LIMIT 25", (f"%{current}%",)).fetchall()
-        return [app_commands.Choice(name=f"{row['emoji']} {row['name']}", value=row['name']) for row in rows]
+    class MiningAreaSelect(discord.ui.Select):
+        def __init__(self, owner_id: int, current_area_id: int, mining_level: int):
+            self.owner_id = owner_id
+            self.mining_level = mining_level
+            areas = db.execute("SELECT * FROM mining_areas WHERE enabled=1 ORDER BY required_level,position").fetchall()
+            options = []
+            for area in areas[:25]:
+                unlocked = mining_level >= area["required_level"]
+                prefix = "✅ " if area["id"] == current_area_id else ("🔓 " if unlocked else f"🔒 Lv.{area['required_level']} ")
+                desc = f"Cost: {area['energy_cost']}⚡ | CD: {area['cooldown_seconds']}s | XCrystal: {area['crystal_chance']}%"
+                options.append(discord.SelectOption(
+                    label=f"{prefix}{area['name']}"[:100],
+                    value=str(area["id"]),
+                    description=desc[:100],
+                    emoji=safe_discord_component_emoji(area.get("emoji"), "🗺️"),
+                    default=(area["id"] == current_area_id)
+                ))
+            super().__init__(placeholder="Select an expedition area...", options=options or [discord.SelectOption(label="No areas available", value="0")])
 
-    @bot.tree.command(name="mine_area", description="Choose a mining area unlocked by your Mining Level")
-    @app_commands.autocomplete(area=area_autocomplete)
-    async def mine_area(interaction: discord.Interaction, area: str):
-        player = create_player(interaction.user); selected = db.execute("SELECT * FROM mining_areas WHERE name=? COLLATE NOCASE AND enabled=1", (area.strip(),)).fetchone()
-        if selected is None:
-            await interaction.response.send_message("❌ Mining area not found.", ephemeral=True); return
-        if player["mining_level"] < selected["required_level"]:
-            await interaction.response.send_message(f"🔒 This area requires Mining Level **{selected['required_level']}**.", ephemeral=True); return
-        db.execute("UPDATE players SET mining_area_id=? WHERE user_id=?", (selected["id"], interaction.user.id)); db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("🗺️ Mining Area Selected", f"Current area: **{selected['emoji']} {selected['name']}**\n{selected['description']}"))
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message("This Mining view belongs to another player.", ephemeral=True)
+                return
+            area_id = int(self.values[0])
+            selected = db.execute("SELECT * FROM mining_areas WHERE id=? AND enabled=1", (area_id,)).fetchone()
+            if not selected:
+                await interaction.response.send_message("❌ Mining area not found.", ephemeral=True)
+                return
+            if self.mining_level < selected["required_level"]:
+                await interaction.response.send_message(f"🔒 **{selected['name']}** requires Mining Level **{selected['required_level']}** (Your level: {self.mining_level}).", ephemeral=True)
+                return
+            db.execute("UPDATE players SET mining_area_id=? WHERE user_id=?", (selected["id"], self.owner_id))
+            db.commit()
+            await interaction.response.edit_message(view=MiningAreasView(self.owner_id, notice=f"✅ Switched active area to **{selected['emoji']} {selected['name']}**!"))
+
+    class MiningAreasView(discord.ui.LayoutView):
+        def __init__(self, owner_id: int, notice: str | None = None):
+            super().__init__(timeout=300)
+            self.owner_id = owner_id
+            player = db.execute("SELECT * FROM players WHERE user_id=?", (owner_id,)).fetchone()
+            mining_lvl = player["mining_level"] if player else 1
+            curr_area_id = player["mining_area_id"] if player else 0
+
+            container = discord.ui.Container(accent_color=discord.Color.dark_gold())
+            container.add_item(discord.ui.TextDisplay("## 🗺️ Mining Areas & Expeditions"))
+            if notice:
+                container.add_item(discord.ui.TextDisplay(notice))
+                container.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.small))
+
+            areas = db.execute("SELECT * FROM mining_areas WHERE enabled=1 ORDER BY required_level,position").fetchall()
+            lines = []
+            for area in areas:
+                is_active = (area["id"] == curr_area_id)
+                unlocked = mining_lvl >= area["required_level"]
+                status = "🟢 Active" if is_active else ("✅ Unlocked" if unlocked else f"🔒 Requires Level {area['required_level']}")
+                lines.append(
+                    f"### {area['emoji']} {area['name']} — {status}\n"
+                    f"{area['description'] or 'No description set.'}\n"
+                    f"⚡ {area['energy_cost']} Energy · ⏳ {area['cooldown_seconds']}s · 📈 {area['exp_min']}–{area['exp_max']} EXP · 💎 {area['crystal_chance']}% XCrystal"
+                )
+            container.add_item(discord.ui.TextDisplay("\n".join(lines) or "No Mining Areas enabled."))
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.ActionRow(MiningAreaSelect(owner_id, curr_area_id, mining_lvl)))
+            container.add_item(discord.ui.ActionRow(
+                MiningHubButton("mine", "Mine Now", "⛏️", discord.ButtonStyle.success),
+                MiningHubButton("hub", "Mining Hub", "⛏️", discord.ButtonStyle.secondary),
+                MiningLobbyButton(),
+            ))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id == self.owner_id:
+                return True
+            await interaction.response.send_message("Open `/mining` for your own Mining Hub.", ephemeral=True)
+            return False
+
+    async def show_mining_areas(interaction: discord.Interaction):
+        create_player(interaction.user)
+        view = MiningAreasView(interaction.user.id)
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=view)
+        else:
+            await interaction.response.send_message(view=view)
+
+    class MiningProfileView(discord.ui.LayoutView):
+        def __init__(self, owner_id: int, body: str):
+            super().__init__(timeout=300)
+            self.owner_id = owner_id
+            container = discord.ui.Container(accent_color=discord.Color.dark_gold())
+            container.add_item(discord.ui.TextDisplay(body))
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.ActionRow(
+                MiningHubButton("mine", "Mine Now", "⛏️", discord.ButtonStyle.success),
+                MiningHubButton("hub", "Mining Hub", "⛏️", discord.ButtonStyle.secondary),
+                MiningHubButton("inventory", "Backpack", "🎒", discord.ButtonStyle.secondary),
+            ))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id == self.owner_id:
+                return True
+            await interaction.response.send_message("Open `/mining` for your own Mining Hub.", ephemeral=True)
+            return False
 
     async def show_mining_profile(interaction: discord.Interaction):
         create_player(interaction.user); energy = refresh_mining_energy(db, interaction.user.id); db.commit()
@@ -1181,54 +1338,92 @@ def register_commands(bot, db, create_player) -> None:
         body = (f"⛏️ **Level:** {player['mining_level']} · **EXP:** {player['mining_exp']:,}/{next_exp:,}\n"
             f"⚡ **Energy:** {energy}/{setting(db,'mining_max_energy')}\n🗺️ **Area:** {player['area_emoji'] or '❓'} {player['area_name'] or 'Not selected'}\n"
             f"🛠️ **Pickaxe:** {player['pickaxe_name'] or 'Not equipped'}{tool_stats}\n📊 **Mining Runs:** {player['total_mines']:,} · **Rare Finds:** {player['rare_mining_finds']:,}{area_goal}")
-        await interaction.response.send_message(view=xbot_ui.panel(f"⛏️ {interaction.user.display_name}'s Mining Profile", body, colour=discord.Color.dark_gold()))
+        view = MiningProfileView(interaction.user.id, f"## ⛏️ {interaction.user.display_name}'s Mining Profile\n{body}")
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=view)
+        else:
+            await interaction.response.send_message(view=view)
 
-    @bot.tree.command(name="mining_help", description="Learn how Mining, Pickaxes, Areas and selling work")
-    async def mining_help(interaction: discord.Interaction):
-        player = create_player(interaction.user)
-        body = ("**1.** Use `/mine` to collect a material from your selected area.\n"
-                "**2.** Use `/profile` (or `[ ⛏️ Mining Stats ]`) to see your level, energy, area and equipped pickaxe.\n"
-                "**3.** Use `/mine_area` to switch to an unlocked area.\n"
-                "**4.** Use `/shop` to buy a better pickaxe, then `/equip` it.\n"
-                "**5.** Use `/inventory` or `/sell_mined` to turn materials into XC.\n"
-                "**6.** Find every material, then use `/mining_collection` to track your completion reward.\n\n"
-                f"You start with a **Basic Pickaxe** automatically. Your current Mining Level is **{player['mining_level']}**.")
-        await interaction.response.send_message(view=xbot_ui.panel("⛏️ X BOT Mining Guide", body, colour=discord.Color.dark_gold()))
+    class MiningHelpView(discord.ui.LayoutView):
+        def __init__(self, owner_id: int):
+            super().__init__(timeout=300)
+            self.owner_id = owner_id
+            player = db.execute("SELECT * FROM players WHERE user_id=?", (owner_id,)).fetchone()
+            lvl = player["mining_level"] if player else 1
+            body = ("**1.** Press `[ ⛏️ Mine Now ]` to collect materials from your selected area.\n"
+                    "**2.** Use `/profile` (or `[ 📊 Profile ]`) to view your mining level, energy, and equipped pickaxe.\n"
+                    "**3.** Press `[ 🗺️ Areas & Select ]` to switch expeditions and unlock higher tiers.\n"
+                    "**4.** Press `[ 🏪 Tool Shop ]` to purchase better pickaxes, then equip them in `[ 🎒 Backpack ]`.\n"
+                    "**5.** Press `[ 💰 Sell Materials ]` to quick-sell mined minerals for XC.\n"
+                    "**6.** Complete your `[ 🏆 Collection ]` by finding all minerals for a massive reward!\n\n"
+                    f"You start with a **Basic Pickaxe** automatically. Your Mining Level: **{lvl}**.")
+            container = discord.ui.Container(accent_color=discord.Color.dark_gold())
+            container.add_item(discord.ui.TextDisplay("## ⛏️ X BOT Mining Guide\n" + body))
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.ActionRow(
+                MiningHubButton("mine", "Mine Now", "⛏️", discord.ButtonStyle.success),
+                MiningHubButton("hub", "Mining Hub", "⛏️", discord.ButtonStyle.secondary),
+                MiningLobbyButton(),
+            ))
+            self.add_item(container)
 
-    @bot.tree.command(name="mining_areas", description="View Mining Areas, levels and unlock requirements")
-    async def mining_areas(interaction: discord.Interaction):
-        player = create_player(interaction.user)
-        areas = db.execute("SELECT * FROM mining_areas WHERE enabled=1 ORDER BY required_level,position").fetchall()
-        lines = []
-        for area in areas:
-            unlocked = player["mining_level"] >= area["required_level"]
-            state = "✅ Unlocked" if unlocked else f"🔒 Level {area['required_level']}"
-            lines.append(
-                f"### {area['emoji']} {area['name']} — {state}\n"
-                f"{area['description'] or 'No description set.'}\n"
-                f"⚡ {area['energy_cost']} Energy · ⏳ {area['cooldown_seconds']}s · 📈 {area['exp_min']}–{area['exp_max']} EXP · 💎 {area['crystal_chance']}% XCrystal"
-            )
-        await interaction.response.send_message(view=xbot_ui.panel(
-            "🗺️ X BOT Mining Areas", "\n".join(lines) or "No Mining Areas have been enabled in the Dashboard.",
-            colour=discord.Color.dark_gold()
-        ))
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id == self.owner_id:
+                return True
+            await interaction.response.send_message("Open `/mining` for your own Mining Hub.", ephemeral=True)
+            return False
 
-    @bot.tree.command(name="mining_collection", description="View your mined-material collection and completion reward")
-    async def mining_collection(interaction: discord.Interaction):
+    async def show_mining_help(interaction: discord.Interaction):
+        create_player(interaction.user)
+        view = MiningHelpView(interaction.user.id)
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=view)
+        else:
+            await interaction.response.send_message(view=view)
+
+    class MiningCollectionView(discord.ui.LayoutView):
+        def __init__(self, owner_id: int, body: str):
+            super().__init__(timeout=300)
+            self.owner_id = owner_id
+            container = discord.ui.Container(accent_color=discord.Color.gold())
+            container.add_item(discord.ui.TextDisplay("## 🏆 Mining Collection\n" + body))
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.ActionRow(
+                MiningHubButton("mine", "Mine Now", "⛏️", discord.ButtonStyle.success),
+                MiningHubButton("hub", "Mining Hub", "⛏️", discord.ButtonStyle.secondary),
+                MiningHubButton("inventory", "Backpack", "🎒", discord.ButtonStyle.secondary),
+            ))
+            self.add_item(container)
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id == self.owner_id:
+                return True
+            await interaction.response.send_message("Open `/mining` for your own Mining Hub.", ephemeral=True)
+            return False
+
+    async def show_mining_collection(interaction: discord.Interaction):
         create_player(interaction.user)
         materials = mining_collection_status(db, interaction.user.id)
         if not materials:
-            await interaction.response.send_message(view=xbot_ui.warning("⛏️ Collection Unavailable", "No mining materials are enabled yet."), ephemeral=True)
+            view = xbot_ui.warning("⛏️ Collection Unavailable", "No mining materials are enabled yet.")
+            if interaction.message is not None:
+                await interaction.response.edit_message(view=view)
+            else:
+                await interaction.response.send_message(view=view, ephemeral=True)
             return
         found = sum(1 for item in materials if item["quantity"] > 0)
         reward = db.execute("SELECT claimed_at FROM mining_collection_rewards WHERE user_id=?", (interaction.user.id,)).fetchone()
         rows = [f"{'✅' if item['quantity'] > 0 else '⬛'} {item['emoji']} **{item['name']}** — {item['quantity']:,}" for item in materials]
         reward_text = ("🏆 **Completion Reward: claimed**" if reward else
             f"🎁 **Completion Reward:** {setting(db, 'mining_collection_xc_reward'):,} XC + {setting(db, 'mining_collection_xcrystal_reward'):,} XCrystals")
-        body = (f"## Progress: **{found}/{len(materials)}** materials discovered\n"
+        body = (f"### Progress: **{found}/{len(materials)}** materials discovered\n"
                 f"{reward_text}\n\n" + "\n".join(rows) +
                 "\n\n-# Find every enabled material at least once. The reward is granted automatically after your final discovery.")
-        await interaction.response.send_message(view=xbot_ui.panel("🏆 Mining Collection", body, colour=discord.Color.gold()))
+        view = MiningCollectionView(interaction.user.id, body)
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=view)
+        else:
+            await interaction.response.send_message(view=view)
 
     @bot.tree.command(name="mine", description="Mine materials in your selected area")
     async def mine(interaction: discord.Interaction):
@@ -1313,8 +1508,7 @@ def register_commands(bot, db, create_player) -> None:
         else:
             await interaction.response.send_message(view=result)
 
-    @bot.tree.command(name="sell_mined", description="Sell all sellable mining materials from your Backpack")
-    async def sell_mined(interaction: discord.Interaction):
+    async def execute_sell_mined(interaction: discord.Interaction):
         """Quick-sell only mined crafting materials; tools and other items stay safe."""
         create_player(interaction.user)
         materials = db.execute("""SELECT i.id,i.name,i.emoji,i.sell_price,i.currency,inv.quantity
@@ -1323,10 +1517,14 @@ def register_commands(bot, db, create_player) -> None:
               AND i.sellable=1 AND i.sell_price>0
             ORDER BY i.name""", (interaction.user.id,)).fetchall()
         if not materials:
-            await interaction.response.send_message(view=xbot_ui.warning(
+            warn = xbot_ui.warning(
                 "⛏️ No Mining Materials to Sell",
                 "You do not have any sellable mined materials. Keep materials for recipes, or use `/mine` to find more."
-            ), ephemeral=True)
+            )
+            if interaction.message is not None:
+                await interaction.response.edit_message(view=warn)
+            else:
+                await interaction.response.send_message(view=warn, ephemeral=True)
             return
 
         totals = {"xc": 0, "xcrystals": 0}
@@ -1363,6 +1561,8 @@ def register_commands(bot, db, create_player) -> None:
         else:
             await interaction.response.send_message(view=result)
 
+    sell_mined = execute_sell_mined
+
     class MiningHubButton(discord.ui.Button):
         def __init__(self, action: str, label: str, emoji: str, style: discord.ButtonStyle):
             super().__init__(label=label, emoji=emoji, style=style)
@@ -1372,14 +1572,23 @@ def register_commands(bot, db, create_player) -> None:
             if self.action == "hub":
                 await interaction.response.edit_message(view=build_mining_hub(interaction.user.id))
                 return
+            if self.action == "areas":
+                await show_mining_areas(interaction)
+                return
+            if self.action == "collection":
+                await show_mining_collection(interaction)
+                return
+            if self.action == "help":
+                await show_mining_help(interaction)
+                return
+            if self.action == "sell":
+                await execute_sell_mined(interaction)
+                return
             actions = {
                 "mine": mine.callback,
                 "profile": show_mining_profile,
-                "areas": mining_areas.callback,
-                "collection": mining_collection.callback,
                 "inventory": inventory.callback,
                 "shop": shop.callback,
-                "sell": sell_mined.callback,
             }
             await actions[self.action](interaction)
 
@@ -1468,7 +1677,8 @@ def register_commands(bot, db, create_player) -> None:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.ActionRow(
                 MiningHubButton("mine", "Mine Now", "⛏️", discord.ButtonStyle.success),
-                MiningHubButton("profile", "Profile", "📊", discord.ButtonStyle.primary),
+                MiningHubButton("areas", "Areas & Select", "🗺️", discord.ButtonStyle.primary),
+                MiningHubButton("help", "Guide", "📖", discord.ButtonStyle.secondary),
             ))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay('### 🎒 Equipment & Materials'))
@@ -1478,8 +1688,8 @@ def register_commands(bot, db, create_player) -> None:
                 MiningHubButton("sell", "Sell Materials", "💰", discord.ButtonStyle.secondary),
             ))
             container.add_item(discord.ui.ActionRow(
-                MiningHubButton("areas", "Areas", "🗺️", discord.ButtonStyle.primary),
                 MiningHubButton("collection", "Collection", "🏆", discord.ButtonStyle.secondary),
+                MiningHubButton("profile", "Profile", "📊", discord.ButtonStyle.secondary),
                 EconomyCentreButton(owner_id, "Economy"),
                 MiningLobbyButton(),
             ))

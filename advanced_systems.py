@@ -453,70 +453,62 @@ def register_commands(bot, db, create_player):
         detail = "\n".join(f"{r['emoji']} {r['name']}: **{r['amount']:,} XC**" for r in collected)
         await interaction.response.send_message(view=xbot_ui.success("💵 Income Collected", f"{detail}\n\nTotal: **{total:,} XC**"))
 
-    async def purchase_role(interaction: discord.Interaction, offer):
-        """Single purchase path for both the slash command and shop buttons."""
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message(view=xbot_ui.danger("Server Only", "Role purchases only work inside the Discord server."), ephemeral=True); return
-        if not setting(db, "role_shop_enabled"):
-            await interaction.response.send_message(view=xbot_ui.warning("Role Shop Closed", "The Role Shop is currently closed."), ephemeral=True); return
-        if offer is None or not offer["enabled"] or offer["stock"] == 0:
-            await interaction.response.send_message(view=xbot_ui.danger("Role Unavailable", "This role is no longer for sale."), ephemeral=True); return
-        discord_role = interaction.guild.get_role(int(offer["role_id"]))
-        if discord_role is None:
-            await interaction.response.send_message(view=xbot_ui.danger("Role Unavailable", "The Dashboard role setting no longer matches a server role."), ephemeral=True); return
-        if discord_role in interaction.user.roles:
-            await interaction.response.send_message(view=xbot_ui.warning("Already Owned", "You already have this role."), ephemeral=True); return
-        player = create_player(interaction.user); currency = offer["currency"] if offer["currency"] in {"xc", "xcrystals"} else "xc"
-        currency_label = "XC" if currency == "xc" else "XCrystals"
-        if player[currency] < offer["price"]:
-            await interaction.response.send_message(view=xbot_ui.danger("Not Enough Currency", f"You need **{offer['price']:,} {currency_label}**."), ephemeral=True); return
-        try:
-            await interaction.user.add_roles(discord_role, reason="Purchased from X BOT Role Shop")
-        except discord.Forbidden:
-            await interaction.response.send_message(view=xbot_ui.danger("Role Delivery Failed", "Move the X BOT role above the role being sold and enable Manage Roles."), ephemeral=True); return
-        db.execute(f"UPDATE players SET {currency}={currency}-? WHERE user_id=?", (offer["price"],interaction.user.id))
-        if offer["stock"] > 0:
-            db.execute("UPDATE role_shop SET stock=stock-1 WHERE id=?", (offer["id"],))
-        db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("🎭 Role Purchased", f"You received **{discord_role.name}** for **{offer['price']:,} {currency_label}**."), ephemeral=True)
+async def purchase_role(interaction: discord.Interaction, db, create_player, offer):
+    """Single purchase path for both the slash command and shop buttons."""
+    if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(view=xbot_ui.danger("Server Only", "Role purchases only work inside the Discord server."), ephemeral=True); return
+    if not setting(db, "role_shop_enabled"):
+        await interaction.response.send_message(view=xbot_ui.warning("Role Shop Closed", "The Role Shop is currently closed."), ephemeral=True); return
+    if offer is None or not offer["enabled"] or offer["stock"] == 0:
+        await interaction.response.send_message(view=xbot_ui.danger("Role Unavailable", "This role is no longer for sale."), ephemeral=True); return
+    discord_role = interaction.guild.get_role(int(offer["role_id"]))
+    if discord_role is None:
+        await interaction.response.send_message(view=xbot_ui.danger("Role Unavailable", "The Dashboard role setting no longer matches a server role."), ephemeral=True); return
+    if discord_role in interaction.user.roles:
+        await interaction.response.send_message(view=xbot_ui.warning("Already Owned", "You already have this role."), ephemeral=True); return
+    player = create_player(interaction.user); currency = offer["currency"] if offer["currency"] in {"xc", "xcrystals"} else "xc"
+    currency_label = "XC" if currency == "xc" else "XCrystals"
+    if player[currency] < offer["price"]:
+        await interaction.response.send_message(view=xbot_ui.danger("Not Enough Currency", f"You need **{offer['price']:,} {currency_label}**."), ephemeral=True); return
+    try:
+        await interaction.user.add_roles(discord_role, reason="Purchased from X BOT Role Shop")
+    except discord.Forbidden:
+        await interaction.response.send_message(view=xbot_ui.danger("Role Delivery Failed", "Move the X BOT role above the role being sold and enable Manage Roles."), ephemeral=True); return
+    db.execute(f"UPDATE players SET {currency}={currency}-? WHERE user_id=?", (offer["price"],interaction.user.id))
+    if offer["stock"] > 0:
+        db.execute("UPDATE role_shop SET stock=stock-1 WHERE id=?", (offer["id"],))
+    db.commit()
+    await interaction.response.send_message(view=xbot_ui.success("🎭 Role Purchased", f"You received **{discord_role.name}** for **{offer['price']:,} {currency_label}**."), ephemeral=True)
 
-    class RoleShopBuyButton(discord.ui.Button):
-        def __init__(self, offer):
-            label = f"Buy ({offer['price']:,} {'XC' if offer['currency']=='xc' else 'XCrystals'})"
-            super().__init__(label=label[:80], emoji="🛍️", style=discord.ButtonStyle.success)
-            self.offer_id = offer["id"]
 
-        async def callback(self, interaction: discord.Interaction):
-            offer = db.execute("SELECT * FROM role_shop WHERE id=?", (self.offer_id,)).fetchone()
-            await purchase_role(interaction, offer)
+class RoleShopBuyButton(discord.ui.Button):
+    def __init__(self, db, create_player, offer):
+        label = f"Buy ({offer['price']:,} {'XC' if offer['currency']=='xc' else 'XCrystals'})"
+        super().__init__(label=label[:80], emoji="🛍️", style=discord.ButtonStyle.success)
+        self.db = db
+        self.create_player = create_player
+        self.offer_id = offer["id"]
 
-    class RoleShopView(discord.ui.LayoutView):
-        def __init__(self):
-            super().__init__(timeout=300)
-            rows = db.execute("SELECT * FROM role_shop WHERE enabled=1 AND stock<>0 ORDER BY price,name LIMIT 10").fetchall()
-            container = discord.ui.Container(accent_color=discord.Color.purple())
-            container.add_item(discord.ui.TextDisplay("## 🎭 X BOT Role Shop\nClick **Buy** to purchase a role using your X BOT balance."))
-            for row in rows:
-                container.add_item(discord.ui.Separator())
-                currency = "XC" if row["currency"] == "xc" else "XCrystals"
-                stock = "Unlimited" if row["stock"] < 0 else str(row["stock"])
-                text = f"### {row['emoji']} {row['name']}\n💰 **{row['price']:,} {currency}** · 📦 **{stock}**\n{row['description'] or 'No description provided.'}"
-                container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=RoleShopBuyButton(row)))
-            if not rows:
-                container.add_item(discord.ui.TextDisplay("No roles are currently for sale."))
-            container.add_item(discord.ui.TextDisplay("-# Showing up to 10 roles · `/role_buy` remains available as a backup."))
-            self.add_item(container)
+    async def callback(self, interaction: discord.Interaction):
+        offer = self.db.execute("SELECT * FROM role_shop WHERE id=?", (self.offer_id,)).fetchone()
+        await purchase_role(interaction, self.db, self.create_player, offer)
 
-    @bot.tree.command(name="role_shop", description="View Discord roles sold by X BOT")
-    async def role_shop(interaction: discord.Interaction):
-        if not setting(db, "role_shop_enabled"):
-            await interaction.response.send_message(view=xbot_ui.warning("🎭 Role Shop Closed", "The Role Shop is currently closed."), ephemeral=True); return
-        await interaction.response.send_message(view=RoleShopView())
 
-    @bot.tree.command(name="role_buy", description="Buy a Discord role from X BOT")
-    @app_commands.autocomplete(role=role_offer_autocomplete)
-    async def role_buy(interaction: discord.Interaction, role: str):
-        offer = db.execute("SELECT * FROM role_shop WHERE name=? COLLATE NOCASE AND enabled=1 AND stock<>0", (role.strip(),)).fetchone()
-        if offer is None:
-            await interaction.response.send_message(view=xbot_ui.danger("Role Unavailable", "Use `/role_shop` to view available roles."), ephemeral=True); return
-        await purchase_role(interaction, offer)
+class RoleShopView(discord.ui.LayoutView):
+    def __init__(self, db, create_player):
+        super().__init__(timeout=300)
+        self.db = db
+        self.create_player = create_player
+        rows = db.execute("SELECT * FROM role_shop WHERE enabled=1 AND stock<>0 ORDER BY price,name LIMIT 10").fetchall()
+        container = discord.ui.Container(accent_color=discord.Color.purple())
+        container.add_item(discord.ui.TextDisplay("## 🎭 X BOT Role Shop\nClick **Buy** to purchase a role using your X BOT balance."))
+        for row in rows:
+            container.add_item(discord.ui.Separator())
+            currency = "XC" if row["currency"] == "xc" else "XCrystals"
+            stock = "Unlimited" if row["stock"] < 0 else str(row["stock"])
+            text = f"### {row['emoji']} {row['name']}\n💰 **{row['price']:,} {currency}** · 📦 **{stock}**\n{row['description'] or 'No description provided.'}"
+            container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=RoleShopBuyButton(db, create_player, row)))
+        if not rows:
+            container.add_item(discord.ui.TextDisplay("No roles are currently for sale."))
+        container.add_item(discord.ui.TextDisplay("-# Roles are delivered instantly upon purchase."))
+        self.add_item(container)

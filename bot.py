@@ -1134,8 +1134,12 @@ for _retired_command in (
     "deposit", "withdraw",
     # Leaderboards unified into /leaderboard
     "mining_leaderboard", "level_leaderboard", "casino_leaderboard", "war_leaderboard",
-    # Mining profile unified into /profile
-    "mining_profile",
+    # Mining unified into interactive /mining and /mine
+    "mine_area", "mining_areas", "mining_collection", "mining_help", "sell_mined",
+    # Role shop unified into /shop
+    "role_shop", "role_buy",
+    # Player market subcommands unified into /market
+    "market_sell", "market_mine", "market_cancel",
 ):
     bot.tree.remove_command(_retired_command)
 
