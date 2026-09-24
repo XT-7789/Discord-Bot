@@ -82,9 +82,11 @@ def build(panel, content):
         section('Create a code','Set rewards and usage limits in the form.',action('create_code'))
     elif panel.page=='verification':
         channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
+        user_select=take(lambda c:isinstance(c,AdminUserSelect))
         roles='\n'.join(f"**{f.name}** · {f.value if f.value!='<@&0>' else 'Not configured'}" for f in fields)
         section('Role mapping',roles or 'No roles configured.')
         section('Manage verification','Select destination channel and post or toggle verification status.',channel_select+action('post_verification','toggle_verification'))
+        section('Manual Member Verification','Select a member from the dropdown, then click verify.',user_select+action('manual_verify_member'))
     elif panel.page=='maintenance':
         if panel.pending_action:
             summary={'backup_now':'Create a database backup. No player assets are changed.','tier5_repair':'Repair stored mission data.','tier6_repair':'Repair stored economy data.'}[panel.pending_action]

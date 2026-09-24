@@ -201,6 +201,40 @@ async def complete_verification(bot, db, interaction):
     await interaction.response.send_message(view=xbot_ui.success("🔓 Verification Complete", f"You now have {guest.mention}. Participate in chat or voice and reach **Level 2** to become a Member."), ephemeral=True)
 
 
+async def manual_verify_member(bot, db, guild: discord.Guild, member: discord.Member, admin: discord.Member) -> tuple[bool, str]:
+    """Admin tool: manually verify a member, grant Guest role, and strip Unverified role."""
+    guest_id = setting(db, "verification_guest_role_id")
+    guest = guild.get_role(int(guest_id)) if str(guest_id).isdigit() and int(guest_id) else None
+    if not guest:
+        return False, "The configured Guest role no longer exists in this server."
+
+    unverified_id = setting(db, "verification_unverified_role_id")
+    unverified = guild.get_role(int(unverified_id)) if str(unverified_id).isdigit() and int(unverified_id) else None
+
+    try:
+        if guest not in member.roles:
+            await member.add_roles(guest, reason=f"Manually verified by {admin.display_name}")
+        if unverified and unverified in member.roles:
+            await member.remove_roles(unverified, reason=f"Manually verified by {admin.display_name}")
+    except discord.Forbidden:
+        return False, "Bot lacks permission to manage roles. Move the X BOT role above both the Unverified and Guest roles, then try again."
+    except discord.HTTPException as e:
+        return False, f"Discord error updating roles: {e}"
+
+    channel_id = int(setting(db, "verification_log_channel_id") or 0)
+    channel = bot.get_channel(channel_id) if channel_id else None
+    if channel:
+        try:
+            await channel.send(view=xbot_ui.success(
+                "🔓 Member Manually Verified",
+                f"{member.mention} was manually verified by {admin.mention} and received {guest.mention}."
+            ))
+        except discord.HTTPException:
+            pass
+
+    return True, f"Successfully verified {member.mention}! Granted {guest.mention} and removed Unverified."
+
+
 class VerificationButton(discord.ui.Button):
     def __init__(self, bot, db):
         super().__init__(label="Verify", emoji="🔒", style=discord.ButtonStyle.primary, custom_id="xbot:verification:complete")
@@ -402,7 +436,9 @@ class ApplicationStartView(discord.ui.View):
         await begin_application(self.bot, self.db, interaction, selected)
 
 
-def register_commands(bot, db):
+def register_commands(bot, db, is_staff=None, staff_kwargs=None):
+    kwargs = staff_kwargs or {}
+
     @bot.tree.command(name="application_review", description="Staff: accept, deny, or hold an application")
     @app_commands.choices(decision=[app_commands.Choice(name="Accept", value="accepted"), app_commands.Choice(name="Deny", value="denied"), app_commands.Choice(name="Hold", value="hold")])
     async def application_review(interaction: discord.Interaction, submission_id: int, decision: app_commands.Choice[str], reason: str = ""):
@@ -433,3 +469,18 @@ def register_commands(bot, db):
             try: await result_channel.send(view=xbot_ui.panel("📋 Application Result", body, colour=discord.Color.green() if decision.value=="accepted" else discord.Color.red() if decision.value=="denied" else discord.Color.gold()))
             except discord.HTTPException: pass
         await interaction.response.send_message(view=xbot_ui.success("Application Reviewed", body), ephemeral=True)
+
+    @bot.tree.command(name="verify", description="Admin: Manually verify a new member and grant Guest role", **kwargs)
+    @app_commands.describe(member="The new member to manually verify")
+    async def verify_cmd(interaction: discord.Interaction, member: discord.Member):
+        if not interaction.guild:
+            await interaction.response.send_message("Use this command inside the server.", ephemeral=True); return
+        can_verify = is_staff(interaction) if is_staff else getattr(interaction.user.guild_permissions, "administrator", False)
+        if not can_verify:
+            await interaction.response.send_message("Only Administrators and Staff can manually verify members.", ephemeral=True); return
+        await interaction.response.defer(ephemeral=True)
+        ok, msg = await manual_verify_member(bot, db, interaction.guild, member, interaction.user)
+        if ok:
+            await interaction.followup.send(view=xbot_ui.success("🔓 Member Verified", msg), ephemeral=True)
+        else:
+            await interaction.followup.send(view=xbot_ui.danger("Verification Error", msg), ephemeral=True)

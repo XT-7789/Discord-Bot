@@ -1116,7 +1116,7 @@ tier5.register_commands(bot, db, create_player)
 tier6.register_commands(bot, db, create_player)
 advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db, is_council_or_admin)
-applications.register_commands(bot, db)
+applications.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 staff_panel.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 deadzone.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
@@ -1130,7 +1130,7 @@ for _retired_command in (
     # Replaced by the single interactive /server_settings panel.
     "setannouncement", "announcementshow", "setannouncementchat",
     # Standalone verification, application, and deadzone panels retired (managed via Staff Panel /admin)
-    "verification_panel", "application_panel", "verify", "apply",
+    "verification_panel", "application_panel", "apply",
     # Economy deposit/withdraw retired in favour of /bank & /menu
     "deposit", "withdraw",
     # Leaderboards unified into /leaderboard

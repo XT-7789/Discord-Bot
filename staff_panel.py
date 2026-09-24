@@ -816,6 +816,8 @@ class AdminPanel(discord.ui.LayoutView):
             self.add_item(AdminChannelSelect(placeholder="Target channel to deploy verification…", default_channel_id=self.target_channel_id, row=1))
             self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=2))
             self.add_item(AdminActionButton("toggle_verification", "Close Verification" if _setting(self.db,'verification_enabled','1')=='1' else "Open Verification", emoji="🔁", row=2))
+            self.add_item(AdminUserSelect(placeholder="Select member to manually verify…", default_user_id=self.target_user_id, row=3))
+            self.add_item(AdminActionButton("manual_verify_member", "Manually Verify Member", emoji="🔓", style=discord.ButtonStyle.primary, row=4))
         elif self.page == "tester":
             reports = self.pending_feedback()
             if reports:
@@ -1267,6 +1269,21 @@ class AdminPanel(discord.ui.LayoutView):
                 return
             await target_ch.send(view=applications.VerificationView(self.bot, self.db))
             await self.refresh(interaction, notice=f"✅ Verification panel posted in <#{target_cid}>.")
+            return
+        if action == "manual_verify_member":
+            if not interaction.guild:
+                await self.refresh(interaction, notice="❌ Use verification inside a server.")
+                return
+            target_id = self.target_user_id or self.owner_id
+            target_member = interaction.guild.get_member(target_id)
+            if not target_member:
+                try: target_member = await interaction.guild.fetch_member(target_id)
+                except Exception: target_member = None
+            if not target_member:
+                await self.refresh(interaction, notice=f"❌ Could not find member <@{target_id}> in this server.")
+                return
+            ok, msg = await applications.manual_verify_member(self.bot, self.db, interaction.guild, target_member, interaction.user)
+            await self.refresh(interaction, notice=("✅ " if ok else "❌ ") + msg)
             return
         if action == "post_tester_feedback":
             target_cid, target_ch = self._resolve_target_channel(interaction)
