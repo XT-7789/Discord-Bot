@@ -47,8 +47,12 @@ class DummyGuild:
         self.channels = {}
 
         for lid, info in lounges.LOUNGES.items():
-            self.channels[info["text_id"]] = DummyChannel(info["text_id"], f"lounge-{lid}-text")
-            self.channels[info["vc_id"]] = DummyChannel(info["vc_id"], f"lounge-{lid}-vc")
+            tc = DummyChannel(info["text_id"], f"lounge-{lid}-text")
+            tc.guild = self
+            vc = DummyChannel(info["vc_id"], f"lounge-{lid}-vc")
+            vc.guild = self
+            self.channels[info["text_id"]] = tc
+            self.channels[info["vc_id"]] = vc
 
     def get_channel(self, cid):
         return self.channels.get(cid)
@@ -60,6 +64,7 @@ class DummyGuild:
         m.display_name = f"User_{uid}"
         m.mention = f"<@{uid}>"
         m.voice = None
+        m.bot = False
         m.move_to = AsyncMock()
         m.send = AsyncMock()
         return m
@@ -250,6 +255,50 @@ class LoungesTests(unittest.IsolatedAsyncioTestCase):
         row = lounges.get_lounge_row(self.db, 2)
         invited = json.loads(row["invited_user_ids"])
         self.assertIn(777888, invited)
+
+    async def test_empty_lounge_voice_state_update_and_auto_clear(self):
+        """Verify that when everyone leaves a lounge VC, it warns and auto-clears after timeout."""
+        # 1. Occupy Lounge 1
+        now = int(time.time()) - 200  # past 180s initial grace period
+        self.db.execute(
+            """UPDATE server_lounges
+            SET status='occupied', host_user_id=12345, host_name='HostUser', reserved_at=?, expires_at=?
+            WHERE lounge_id=1""",
+            (now, now + 3600),
+        )
+        self.db.commit()
+
+        vc_info = lounges.LOUNGES[1]
+        vc_ch = self.guild.get_channel(vc_info["vc_id"])
+        tc_ch = self.guild.get_channel(vc_info["text_id"])
+        member = self.guild.get_member(12345)
+        member.bot = False
+
+        # Member leaves VC
+        before_state = MagicMock(spec=discord.VoiceState)
+        before_state.channel = vc_ch
+        vc_ch.members = []  # VC is now empty
+
+        after_state = MagicMock(spec=discord.VoiceState)
+        after_state.channel = None
+
+        await lounges.handle_voice_state_update(self.bot, self.db, member, before_state, after_state)
+
+        # Verify empty warning sent
+        self.assertIn(1, lounges._lounge_empty_since)
+        self.assertTrue(any("Empty Lounge Alert" in str(msg) for msg in tc_ch.sent_messages))
+
+        # Advance empty timer beyond 90 seconds
+        lounges._lounge_empty_since[1] = int(time.time()) - 100
+
+        # Run lounge_check_loop iteration
+        await lounges.lounge_check_loop()
+
+        # Verify lounge was auto-cleared and reset to available
+        row = lounges.get_lounge_row(self.db, 1)
+        self.assertEqual(row["status"], "available")
+        self.assertEqual(row["host_user_id"], 0)
+        self.assertNotIn(1, lounges._lounge_empty_since)
 
 
 if __name__ == "__main__":

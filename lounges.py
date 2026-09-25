@@ -42,6 +42,8 @@ DEFAULT_SETTINGS = {
     "lounge_lobby_channel_id": "0",
     "lounge_lobby_message_id": "0",
     "verification_member_role_id": "1505437941647015986",
+    "lounge_empty_timeout_seconds": "90",
+    "lounge_empty_grace_seconds": "180",
 }
 
 _bot = None
@@ -50,6 +52,8 @@ _user_vc_duration = {}
 _user_dz_thaw_seconds = {}
 _squad_ping_cooldowns = {}
 _lounge_squad_time = {}
+_lounge_empty_since = {}
+_lounge_empty_warned = {}
 
 
 def setting(db, key):
@@ -283,6 +287,8 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
     )
     db.commit()
     _lounge_squad_time.pop(lounge_id, None)
+    _lounge_empty_since.pop(lounge_id, None)
+    _lounge_empty_warned.pop(lounge_id, None)
 
     # 5. Announce clean reopen in the text channel
     if guild:
@@ -1231,6 +1237,57 @@ async def lounge_check_loop():
         if rem <= 0:
             if guild:
                 await clear_and_reopen_lounge(_bot, _db, guild, lid, reason="Time limit reached")
+            continue
+
+        # Check empty lounge auto-cleanup
+        empty_timeout = int(setting(_db, "lounge_empty_timeout_seconds") or 90)
+        empty_grace = int(setting(_db, "lounge_empty_grace_seconds") or 180)
+
+        vc = _bot.get_channel(info["vc_id"]) if _bot else None
+        active_vc_members = [m for m in getattr(vc, "members", []) if not getattr(m, "bot", False)] if vc else []
+
+        initial_grace_passed = (now - l.get("reserved_at", 0)) >= empty_grace
+
+        if initial_grace_passed and len(active_vc_members) == 0:
+            if lid not in _lounge_empty_since:
+                _lounge_empty_since[lid] = now
+                _lounge_empty_warned[lid] = False
+
+            empty_elapsed = now - _lounge_empty_since[lid]
+
+            # Send a warning in the text channel once when detected empty
+            if not _lounge_empty_warned.get(lid, False):
+                _lounge_empty_warned[lid] = True
+                if guild:
+                    tc = guild.get_channel(info["text_id"])
+                    if tc:
+                        try:
+                            empty_limit_time = now + max(0, empty_timeout - empty_elapsed)
+                            await tc.send(
+                                f"⚠️ **Empty Lounge Alert:** No members detected in the voice channel!\n"
+                                f"This lounge will automatically reset and reopen <t:{empty_limit_time}:R> if nobody rejoins."
+                            )
+                        except Exception:
+                            pass
+
+            if empty_elapsed >= empty_timeout:
+                _lounge_empty_since.pop(lid, None)
+                _lounge_empty_warned.pop(lid, None)
+                if guild:
+                    await clear_and_reopen_lounge(_bot, _db, guild, lid, reason="Auto-cleared (lounge was empty)")
+                continue
+        else:
+            if lid in _lounge_empty_since:
+                _lounge_empty_since.pop(lid, None)
+                if _lounge_empty_warned.get(lid, False):
+                    if guild:
+                        tc = guild.get_channel(info["text_id"])
+                        if tc:
+                            try:
+                                await tc.send("🟢 **Activity Restored:** Members detected in the lounge. Auto-cleanup cancelled.")
+                            except Exception:
+                                pass
+                _lounge_empty_warned.pop(lid, None)
 
     # ---------- Lounge VC Rewards & Deadzone Thaw Protocol ----------
     current_vc_members = set()
@@ -1349,6 +1406,48 @@ async def lounge_check_loop():
         if uid not in current_vc_members:
             _user_vc_duration.pop(uid, None)
             _user_dz_thaw_seconds.pop(uid, None)
+
+
+async def handle_voice_state_update(bot: discord.Client, db, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    """Handle instant empty detection when members leave a lounge voice channel."""
+    if not bot or not db or getattr(member, "bot", False):
+        return
+
+    # Check if member left a lounge VC
+    if before.channel and before.channel.id in LOUNGE_VC_CHANNEL_IDS and (after.channel is None or after.channel.id != before.channel.id):
+        lid = next((k for k, v in LOUNGES.items() if v["vc_id"] == before.channel.id), None)
+        if lid:
+            l = get_lounge_row(db, lid)
+            if l and l["status"] == "occupied":
+                active_members = [m for m in getattr(before.channel, "members", []) if not getattr(m, "bot", False)]
+                if len(active_members) == 0:
+                    now = int(time.time())
+                    if lid not in _lounge_empty_since:
+                        _lounge_empty_since[lid] = now
+                        _lounge_empty_warned[lid] = True
+                        empty_timeout = int(setting(db, "lounge_empty_timeout_seconds") or 90)
+                        tc = bot.get_channel(LOUNGES[lid]["text_id"])
+                        if tc:
+                            try:
+                                await tc.send(
+                                    f"⚠️ **Empty Lounge Alert:** Everyone has left the voice channel!\n"
+                                    f"This lounge will automatically reset and reopen <t:{now + empty_timeout}:R> if nobody rejoins."
+                                )
+                            except Exception:
+                                pass
+
+    # Check if member joined a lounge VC
+    if after.channel and after.channel.id in LOUNGE_VC_CHANNEL_IDS and (before.channel is None or before.channel.id != after.channel.id):
+        lid = next((k for k, v in LOUNGES.items() if v["vc_id"] == after.channel.id), None)
+        if lid and lid in _lounge_empty_since:
+            _lounge_empty_since.pop(lid, None)
+            if _lounge_empty_warned.pop(lid, False):
+                tc = bot.get_channel(LOUNGES[lid]["text_id"])
+                if tc:
+                    try:
+                        await tc.send(f"🟢 {member.mention} **rejoined the voice channel!** Auto-cleanup cancelled.")
+                    except Exception:
+                        pass
 
 
 def start_lounge_loop(bot: discord.Client, db):

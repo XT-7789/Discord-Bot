@@ -820,6 +820,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         return
     if after.channel is not None:
         deadzone.touch_activity(db, member.id)
+    await lounges.handle_voice_state_update(bot, db, member, before, after)
 
 
 @bot.tree.command(name="ping", description="Check whether X BOT is online")
