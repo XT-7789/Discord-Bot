@@ -218,10 +218,10 @@ async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
             for target in list(text_ch.overwrites.keys()):
                 if isinstance(target, (discord.Member, discord.User)):
                     await text_ch.set_permissions(target, overwrite=None)
-            # Normal idle state: hide from @everyone so idle lounges do not clutter members' sidebars
+            # Available idle state: visible to everyone so members can see available lounges, read-only until booked
             await text_ch.set_permissions(
                 guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=False, send_messages=False, read_message_history=False),
+                overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True),
             )
         except discord.HTTPException:
             pass
@@ -231,10 +231,10 @@ async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
             for target in list(vc_ch.overwrites.keys()):
                 if isinstance(target, (discord.Member, discord.User)):
                     await vc_ch.set_permissions(target, overwrite=None)
-            # Normal idle state: hide from @everyone
+            # Available idle state: visible to everyone so members can see the voice channel (connect locked until reserved or host joins)
             await vc_ch.set_permissions(
                 guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=False, connect=False, speak=False),
+                overwrite=discord.PermissionOverwrite(view_channel=True, connect=False, speak=False),
             )
         except discord.HTTPException:
             pass
@@ -339,10 +339,18 @@ def build_lobby_embed(db):
             mins = rem // 60
             host_text = f"<@{l['host_user_id']}>"
             priv_badge = "🔒 Private" if l["privacy"] == "private" else "🌐 Public"
+
+            # Check if currently empty / pending auto-clean
+            empty_info = ""
+            if lid in _lounge_empty_since:
+                empty_timeout = int(setting(db, "lounge_empty_timeout_seconds") or 90)
+                reset_time = _lounge_empty_since[lid] + empty_timeout
+                empty_info = f"\n   ⚠️ *VC Empty — auto-resetting <t:{reset_time}:R>*"
+
             lines.append(
                 f"🔴 **{name}** · **Occupied** by {host_text} ({priv_badge})\n"
                 f"   ⏳ Remaining: `{mins} mins` (<t:{l['expires_at']}:R>)\n"
-                f"   Channels: <#{text_id}> · <#{vc_id}>"
+                f"   Channels: <#{text_id}> · <#{vc_id}>{empty_info}"
             )
         else:
             available_count += 1
