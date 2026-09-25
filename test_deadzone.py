@@ -536,6 +536,40 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         call_msg = interaction.response.send_message.call_args.args[0]
         self.assertIn("999111888", call_msg)
 
+    async def test_forum_channel_as_party_channel_handled_gracefully(self):
+        """Verify if party channel is a ForumChannel (no send attr), bot falls back gracefully without crashing."""
+        member_role = self.guild.get_role(1505437941647015986)
+        sleeper = make_member(666555, self.guild, roles=[member_role])
+
+        # Forum channel has NO .send method
+        forum_ch = MagicMock(spec=discord.ForumChannel)
+        forum_ch.id = 1524716540988231820
+        forum_ch.name = "general"
+        del forum_ch.send  # explicitly ensure ForumChannel has no send method
+
+        # Real text channel named general that DOES have .send
+        real_text_ch = AsyncMock(spec=discord.TextChannel)
+        real_text_ch.id = 1524716540988239999
+        real_text_ch.name = "general"
+
+        self.guild.text_channels = [real_text_ch]
+
+        notif_ch = AsyncMock(spec=discord.TextChannel)
+        notif_ch.id = 1526521131048370217
+
+        dummy_bot = MagicMock()
+        dummy_bot.get_channel = lambda cid: forum_ch if cid == forum_ch.id else (notif_ch if cid == notif_ch.id else None)
+
+        await deadzone.demote_to_deadzone(dummy_bot, self.db, sleeper)
+        self.db.execute("UPDATE deadzone_members SET thaw_count=5 WHERE user_id=?", (sleeper.id,))
+        self.db.commit()
+
+        # Reviving member must NOT raise AttributeError: 'ForumChannel' object has no attribute 'send'
+        revived = await deadzone.revive_member(dummy_bot, self.db, sleeper, triggered_by="rescue")
+        self.assertTrue(revived)
+        # Party was delivered to real_text_ch or notif_ch
+        self.assertTrue(real_text_ch.send.called or notif_ch.send.called)
+
 
 if __name__ == "__main__":
     unittest.main()

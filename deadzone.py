@@ -158,6 +158,22 @@ def setting(db, key):
         return DEFAULTS.get(key, "0")
 
 
+def is_sendable_text_channel(ch):
+    """Check if a channel object can receive standard text messages and has .send()"""
+    if ch is None:
+        return False
+    if not hasattr(ch, "send") or not callable(getattr(ch, "send", None)):
+        return False
+    # Exclude Discord ForumChannel, CategoryChannel, or StageChannel where .send is invalid
+    forum_cls = getattr(discord, "ForumChannel", None)
+    if forum_cls and isinstance(ch, forum_cls):
+        return False
+    category_cls = getattr(discord, "CategoryChannel", None)
+    if category_cls and isinstance(ch, category_cls):
+        return False
+    return True
+
+
 async def get_party_channel_async(bot, db, guild=None):
     try:
         cid_val = setting(db, "deadzone_party_channel_id") or setting(db, "general_channel_id") or str(DEFAULT_GENERAL_CHANNEL_ID)
@@ -184,14 +200,29 @@ async def get_party_channel_async(bot, db, guild=None):
             except Exception:
                 ch = None
 
-    # Fallback: Find text channel named "general" or "chat" in guild
+    # Check if channel is actually a sendable text channel (and not a ForumChannel)
+    if not is_sendable_text_channel(ch):
+        ch = None
+
+    # Fallback 1: Find real text channel named "general" or "chat" in guild
     if not ch and guild and hasattr(guild, "text_channels"):
         for c in guild.text_channels:
-            if c.name.lower() in ("general", "chat", "main-chat", "💬-general"):
+            if is_sendable_text_channel(c) and c.name.lower() in ("general", "chat", "main-chat", "lobby"):
                 ch = c
                 break
 
-    return ch or getattr(guild, "system_channel", None)
+    # Fallback 2: guild.system_channel
+    if not ch and guild and is_sendable_text_channel(getattr(guild, "system_channel", None)):
+        ch = guild.system_channel
+
+    # Fallback 3: First sendable text channel in guild
+    if not ch and guild and hasattr(guild, "text_channels"):
+        for c in guild.text_channels:
+            if is_sendable_text_channel(c):
+                ch = c
+                break
+
+    return ch
 
 
 def get_party_channel(bot, db, guild=None):
@@ -206,12 +237,16 @@ def get_party_channel(bot, db, guild=None):
             ch = guild.get_channel(cid)
         except Exception:
             ch = None
+    if not is_sendable_text_channel(ch):
+        ch = None
     if not ch and guild and hasattr(guild, "text_channels"):
         for c in guild.text_channels:
-            if c.name.lower() in ("general", "chat", "main-chat", "💬-general"):
+            if is_sendable_text_channel(c) and c.name.lower() in ("general", "chat", "main-chat", "lobby"):
                 ch = c
                 break
-    return ch or getattr(guild, "system_channel", None)
+    if not ch and guild and is_sendable_text_channel(getattr(guild, "system_channel", None)):
+        ch = guild.system_channel
+    return ch
 
 
 def get_notif_channel(bot, db, guild=None):
@@ -226,6 +261,8 @@ def get_notif_channel(bot, db, guild=None):
             ch = guild.get_channel(cid)
         except Exception:
             ch = None
+    if not is_sendable_text_channel(ch):
+        ch = None
     return ch or getattr(guild, "system_channel", None)
 
 
@@ -472,10 +509,10 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
                 pass
 
     # Start 5-minute Resurrection Welcome Party in general channel (Picture 1)
-    target_party_ch = party_channel or notif_channel
+    target_party_ch = party_channel if is_sendable_text_channel(party_channel) else (notif_channel if is_sendable_text_channel(notif_channel) else None)
     if target_party_ch and party_duration > 0 and getattr(member, "guild", None):
         allowed_channels = {target_party_ch.id, *LOUNGE_TEXT_CHANNEL_IDS}
-        if notif_channel:
+        if is_sendable_text_channel(notif_channel):
             allowed_channels.add(notif_channel.id)
         active_parties[member.guild.id] = {
             "expires_at": time.time() + party_duration,
@@ -498,25 +535,28 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
         party_embed.set_footer(text="X BOT · Deadzone Division · Welcome Party")
         party_posted = False
         try:
-            await target_party_ch.send(embed=party_embed)
-            party_posted = True
-        except (discord.HTTPException, discord.Forbidden):
-            try:
-                await target_party_ch.send(
-                    f"🎊 **[WELCOME PARTY STARTED — 5 MINUTES]**\n"
-                    f"A celebration party has started for {member.mention}!\n"
-                    f"💬 Chat in this channel within 5 minutes to claim your **💵 {party_reward:,} Cash** welcome bonus!"
-                )
+            if hasattr(target_party_ch, "send"):
+                await target_party_ch.send(embed=party_embed)
                 party_posted = True
-            except Exception as e:
-                print(f"[PARTY] Error posting party embed to {target_party_ch}: {e}")
-
-        # If sending to primary party channel failed, fallback to notif_channel
-        if not party_posted and notif_channel and notif_channel.id != target_party_ch.id:
+        except Exception as e:
+            print(f"[PARTY] Error posting party embed to {target_party_ch}: {e}")
             try:
-                await notif_channel.send(embed=party_embed)
+                if hasattr(target_party_ch, "send"):
+                    await target_party_ch.send(
+                        f"🎊 **[WELCOME PARTY STARTED — 5 MINUTES]**\n"
+                        f"A celebration party has started for {member.mention}!\n"
+                        f"💬 Chat in this channel within 5 minutes to claim your **💵 {party_reward:,} Cash** welcome bonus!"
+                    )
+                    party_posted = True
             except Exception:
                 pass
+
+        # If sending to primary party channel failed, fallback to notif_channel
+        if not party_posted and is_sendable_text_channel(notif_channel) and notif_channel.id != getattr(target_party_ch, "id", None):
+            try:
+                await notif_channel.send(embed=party_embed)
+            except Exception as e:
+                print(f"[PARTY] Fallback send to notif_channel failed: {e}")
 
     return True
 
@@ -1093,10 +1133,10 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             embed.set_footer(text="X BOT · Deadzone Division · 1+2 Respawn System")
 
             notif_ch = get_notif_channel(bot, db, interaction.guild)
-            if notif_ch and notif_ch.id != interaction.channel_id:
+            if notif_ch and hasattr(notif_ch, "send") and notif_ch.id != interaction.channel_id:
                 try:
                     await notif_ch.send(embed=embed)
-                except (discord.HTTPException, discord.Forbidden):
+                except Exception:
                     pass
 
             try:
