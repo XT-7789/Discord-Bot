@@ -3,6 +3,7 @@ import json
 import random
 import sqlite3
 import time
+import traceback
 from typing import Optional
 
 import discord
@@ -377,7 +378,10 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     if bonus_xc > 0:
         db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (bonus_xc, member.id))
     if bonus_xp > 0:
-        await leveling.grant_xp(bot, db, member, bonus_xp, "message")
+        try:
+            await leveling.grant_xp(bot, db, member, bonus_xp, "message")
+        except Exception as xp_err:
+            print(f"[REVIVE] grant_xp warning: {xp_err}")
 
     now = int(time.time())
     db.execute(
@@ -388,16 +392,28 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     )
     db.commit()
 
+    party_channel = get_party_channel(bot, db, getattr(member, "guild", None))
+    party_duration = int(setting(db, "deadzone_party_duration") or 300)
+    party_reward = int(setting(db, "deadzone_party_reward_cash") or 2000)
+
     # Announce resurrection technical alert in notification channel (bot-notifications)
     notif_channel = get_notif_channel(bot, db, getattr(member, "guild", None))
     if notif_channel:
         welcome_quote = random.choice(RESURRECTION_QUOTES)
+        party_callout = ""
+        target_party_ch = party_channel or notif_channel
+        if target_party_ch and party_duration > 0:
+            party_callout = (
+                f"\n\n🎊 **Resurrection Welcome Party (5 Minutes):**\n"
+                f"A celebration party has begun in {target_party_ch.mention}!\n"
+                f"Chat there within the next 5 minutes to claim your **💵 +${party_reward:,} Cash** welcome bonus!"
+            )
         embed = discord.Embed(
             title="⚡ [RESURRECTION ALERT]",
             description=(
                 f"🎉 {member.mention} **has broken out of their coffin and returned to the living!**\n\n"
                 f"🛡️ **Status Restored:** Member, Music, and Level {level} perks are active.\n"
-                f"🎁 **Survival Bonus:** Received `💵 +{bonus_cash:,} Cash`, `🪙 +{bonus_xc} XC`, and `⭐ +{bonus_xp} XP`!\n\n"
+                f"🎁 **Survival Bonus:** Received `💵 +{bonus_cash:,} Cash`, `🪙 +{bonus_xc} XC`, and `⭐ +{bonus_xp} XP`!{party_callout}\n\n"
                 f"*{welcome_quote}*"
             ),
             color=0x2ECC71,
@@ -405,20 +421,26 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
         embed.set_footer(text="X BOT · Deadzone Division")
         try:
             await notif_channel.send(embed=embed)
-        except discord.HTTPException:
-            pass
+        except (discord.HTTPException, discord.Forbidden):
+            try:
+                await notif_channel.send(
+                    f"⚡ **[RESURRECTION ALERT]** 🎉 {member.mention} has returned to the living! Perks restored.\n"
+                    f"Survival Bonus: `+${bonus_cash:,} Cash`, `+{bonus_xc} XC`, `+{bonus_xp} XP`.{party_callout}"
+                )
+            except Exception:
+                pass
 
     # Start 5-minute Resurrection Welcome Party in general channel (Picture 1)
-    party_channel = get_party_channel(bot, db, getattr(member, "guild", None)) or notif_channel
-    party_duration = int(setting(db, "deadzone_party_duration") or 300)
-    party_reward = int(setting(db, "deadzone_party_reward_cash") or 2000)
-    if party_channel and party_duration > 0 and getattr(member, "guild", None):
-        allowed_channels = {party_channel.id, *LOUNGE_TEXT_CHANNEL_IDS}
+    target_party_ch = party_channel or notif_channel
+    if target_party_ch and party_duration > 0 and getattr(member, "guild", None):
+        allowed_channels = {target_party_ch.id, *LOUNGE_TEXT_CHANNEL_IDS}
+        if notif_channel:
+            allowed_channels.add(notif_channel.id)
         active_parties[member.guild.id] = {
             "expires_at": time.time() + party_duration,
             "revived_user_id": member.id,
             "revived_name": member.display_name,
-            "channel_id": party_channel.id,
+            "channel_id": target_party_ch.id,
             "allowed_channel_ids": allowed_channels,
             "reward_cash": party_reward,
             "claimed_users": set(),
@@ -427,16 +449,23 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
             title="🎊 [WELCOME PARTY STARTED — 5 MINUTES]",
             description=(
                 f"A celebration party has started for {member.mention}!\n\n"
-                f"💬 **Chat in {party_channel.mention}** within the next **5 minutes** to claim your **💵 {party_reward:,} Cash** welcome bonus!\n"
+                f"💬 **Chat in {target_party_ch.mention}** within the next **5 minutes** to claim your **💵 {party_reward:,} Cash** welcome bonus!\n"
                 f"-# One claim per member · Say hi and celebrate their return!"
             ),
             color=0xF1C40F,
         )
         party_embed.set_footer(text="X BOT · Deadzone Division · Welcome Party")
         try:
-            await party_channel.send(embed=party_embed)
-        except discord.HTTPException:
-            pass
+            await target_party_ch.send(embed=party_embed)
+        except (discord.HTTPException, discord.Forbidden):
+            try:
+                await target_party_ch.send(
+                    f"🎊 **[WELCOME PARTY STARTED — 5 MINUTES]**\n"
+                    f"A celebration party has started for {member.mention}!\n"
+                    f"💬 Chat in this channel within 5 minutes to claim your **💵 {party_reward:,} Cash** welcome bonus!"
+                )
+            except Exception:
+                pass
 
     return True
 
@@ -910,75 +939,129 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         except Exception:
             await interaction.response.send_message(f"🔔 Sent a direct wake-up call to {target.mention}!", ephemeral=True)
 
-    @deadzone_group.command(name="rescue", description="Rescue a thawed teammate from the Deadzone and earn +50 XC")
-    @app_commands.describe(member="Thawed teammate currently sleeping in the Deadzone")
-    async def dz_rescue(interaction: discord.Interaction, member: discord.Member):
-        if interaction.user.id == member.id:
-            await interaction.response.send_message("❌ You cannot rescue yourself! A living comrade must pull you out of the crypt.", ephemeral=True)
+    @deadzone_group.command(name="rescue", description="Rescue a thawed teammate from the Deadzone and earn Hero rewards")
+    @app_commands.describe(member="Thawed teammate sleeping in Deadzone (optional: auto-targets thawed member if left empty)")
+    async def dz_rescue(interaction: discord.Interaction, member: Optional[discord.Member] = None):
+        if not interaction.guild:
+            await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
             return
 
         my_status = member_status(db, interaction.user.id)
         if my_status and my_status["is_in_deadzone"]:
-            await interaction.response.send_message("💀 You cannot rescue others while trapped in the Deadzone yourself!", ephemeral=True)
+            await interaction.response.send_message("💀 You cannot rescue others while trapped in the Deadzone yourself! Thaw out first.", ephemeral=True)
             return
 
-        target_status = member_status(db, member.id)
-        if not target_status or not target_status["is_in_deadzone"]:
-            await interaction.response.send_message(f"{member.mention} is not in the Deadzone! They are already active.", ephemeral=True)
-            return
+        target_member = member
+        if target_member is None:
+            # Auto-detect any thawed comrade (is_in_deadzone=1 and thaw_count>=5)
+            ready_sleepers = db.execute(
+                "SELECT user_id, thaw_count FROM deadzone_members WHERE is_in_deadzone=1 AND thaw_count>=5 ORDER BY thaw_count DESC"
+            ).fetchall()
+            valid_sleepers = [r for r in ready_sleepers if r["user_id"] != interaction.user.id]
 
-        thaw_count = target_status["thaw_count"] if "thaw_count" in target_status.keys() else 0
-        if thaw_count < 5:
-            await interaction.response.send_message(
-                f"🧊 {member.mention} is still frozen in cryo-stasis (**{thaw_count}/5 messages**).\n"
-                f"They need to send **{5 - thaw_count} more message(s)** in chat before you can rescue them!",
-                ephemeral=True,
-            )
-            return
+            for s_row in valid_sleepers:
+                uid = s_row["user_id"]
+                m = interaction.guild.get_member(uid)
+                if not m:
+                    try:
+                        m = await interaction.guild.fetch_member(uid)
+                    except (discord.NotFound, discord.HTTPException):
+                        m = None
+                if m:
+                    target_member = m
+                    break
 
-        await interaction.response.defer()
-        success = await revive_member(bot, db, member, triggered_by=f"rescued_by_{interaction.user.id}")
-        if not success:
-            await interaction.followup.send(f"⚠️ Failed to rescue {member.mention}.", ephemeral=True)
-            return
+            if not target_member:
+                all_sleepers = db.execute("SELECT user_id, thaw_count FROM deadzone_members WHERE is_in_deadzone=1").fetchall()
+                valid_all = [r for r in all_sleepers if r["user_id"] != interaction.user.id]
+                if not valid_all:
+                    await interaction.response.send_message("🎉 No comrades are currently trapped in the Deadzone! Everyone is active.", ephemeral=True)
+                    return
 
-        reward_cash = int(setting(db, "deadzone_rescue_reward_cash") or 50000)
-        reward_xc = int(setting(db, "deadzone_rescue_reward_xc") or 250)
-        reward_xp = int(setting(db, "deadzone_rescue_reward_xp") or 150)
-        leveling._ensure_economy_player(db, interaction.user)
-        db.execute("UPDATE players SET xc = xc + ?, money = money + ? WHERE user_id = ?", (reward_xc, reward_cash, interaction.user.id))
-        touch_activity(db, interaction.user.id)
-        db.commit()
-        await leveling.grant_xp(bot, db, interaction.user, reward_xp, "rescue_comrade")
-
-        embed = discord.Embed(
-            title="🤝 [RESCUE OPERATION COMPLETE]",
-            description=(
-                f"🎉 {interaction.user.mention} **bravely pulled** {member.mention} **out of the Deadzone crypt!**\n\n"
-                f"🛡️ **{member.mention}** has returned to the living! Perks and rank tags restored.\n\n"
-                f"💰 **Hero Rescue Rewards:**\n"
-                f"• 💵 **+${reward_cash:,} Cash**\n"
-                f"• 🪙 **+{reward_xc} XC**\n"
-                f"• ⭐ **+{reward_xp} XP**"
-            ),
-            color=0x2ECC71,
-        )
-        embed.set_footer(text="X BOT · Deadzone Division · 1+2 Respawn System")
-
-        notif_ch = get_notif_channel(bot, db, interaction.guild)
-        if interaction.channel_id == DEFAULT_GENERAL_CHANNEL_ID and notif_ch:
-            try:
-                await notif_ch.send(embed=embed)
-            except discord.HTTPException:
-                pass
-            await interaction.followup.send(f"✅ Successfully rescued {member.mention}! Rescue log posted in {notif_ch.mention}.", ephemeral=True)
+                lines = [f"• <@{r['user_id']}> (Thaw progress: **{min(r['thaw_count'] if 'thaw_count' in r.keys() else 0, 5)}/5** messages)" for r in valid_all[:10]]
+                await interaction.response.send_message(
+                    "🧊 **No comrades are fully thawed yet!**\n"
+                    "Comrades must chat in channels to reach **5/5 thaw** before they can be rescued:\n\n"
+                    + "\n".join(lines),
+                    ephemeral=True,
+                )
+                return
         else:
-            await interaction.followup.send(embed=embed)
+            if interaction.user.id == target_member.id:
+                await interaction.response.send_message("❌ You cannot rescue yourself! A living comrade must pull you out of the crypt.", ephemeral=True)
+                return
+
+            target_status = member_status(db, target_member.id)
+            if not target_status or not target_status["is_in_deadzone"]:
+                await interaction.response.send_message(f"{target_member.mention} is not in the Deadzone! They are already active.", ephemeral=True)
+                return
+
+            thaw_count = target_status["thaw_count"] if "thaw_count" in target_status.keys() else 0
+            if thaw_count < 5:
+                await interaction.response.send_message(
+                    f"🧊 {target_member.mention} is still frozen in cryo-stasis (**{thaw_count}/5 messages**).\n"
+                    f"They need to send **{5 - thaw_count} more message(s)** in chat before you can rescue them!",
+                    ephemeral=True,
+                )
+                return
+
+        # Target member confirmed and ready to be rescued
+        await interaction.response.defer(ephemeral=False)
+
+        try:
+            success = await revive_member(bot, db, target_member, triggered_by=f"rescued_by_{interaction.user.id}")
+            if not success:
+                await interaction.followup.send(f"⚠️ Failed to rescue {target_member.mention}. They may have already been revived.")
+                return
+
+            reward_cash = int(setting(db, "deadzone_rescue_reward_cash") or 50000)
+            reward_xc = int(setting(db, "deadzone_rescue_reward_xc") or 250)
+            reward_xp = int(setting(db, "deadzone_rescue_reward_xp") or 150)
+            leveling._ensure_economy_player(db, interaction.user)
+            db.execute("UPDATE players SET xc = xc + ?, money = money + ? WHERE user_id = ?", (reward_xc, reward_cash, interaction.user.id))
+            touch_activity(db, interaction.user.id)
+            db.commit()
+
+            try:
+                await leveling.grant_xp(bot, db, interaction.user, reward_xp, "rescue_comrade")
+            except Exception as xp_err:
+                print(f"[DZ RESCUE] grant_xp warning: {xp_err}")
+
+            embed = discord.Embed(
+                title="🤝 [RESCUE OPERATION COMPLETE]",
+                description=(
+                    f"🎉 {interaction.user.mention} **bravely pulled** {target_member.mention} **out of the Deadzone crypt!**\n\n"
+                    f"🛡️ **{target_member.mention}** has returned to the living! Perks and rank tags restored.\n\n"
+                    f"💰 **Hero Rescue Rewards:**\n"
+                    f"• 💵 **+${reward_cash:,} Cash**\n"
+                    f"• 🪙 **+{reward_xc} XC**\n"
+                    f"• ⭐ **+{reward_xp} XP**"
+                ),
+                color=0x2ECC71,
+            )
+            embed.set_footer(text="X BOT · Deadzone Division · 1+2 Respawn System")
+
+            notif_ch = get_notif_channel(bot, db, interaction.guild)
             if notif_ch and notif_ch.id != interaction.channel_id:
                 try:
                     await notif_ch.send(embed=embed)
-                except discord.HTTPException:
+                except (discord.HTTPException, discord.Forbidden):
                     pass
+
+            try:
+                await interaction.followup.send(embed=embed)
+            except (discord.HTTPException, discord.Forbidden):
+                fallback_msg = (
+                    f"🤝 **[RESCUE OPERATION COMPLETE]**\n"
+                    f"🎉 {interaction.user.mention} **bravely pulled** {target_member.mention} **out of the Deadzone crypt!**\n\n"
+                    f"🛡️ **{target_member.mention}** has returned to the living! Perks and rank tags restored.\n"
+                    f"💰 **Hero Rescue Rewards:** `+${reward_cash:,} Cash`, `+{reward_xc} XC`, `+{reward_xp} XP`"
+                )
+                await interaction.followup.send(fallback_msg)
+
+        except Exception as err:
+            traceback.print_exc()
+            await interaction.followup.send(f"⚠️ An error occurred while executing the rescue: `{err}`")
 
     @deadzone_group.command(name="restore", description="Admin: Restore a member from Deadzone and restore all perks")
     @app_commands.describe(member="Member to restore from Deadzone")

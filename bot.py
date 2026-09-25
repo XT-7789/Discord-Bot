@@ -425,10 +425,16 @@ class XCommandTree(app_commands.CommandTree):
         message = xbot_ui.danger("⚠️ Command Error", detail)
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(view=message, ephemeral=True)
+                try:
+                    await interaction.followup.send(view=message, ephemeral=True)
+                except discord.HTTPException:
+                    await interaction.followup.send(f"⚠️ **Command Error:** {detail}")
             else:
-                await interaction.response.send_message(view=message, ephemeral=True)
-        except discord.HTTPException:
+                try:
+                    await interaction.response.send_message(view=message, ephemeral=True)
+                except discord.HTTPException:
+                    await interaction.response.send_message(f"⚠️ **Command Error:** {detail}", ephemeral=True)
+        except Exception:
             pass
 
 

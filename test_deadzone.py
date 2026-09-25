@@ -433,6 +433,78 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deadzone.DEFAULTS["deadzone_rescue_reward_xc"], "250")
         self.assertEqual(deadzone.DEFAULTS["deadzone_rescue_reward_xp"], "150")
 
+    async def test_rescue_command_auto_detects_thawed_comrade(self):
+        """Verify /deadzone rescue without a member auto-detects thawed teammate (5/5)."""
+        registered = {}
+        mock_tree = MagicMock()
+        def add_command(group):
+            registered["group"] = group
+        mock_tree.add_command = add_command
+        mock_bot = MagicMock()
+        mock_bot.tree = mock_tree
+        mock_bot.get_channel = lambda cid: AsyncMock()
+
+        deadzone.register_commands(mock_bot, self.db, lambda i: False, {})
+        group = registered["group"]
+        rescue_cmd = next(c for c in group.commands if c.name == "rescue")
+
+        # Demote sleeper and thaw them out
+        sleeper = make_member(444333, self.guild, roles=[self.guild.get_role(1505437941647015986)])
+        self.guild.members.append(sleeper)
+        self.guild.get_member = lambda uid: sleeper if uid == sleeper.id else None
+        await deadzone.demote_to_deadzone(mock_bot, self.db, sleeper)
+        self.db.execute("UPDATE deadzone_members SET thaw_count=5 WHERE user_id=?", (sleeper.id,))
+        self.db.commit()
+
+        # Rescuer runs /deadzone rescue without specifying member
+        rescuer = make_member(555666, self.guild)
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.user = rescuer
+        interaction.guild = self.guild
+        interaction.channel_id = 12345
+        interaction.response = AsyncMock()
+        interaction.followup = AsyncMock()
+
+        await rescue_cmd.callback(interaction, member=None)
+
+        # Verification: Sleeper is revived and rescuer rewarded
+        status = deadzone.member_status(self.db, sleeper.id)
+        self.assertEqual(status["is_in_deadzone"], 0)
+        rescuer_player = self.db.execute("SELECT money, xc FROM players WHERE user_id=?", (rescuer.id,)).fetchone()
+        self.assertGreaterEqual(rescuer_player["money"], 50000)
+        self.assertGreaterEqual(rescuer_player["xc"], 250)
+        interaction.followup.send.assert_called()
+
+    async def test_revival_includes_welcome_party_callout(self):
+        """Verify revival alert includes welcome party info pointing to general channel."""
+        member_role = self.guild.get_role(1505437941647015986)
+        sleeper = make_member(333222, self.guild, roles=[member_role])
+        notif_ch = AsyncMock(spec=discord.TextChannel)
+        notif_ch.id = 1526521131048370217
+        notif_ch.mention = "<#1526521131048370217>"
+        party_ch = AsyncMock(spec=discord.TextChannel)
+        party_ch.id = 1524716540988231820
+        party_ch.mention = "<#1524716540988231820>"
+
+        dummy_bot = MagicMock()
+        dummy_bot.get_channel = lambda cid: party_ch if cid == party_ch.id else (notif_ch if cid == notif_ch.id else None)
+
+        await deadzone.demote_to_deadzone(dummy_bot, self.db, sleeper)
+        self.db.execute("UPDATE deadzone_members SET thaw_count=5 WHERE user_id=?", (sleeper.id,))
+        self.db.commit()
+
+        revived = await deadzone.revive_member(dummy_bot, self.db, sleeper, triggered_by="button")
+        self.assertTrue(revived)
+        # Verify notif_ch received the alert embed with the party callout
+        notif_ch.send.assert_called()
+        call_kwargs = notif_ch.send.call_args.kwargs
+        self.assertIn("embed", call_kwargs)
+        embed_desc = call_kwargs["embed"].description
+        self.assertIn("Resurrection Welcome Party", embed_desc)
+        self.assertIn(party_ch.mention, embed_desc)
+        # Verify party_ch received the welcome party announcement
+        party_ch.send.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()
