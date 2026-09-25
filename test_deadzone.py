@@ -505,36 +505,41 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         # Verify party_ch received the welcome party announcement
         party_ch.send.assert_called()
 
-    async def test_set_party_channel_and_channels_command(self):
-        """Verify /deadzone set_party_channel and /deadzone channels work properly."""
+    async def test_party_and_channels_command(self):
+        """Verify /deadzone party and /deadzone channels work properly for admin."""
         registered = {}
         mock_tree = MagicMock()
         mock_tree.add_command = lambda g: registered.update({"group": g})
         mock_bot = MagicMock()
         mock_bot.tree = mock_tree
 
+        party_ch = AsyncMock(spec=discord.TextChannel)
+        party_ch.id = 1524716540988231820
+        party_ch.mention = "<#1524716540988231820>"
+        party_ch.name = "general"
+        mock_bot.get_channel = lambda cid: party_ch
+
         deadzone.register_commands(mock_bot, self.db, lambda i: True, {})
         group = registered["group"]
-        set_cmd = next(c for c in group.commands if c.name == "set_party_channel")
+        party_cmd = next(c for c in group.commands if c.name == "party")
         channels_cmd = next(c for c in group.commands if c.name == "channels")
 
-        target_ch = MagicMock(spec=discord.TextChannel)
-        target_ch.id = 999111888
-        target_ch.mention = "<#999111888>"
-
         interaction = MagicMock(spec=discord.Interaction)
+        interaction.guild = self.guild
+        interaction.user = make_member(111222, self.guild)
         interaction.response = AsyncMock()
+        interaction.followup = AsyncMock()
 
-        # Run set_party_channel
-        await set_cmd.callback(interaction, channel=target_ch)
-        setting_val = deadzone.setting(self.db, "deadzone_party_channel_id")
-        self.assertEqual(setting_val, "999111888")
+        # Run party
+        await party_cmd.callback(interaction, member=None)
+        party_ch.send.assert_called()
+        self.assertIn(self.guild.id, deadzone.active_parties)
 
         # Run channels
         await channels_cmd.callback(interaction)
-        interaction.response.send_message.assert_called()
         call_msg = interaction.response.send_message.call_args.args[0]
-        self.assertIn("999111888", call_msg)
+        self.assertIn("Party Channel", call_msg)
+        self.assertIn("Welcome Party", call_msg)
 
     async def test_forum_channel_as_party_channel_handled_gracefully(self):
         """Verify if party channel is a ForumChannel (no send attr), bot falls back gracefully without crashing."""

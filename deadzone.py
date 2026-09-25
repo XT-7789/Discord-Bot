@@ -1196,22 +1196,77 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         else:
             await interaction.followup.send(f"⚠️ Could not demote {member.mention} (already in Deadzone or bot).", ephemeral=True)
 
-    @deadzone_group.command(name="set_party_channel", description="Admin: Set the channel where Welcome Back Parties are held")
-    @app_commands.describe(channel="Text channel for Welcome Back Parties (e.g. #general)")
-    async def dz_set_party_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    @deadzone_group.command(name="party", description="Admin: Post and start a 5-minute Resurrection Welcome Party in #general")
+    @app_commands.describe(member="Member to celebrate (optional: defaults to returned comrades)")
+    async def dz_party(interaction: discord.Interaction, member: Optional[discord.Member] = None):
         if not is_council_or_admin(interaction):
-            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can configure the party channel."), ephemeral=True)
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can trigger Welcome Parties."), ephemeral=True)
             return
 
-        db.execute(
-            "INSERT INTO economy_settings(key, value) VALUES('deadzone_party_channel_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (str(channel.id),)
+        if not interaction.guild:
+            await interaction.response.send_message("❌ This command must be used in a server.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        target_party_ch = await get_party_channel_async(bot, db, interaction.guild)
+        notif_ch = get_notif_channel(bot, db, interaction.guild)
+        if not is_sendable_text_channel(target_party_ch):
+            target_party_ch = notif_ch if is_sendable_text_channel(notif_ch) else interaction.channel
+
+        party_duration = int(setting(db, "deadzone_party_duration") or 300)
+        party_reward = int(setting(db, "deadzone_party_reward_cash") or 2000)
+
+        allowed_channels = {target_party_ch.id, *LOUNGE_TEXT_CHANNEL_IDS}
+        if is_sendable_text_channel(notif_ch):
+            allowed_channels.add(notif_ch.id)
+
+        target_member = member or interaction.user
+        display_name = target_member.display_name if member else "our returned comrades"
+        mention_text = target_member.mention if member else "our returned comrades"
+
+        active_parties[interaction.guild.id] = {
+            "expires_at": time.time() + party_duration,
+            "revived_user_id": target_member.id if member else 0,
+            "revived_name": display_name,
+            "channel_id": target_party_ch.id,
+            "allowed_channel_ids": allowed_channels,
+            "reward_cash": party_reward,
+            "claimed_users": set(),
+        }
+
+        party_embed = discord.Embed(
+            title="🎊 [WELCOME PARTY STARTED — 5 MINUTES]",
+            description=(
+                f"A celebration party has started for {mention_text}!\n\n"
+                f"💬 **Chat in {target_party_ch.mention}** within the next **5 minutes** to claim your **💵 {party_reward:,} Cash** welcome bonus!\n"
+                f"-# One claim per member · Say hi and celebrate their return!"
+            ),
+            color=0xF1C40F,
         )
-        db.commit()
-        await interaction.response.send_message(
-            f"✅ **Party Channel Configured:** Welcome Back Parties will now be held in {channel.mention} (`{channel.id}`).",
-            ephemeral=True
-        )
+        party_embed.set_footer(text="X BOT · Deadzone Division · Welcome Party")
+
+        party_posted = False
+        try:
+            if hasattr(target_party_ch, "send"):
+                await target_party_ch.send(embed=party_embed)
+                party_posted = True
+        except Exception as e:
+            try:
+                if hasattr(target_party_ch, "send"):
+                    await target_party_ch.send(
+                        f"🎊 **[WELCOME PARTY STARTED — 5 MINUTES]**\n"
+                        f"A celebration party has started for {mention_text}!\n"
+                        f"💬 Chat in this channel within 5 minutes to claim your **💵 {party_reward:,} Cash** welcome bonus!"
+                    )
+                    party_posted = True
+            except Exception:
+                pass
+
+        if party_posted:
+            await interaction.followup.send(f"🎊 **Welcome Party Started!** Announced in {target_party_ch.mention} for 5 minutes (💵 ${party_reward:,} Cash bonus per chatter).", ephemeral=True)
+        else:
+            await interaction.followup.send(f"⚠️ Could not send party message to {target_party_ch.mention}. Please check bot channel permissions.", ephemeral=True)
 
     @deadzone_group.command(name="channels", description="Staff: View current Deadzone channel configuration")
     async def dz_channels(interaction: discord.Interaction):
@@ -1228,7 +1283,7 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             f"• 🎊 **Party Channel (Welcome Back Party):** {party_mention} (`{p_cid}`)\n"
             f"• 📢 **Notification Channel (Alerts):** {notif_mention} (`{n_cid}`)\n"
             f"• ⚰️ **Crypt Channel (Status Board):** {crypt_mention} (`{c_cid}`)\n\n"
-            f"-# Use `/deadzone set_party_channel #channel` to change the Welcome Party channel."
+            f"-# Run `/deadzone party` to post and trigger a 5-minute Welcome Party."
         )
         await interaction.response.send_message(msg, ephemeral=True)
 
