@@ -158,6 +158,42 @@ def setting(db, key):
         return DEFAULTS.get(key, "0")
 
 
+async def get_party_channel_async(bot, db, guild=None):
+    try:
+        cid_val = setting(db, "deadzone_party_channel_id") or setting(db, "general_channel_id") or str(DEFAULT_GENERAL_CHANNEL_ID)
+        cid = int(cid_val) if str(cid_val).isdigit() else DEFAULT_GENERAL_CHANNEL_ID
+    except Exception:
+        cid = DEFAULT_GENERAL_CHANNEL_ID
+
+    ch = getattr(bot, "get_channel", lambda _id: None)(cid) if cid and hasattr(bot, "get_channel") else None
+    if not ch and bot and cid and hasattr(bot, "fetch_channel"):
+        try:
+            ch = await bot.fetch_channel(cid)
+        except Exception:
+            ch = None
+
+    if not ch and guild:
+        if hasattr(guild, "get_channel"):
+            try:
+                ch = guild.get_channel(cid)
+            except Exception:
+                ch = None
+        if not ch and hasattr(guild, "fetch_channel"):
+            try:
+                ch = await guild.fetch_channel(cid)
+            except Exception:
+                ch = None
+
+    # Fallback: Find text channel named "general" or "chat" in guild
+    if not ch and guild and hasattr(guild, "text_channels"):
+        for c in guild.text_channels:
+            if c.name.lower() in ("general", "chat", "main-chat", "💬-general"):
+                ch = c
+                break
+
+    return ch or getattr(guild, "system_channel", None)
+
+
 def get_party_channel(bot, db, guild=None):
     try:
         cid_val = setting(db, "deadzone_party_channel_id") or setting(db, "general_channel_id") or str(DEFAULT_GENERAL_CHANNEL_ID)
@@ -170,6 +206,11 @@ def get_party_channel(bot, db, guild=None):
             ch = guild.get_channel(cid)
         except Exception:
             ch = None
+    if not ch and guild and hasattr(guild, "text_channels"):
+        for c in guild.text_channels:
+            if c.name.lower() in ("general", "chat", "main-chat", "💬-general"):
+                ch = c
+                break
     return ch or getattr(guild, "system_channel", None)
 
 
@@ -392,7 +433,7 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
     )
     db.commit()
 
-    party_channel = get_party_channel(bot, db, getattr(member, "guild", None))
+    party_channel = await get_party_channel_async(bot, db, getattr(member, "guild", None))
     party_duration = int(setting(db, "deadzone_party_duration") or 300)
     party_reward = int(setting(db, "deadzone_party_reward_cash") or 2000)
 
@@ -455,8 +496,10 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
             color=0xF1C40F,
         )
         party_embed.set_footer(text="X BOT · Deadzone Division · Welcome Party")
+        party_posted = False
         try:
             await target_party_ch.send(embed=party_embed)
+            party_posted = True
         except (discord.HTTPException, discord.Forbidden):
             try:
                 await target_party_ch.send(
@@ -464,6 +507,14 @@ async def revive_member(bot, db, member: discord.Member, triggered_by: str = "me
                     f"A celebration party has started for {member.mention}!\n"
                     f"💬 Chat in this channel within 5 minutes to claim your **💵 {party_reward:,} Cash** welcome bonus!"
                 )
+                party_posted = True
+            except Exception as e:
+                print(f"[PARTY] Error posting party embed to {target_party_ch}: {e}")
+
+        # If sending to primary party channel failed, fallback to notif_channel
+        if not party_posted and notif_channel and notif_channel.id != target_party_ch.id:
+            try:
+                await notif_channel.send(embed=party_embed)
             except Exception:
                 pass
 
@@ -1104,6 +1155,42 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             await interaction.followup.send(f"✅ Successfully demoted {member.mention} to Deadzone. Member/Music/Rank roles removed.", ephemeral=True)
         else:
             await interaction.followup.send(f"⚠️ Could not demote {member.mention} (already in Deadzone or bot).", ephemeral=True)
+
+    @deadzone_group.command(name="set_party_channel", description="Admin: Set the channel where Welcome Back Parties are held")
+    @app_commands.describe(channel="Text channel for Welcome Back Parties (e.g. #general)")
+    async def dz_set_party_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can configure the party channel."), ephemeral=True)
+            return
+
+        db.execute(
+            "INSERT INTO economy_settings(key, value) VALUES('deadzone_party_channel_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(channel.id),)
+        )
+        db.commit()
+        await interaction.response.send_message(
+            f"✅ **Party Channel Configured:** Welcome Back Parties will now be held in {channel.mention} (`{channel.id}`).",
+            ephemeral=True
+        )
+
+    @deadzone_group.command(name="channels", description="Staff: View current Deadzone channel configuration")
+    async def dz_channels(interaction: discord.Interaction):
+        p_cid = setting(db, "deadzone_party_channel_id") or str(DEFAULT_GENERAL_CHANNEL_ID)
+        n_cid = setting(db, "deadzone_notification_channel_id") or str(DEFAULT_NOTIF_CHANNEL_ID)
+        c_cid = setting(db, "deadzone_crypt_channel_id") or "Not configured"
+
+        party_mention = f"<#{p_cid}>" if p_cid.isdigit() else p_cid
+        notif_mention = f"<#{n_cid}>" if n_cid.isdigit() else n_cid
+        crypt_mention = f"<#{c_cid}>" if c_cid.isdigit() else c_cid
+
+        msg = (
+            f"### ⚙️ Deadzone Channel Configuration:\n"
+            f"• 🎊 **Party Channel (Welcome Back Party):** {party_mention} (`{p_cid}`)\n"
+            f"• 📢 **Notification Channel (Alerts):** {notif_mention} (`{n_cid}`)\n"
+            f"• ⚰️ **Crypt Channel (Status Board):** {crypt_mention} (`{c_cid}`)\n\n"
+            f"-# Use `/deadzone set_party_channel #channel` to change the Welcome Party channel."
+        )
+        await interaction.response.send_message(msg, ephemeral=True)
 
     # Top-level standalone staff commands (accessible from staff_tools Admin Panel and slash)
     @bot.tree.command(name="deadzone_send", description="Admin: Demote an inactive member to Deadzone", **STAFF_COMMAND_KWARGS)
