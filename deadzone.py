@@ -1283,9 +1283,54 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
             f"• 🎊 **Party Channel (Welcome Back Party):** {party_mention} (`{p_cid}`)\n"
             f"• 📢 **Notification Channel (Alerts):** {notif_mention} (`{n_cid}`)\n"
             f"• ⚰️ **Crypt Channel (Status Board):** {crypt_mention} (`{c_cid}`)\n\n"
-            f"-# Run `/deadzone party` to post and trigger a 5-minute Welcome Party."
+            f"-# Run `/deadzone party` to post and trigger a 5-minute Welcome Party.\n"
+            f"-# Run `/deadzone set_notification_channel channel:#...` to change the alerts channel."
         )
         await interaction.response.send_message(msg, ephemeral=True)
+
+    @deadzone_group.command(name="set_notification_channel", description="Admin: Set the Deadzone alert and notification channel")
+    @app_commands.describe(channel="Text channel where Deadzone demotion and revival notifications are sent")
+    async def dz_set_notif_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Staff can configure Deadzone channels."), ephemeral=True)
+            return
+
+        db.execute(
+            "INSERT INTO economy_settings(key, value) VALUES('deadzone_notification_channel_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(channel.id),),
+        )
+        db.commit()
+        await interaction.response.send_message(f"✅ Deadzone notification channel set to {channel.mention} (`{channel.id}`).", ephemeral=True)
+
+    @deadzone_group.command(name="set_channel", description="Admin: Configure Deadzone notification, party, or crypt channel")
+    @app_commands.describe(
+        channel_type="Which channel setting to configure",
+        channel="The target text channel",
+    )
+    @app_commands.choices(
+        channel_type=[
+            app_commands.Choice(name="Notification Channel (Alerts & Demotions)", value="notification"),
+            app_commands.Choice(name="Party Channel (Welcome Back Party)", value="party"),
+            app_commands.Choice(name="Crypt Channel (Revival Board)", value="crypt"),
+        ]
+    )
+    async def dz_set_channel(interaction: discord.Interaction, channel_type: app_commands.Choice[str], channel: discord.TextChannel):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators and Staff can configure Deadzone channels."), ephemeral=True)
+            return
+
+        key_map = {
+            "notification": "deadzone_notification_channel_id",
+            "party": "deadzone_party_channel_id",
+            "crypt": "deadzone_crypt_channel_id",
+        }
+        setting_key = key_map[channel_type.value]
+        db.execute(
+            "INSERT INTO economy_settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (setting_key, str(channel.id)),
+        )
+        db.commit()
+        await interaction.response.send_message(f"✅ Deadzone **{channel_type.name}** set to {channel.mention} (`{channel.id}`).", ephemeral=True)
 
     # Top-level standalone staff commands (accessible from staff_tools Admin Panel and slash)
     @bot.tree.command(name="deadzone_send", description="Admin: Demote an inactive member to Deadzone", **STAFF_COMMAND_KWARGS)

@@ -541,6 +541,26 @@ class DeadzoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Party Channel", call_msg)
         self.assertIn("Welcome Party", call_msg)
 
+        # Test set_notification_channel
+        set_notif_cmd = next(c for c in group.commands if c.name == "set_notification_channel")
+        new_notif_ch = MagicMock(spec=discord.TextChannel)
+        new_notif_ch.id = 999888777
+        new_notif_ch.mention = "<#999888777>"
+        interaction.response.send_message.reset_mock()
+        await set_notif_cmd.callback(interaction, channel=new_notif_ch)
+        self.assertEqual(deadzone.setting(self.db, "deadzone_notification_channel_id"), "999888777")
+        self.assertIn("notification channel set", interaction.response.send_message.call_args.args[0])
+
+        # Test set_channel
+        set_chan_cmd = next(c for c in group.commands if c.name == "set_channel")
+        choice = MagicMock()
+        choice.name = "Party Channel (Welcome Back Party)"
+        choice.value = "party"
+        interaction.response.send_message.reset_mock()
+        await set_chan_cmd.callback(interaction, channel_type=choice, channel=new_notif_ch)
+        self.assertEqual(deadzone.setting(self.db, "deadzone_party_channel_id"), "999888777")
+        self.assertIn("Party Channel", interaction.response.send_message.call_args.args[0])
+
     async def test_forum_channel_as_party_channel_handled_gracefully(self):
         """Verify if party channel is a ForumChannel (no send attr), bot falls back gracefully without crashing."""
         member_role = self.guild.get_role(1505437941647015986)
