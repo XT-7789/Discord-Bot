@@ -93,13 +93,16 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
     def test_initialise_defaults(self):
         self.assertEqual(gaming.setting(self.db, "game_role_steam_id"), "1552259861654413312")
         self.assertEqual(gaming.setting(self.db, "game_role_roblox_id"), "1552259987667943515")
-        self.assertEqual(gaming.setting(self.db, "game_role_mobile_id"), "1552259988691488818")
+        self.assertEqual(gaming.setting(self.db, "game_role_valorant_id"), "1554759111281745962")
+        self.assertEqual(gaming.setting(self.db, "game_role_minecraft_id"), "1554759163442237440")
+        self.assertEqual(gaming.setting(self.db, "game_role_mlbb_id"), "1554759232270639216")
+        self.assertEqual(gaming.setting(self.db, "game_role_genshin_id"), "1554759280194883615")
         self.assertEqual(gaming.setting(self.db, "game_channel_steam_id"), "1552259761607671908")
         self.assertEqual(gaming.setting(self.db, "game_channel_roblox_id"), "1552237657424265236")
         self.assertEqual(gaming.setting(self.db, "game_channel_mobile_id"), "1552237704878620722")
-        self.assertEqual(gaming.setting(self.db, "device_role_pc_id"), "0")
-        self.assertEqual(gaming.setting(self.db, "device_role_mobile_id"), "0")
-        self.assertEqual(gaming.setting(self.db, "device_role_console_id"), "0")
+        self.assertEqual(gaming.setting(self.db, "device_role_pc_id"), "1554759037914976317")
+        self.assertEqual(gaming.setting(self.db, "device_role_mobile_id"), "1552259988691488818")
+        self.assertEqual(gaming.setting(self.db, "device_role_console_id"), "1554758965454315520")
         self.assertEqual(gaming.setting(self.db, "lfg_team_reward_cash"), "500")
 
     def test_game_profile_crud(self):
@@ -183,17 +186,17 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
     def test_new_user_onboarding_view(self):
         view = gaming.NewUserOnboardingView()
         self.assertIsNone(view.timeout)
-        self.assertEqual(len(view.children), 10)  # 3 device buttons + 7 game buttons
+        self.assertEqual(len(view.children), 9)  # 3 device buttons + 6 game buttons (3x3 grid)
         device_btns = [btn for btn in view.children if isinstance(btn, gaming.DeviceRolesButton)]
         game_btns = [btn for btn in view.children if isinstance(btn, gaming.GameRolesButton)]
         self.assertEqual(len(device_btns), 3)
-        self.assertEqual(len(game_btns), 7)
+        self.assertEqual(len(game_btns), 6)
         embed = gaming.build_onboarding_embed()
         self.assertIn("COMMUNITY & GAMING ROLES", embed.title)
         self.assertIn("Valorant", embed.description)
         self.assertIn("Minecraft", embed.description)
         self.assertIn("MLBB", embed.description)
-        self.assertIn("Genshin Impact", embed.description)
+        self.assertIn("Genshin", embed.description)
 
     async def test_lfg_party_flow_and_cash_reward(self):
         host_id = 1001

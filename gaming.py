@@ -9,22 +9,21 @@ import xbot_ui
 
 DEFAULT_SETTINGS = {
     "game_role_steam_id": "1552259861654413312",
+    "game_role_valorant_id": "1554759111281745962",
     "game_role_roblox_id": "1552259987667943515",
-    "game_role_mobile_id": "1552259988691488818",
+    "game_role_minecraft_id": "1554759163442237440",
+    "game_role_mlbb_id": "1554759232270639216",
+    "game_role_genshin_id": "1554759280194883615",
     "game_channel_steam_id": "1552259761607671908",
     "game_channel_roblox_id": "1552237657424265236",
     "game_channel_mobile_id": "1552237704878620722",
-    "game_role_valorant_id": "0",
     "game_channel_valorant_id": "0",
-    "game_role_minecraft_id": "0",
     "game_channel_minecraft_id": "0",
-    "game_role_mlbb_id": "0",
     "game_channel_mlbb_id": "0",
-    "game_role_genshin_id": "0",
     "game_channel_genshin_id": "0",
-    "device_role_pc_id": "0",
-    "device_role_mobile_id": "0",
-    "device_role_console_id": "0",
+    "device_role_pc_id": "1554759037914976317",
+    "device_role_mobile_id": "1552259988691488818",
+    "device_role_console_id": "1554758965454315520",
     "lfg_team_reward_cash": "500",
 }
 
@@ -65,25 +64,18 @@ GAME_CONFIG = {
         "color": discord.Color.gold(),
     },
     "genshin": {
-        "name": "Genshin Impact",
+        "name": "Genshin",
         "emoji": "✨",
         "role_key": "game_role_genshin_id",
         "channel_key": "game_channel_genshin_id",
         "color": discord.Color.teal(),
-    },
-    "mobile": {
-        "name": "Mobile",
-        "emoji": "📱",
-        "role_key": "game_role_mobile_id",
-        "channel_key": "game_channel_mobile_id",
-        "color": discord.Color.green(),
     },
 }
 
 DEVICE_CONFIG = {
     "pc": {
         "name": "PC",
-        "emoji": "🖥️",
+        "emoji": "💻",
         "role_key": "device_role_pc_id",
         "color": discord.Color.blue(),
     },
@@ -111,6 +103,8 @@ def initialise(db) -> None:
     """Create database tables and seed default settings for Gaming Zone."""
     for key, value in DEFAULT_SETTINGS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key, value) VALUES(?, ?)", (key, value))
+        if value != "0":
+            db.execute("UPDATE economy_settings SET value=? WHERE key=? AND (value='0' OR value='')", (value, key))
 
     db.execute("""CREATE TABLE IF NOT EXISTS game_profiles (
         user_id INTEGER PRIMARY KEY,
@@ -298,11 +292,11 @@ class UnifiedGamingRolesView(discord.ui.View):
         # Row 0: Devices (3 buttons)
         for key in ("pc", "mobile", "console"):
             self.add_item(DeviceRolesButton(key, row=0))
-        # Row 1: PC & Multiplayer titles (4 buttons)
-        for key in ("steam", "valorant", "roblox", "minecraft"):
+        # Row 1: Games Set 1 (3 buttons)
+        for key in ("steam", "valorant", "roblox"):
             self.add_item(GameRolesButton(key, row=1))
-        # Row 2: Mobile & RPG titles (3 buttons)
-        for key in ("mlbb", "genshin", "mobile"):
+        # Row 2: Games Set 2 (3 buttons)
+        for key in ("minecraft", "mlbb", "genshin"):
             self.add_item(GameRolesButton(key, row=2))
 
 
@@ -318,7 +312,7 @@ def build_gaming_roles_embed() -> discord.Embed:
             "This unlocks game-specific chat channels, LFG squad notifications, and customizes your server profile!\n"
             "欢迎选择您使用的**游戏设备**与常玩的**游戏**，自动解锁对应讨论区与组队开黑提醒！\n\n"
             "🖥️ **Select Devices / 游戏设备 (Row 1):**\n"
-            "• `🖥️ PC` · PC / Desktop Gamers (电脑玩家)\n"
+            "• `💻 PC` · PC / Desktop Gamers (电脑玩家)\n"
             "• `📱 Mobile` · Smartphone / Tablet (手机平板玩家)\n"
             "• `🎮 Console` · PS5 / Xbox / Switch (主机玩家)\n\n"
             "🎯 **Select Games / 热门游戏 (Row 2 & 3):**\n"
@@ -327,8 +321,7 @@ def build_gaming_roles_embed() -> discord.Embed:
             "• `🟥 Roblox` · Roblox Games & Community\n"
             "• `🟩 Minecraft` · 我的世界 / MC 联机\n"
             "• `🏆 MLBB` · Mobile Legends: Bang Bang\n"
-            "• `✨ Genshin Impact` · 原神 / 联机探讨\n"
-            "• `📱 Mobile` · Other Mobile Games (其他热门手游)\n\n"
+            "• `✨ Genshin` · 原神 / 联机探讨\n\n"
             "-# 💡 Click any button to toggle the role on or off at any time. (点击按钮即可随时添加或移除身份组)"
         ),
         color=0x3498DB,
