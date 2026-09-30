@@ -16,7 +16,8 @@ from discord.ext import tasks
 
 
 DEFAULT_SETTINGS = {
-    "starting_xc": "250",
+    "starting_xc": "10",
+    "starting_cash": "50000",
     "collect_cooldown": "60",
     "land_income_per_land": "100",
     "mine_cooldown": "60",
@@ -26,7 +27,7 @@ DEFAULT_SETTINGS = {
     "transfer_min": "1",
     "transfer_max": "10000",
     "transfer_tax_percent": "0",
-    "exchange_xc_to_war_percent": "100000",
+    "exchange_xc_to_war_percent": "1000000",
     "exchange_war_to_xc_percent": "1",
     "economy_shop_enabled": "1",
     "army_recruit_default_category_id": "0",
@@ -63,6 +64,18 @@ def safe_discord_component_emoji(value: str | None, fallback: str = "⚔️") ->
     return value if len(bases) == 1 else fallback
 
 
+def format_cash(amount: int) -> str:
+    """Format large cash amounts with compact suffix (e.g. 50k, 1.25M) and comma-separated full integer."""
+    abs_amt = abs(amount)
+    if abs_amt >= 1_000_000:
+        compact = f"{amount / 1_000_000:.2f}".rstrip("0").rstrip(".") + "M"
+        return f"{amount:,} ({compact})"
+    elif abs_amt >= 10_000:
+        compact = f"{amount / 1_000:.1f}".rstrip("0").rstrip(".") + "k"
+        return f"{amount:,} ({compact})"
+    return f"{amount:,}"
+
+
 def text_setting(db: sqlite3.Connection, key: str, fallback: str) -> str:
     row = db.execute("SELECT value FROM economy_settings WHERE key=?", (key,)).fetchone()
     return str(row["value"]) if row else fallback
@@ -89,7 +102,7 @@ def initialise(db: sqlite3.Connection) -> None:
     columns = {row["name"] for row in db.execute("PRAGMA table_info(players)")}
     for name, definition in {
         "display_name": "TEXT NOT NULL DEFAULT ''",
-        "xc": "INTEGER NOT NULL DEFAULT 250",
+        "xc": "INTEGER NOT NULL DEFAULT 10",
         "xcrystals": "INTEGER NOT NULL DEFAULT 0",
         "job_id": "INTEGER",
         "last_work": "INTEGER NOT NULL DEFAULT 0",
@@ -215,9 +228,10 @@ def initialise(db: sqlite3.Connection) -> None:
     db.execute(
         "INSERT INTO economy_settings(key,value) VALUES('version','Beta 1.4B') ON CONFLICT(key) DO UPDATE SET value='Beta 1.4B'"
     )
-    db.execute("UPDATE economy_settings SET value='100000' WHERE key='exchange_xc_to_war_percent'")
+    db.execute("UPDATE economy_settings SET value='1000000' WHERE key='exchange_xc_to_war_percent'")
     db.execute("UPDATE economy_settings SET value='1' WHERE key='exchange_war_to_xc_percent' AND value='100'")
     categories = [
+        ("VIP & Perks", "👑", 0, 0),
         ("Consumable", "🎟️", 1, 0),
         ("Utility & Protection", "🧰", 2, 0), ("Materials & Resources", "⛏️", 3, 0),
         ("Gear", "⚒️", 4, 0), ("War", "⚔️", 5, 0),
@@ -244,6 +258,8 @@ def initialise(db: sqlite3.Connection) -> None:
     # Default catalog. Every record is editable in the Dashboard. Sapphire is deliberately not seeded or changed.
     catalog = [
         # name, description, emoji, category, price, effect, power/weight, shop visible, sell price, mine min/max
+        ("Custom Tag", "Exclusive custom server role badge (2.5M Cash / 250 XC). Display your unique style!", "🏷️", "VIP & Perks", 250, "custom_tag", 0, 1, 0, 1, 1),
+        ("VIP Lounge Pass", "Unlock a prestigious Private VIP Lounge sanctuary for you and your squad (5M Cash / 500 XC).", "🛋️", "VIP & Perks", 500, "vip_lounge", 0, 1, 0, 1, 1),
         ("Basic Pickaxe", "A reliable starter pickaxe for mining.", "⛏️", "Gear", 1, "mine_tool", 0, 1, 0, 1, 1),
         ("Iron Pickaxe", "A stronger pickaxe with an extra mining bonus.", "⛏️", "Gear", 600, "mine_tool", 15, 1, 180, 1, 1),
         ("Gold Pickaxe", "A high-quality pickaxe with an improved mining bonus.", "⛏️", "Gear", 5000, "mine_tool", 30, 1, 1500, 1, 1),
@@ -660,7 +676,7 @@ def register_commands(bot, db, create_player) -> None:
         text = (f"## 💳 {user.display_name}'s X BOT Balance\n"
                 f"🪙 **Wallet XC:** {player['xc']:,}\n"
                 f"🏦 **Bank XC:** {player['bank_xc']:,}\n"
-                f"💵 **Cash:** {player['money']:,}\n"
+                f"💵 **Cash:** ${format_cash(player['money'])}\n"
                 f"💎 **XCrystals:** {player['xcrystals']:,}\n"
                 f"🎒 **Inventory:** {item_count:,} item(s)\n"
                 f"🏳️ **Nation:** {player['nation_name']}")
@@ -2019,11 +2035,11 @@ def register_commands(bot, db, create_player) -> None:
             else:
                 source_column, target_column = "money", "xc"
                 source_name, target_name = "Cash", "XC"
-                gross_received = amount // 1000
-                spent = gross_received * 1000
+                gross_received = amount // 10000
+                spent = gross_received * 10000
 
             if gross_received <= 0:
-                await interaction.response.send_message("This amount is too small for the current exchange rate (minimum 1,000 Cash).", ephemeral=True)
+                await interaction.response.send_message("This amount is too small for the current exchange rate (minimum 10,000 Cash).", ephemeral=True)
                 return
             if player[source_column] < spent:
                 await interaction.response.send_message(f"You do not have enough **{source_name}**.", ephemeral=True)
@@ -2061,7 +2077,7 @@ def register_commands(bot, db, create_player) -> None:
             container = discord.ui.Container(accent_color=discord.Color.gold())
             container.add_item(discord.ui.TextDisplay(f"## 🔄 X BOT Currency Exchange\n🪙 XC: **{player['xc']:,}**\n💵 Cash: **{player['money']:,}**"))
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n🪙 1 XC → **{max(1, xc_rate // 100):,} Cash**\n💵 1,000 Cash → **1 XC**\n-# 🏛️ Transactions over 1,000 have a 6% tax."))
+            container.add_item(discord.ui.TextDisplay(f"**Exchange Rates**\n🪙 1 XC → **{max(1, xc_rate // 100):,} Cash**\n💵 10,000 Cash → **1 XC**\n-# 🏛️ Transactions over 1,000 have a 6% tax."))
             container.add_item(discord.ui.ActionRow(ExchangeButton("xc_to_war"), ExchangeButton("war_to_xc"), EconomyCentreButton(owner_id, "Economy")))
             container.add_item(discord.ui.TextDisplay("-# XCrystals cannot be exchanged."))
             self.add_item(container)

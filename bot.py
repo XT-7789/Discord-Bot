@@ -202,8 +202,8 @@ def create_player(user: discord.abc.User):
             )
         )
         db.execute(
-            "UPDATE players SET xc = ? WHERE user_id = ?",
-            (economy.setting(db, "starting_xc"), user.id)
+            "UPDATE players SET xc = ?, money = ? WHERE user_id = ?",
+            (economy.setting(db, "starting_xc"), economy.setting(db, "starting_cash"), user.id)
         )
         db.execute("UPDATE players SET nation_created_at=? WHERE user_id=?", (int(time.time()), user.id))
         infantry = db.execute("SELECT id FROM war_unit_types WHERE code='infantry'").fetchone()
