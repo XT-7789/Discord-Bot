@@ -805,9 +805,21 @@ class LoungeHostControlView(discord.ui.View):
         current_expiry = lounge["expires_at"]
         new_expiry = current_expiry + 1800  # +30 minutes
 
-        if (new_expiry - reserved_at) > max_duration:
+        # Check if user has unlimited extension bypass (Administrator or VIP Lounge Pass owner)
+        is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
+        has_vip_pass = False
+        if not is_admin:
+            vip_item = _db.execute("SELECT id FROM items WHERE (name='VIP Lounge Pass' OR effect='vip_lounge')").fetchone()
+            if vip_item:
+                owned = _db.execute("SELECT quantity FROM inventories WHERE user_id=? AND item_id=? AND quantity>0", (interaction.user.id, vip_item["id"])).fetchone()
+                has_vip_pass = bool(owned)
+
+        has_unlimited_extension = is_admin or has_vip_pass
+
+        if not has_unlimited_extension and (new_expiry - reserved_at) > max_duration:
             await interaction.response.send_message(
-                f"⚠️ Cannot extend further! Maximum extended session length is **{max_duration // 60} minutes (5 Hours)**.",
+                f"⚠️ Cannot extend further! Standard session limit is **{max_duration // 60} minutes (5 Hours)**.\n"
+                f"-# 💡 Server Administrators and members holding a **VIP Lounge Pass** enjoy unlimited extensions!",
                 ephemeral=True,
             )
             return
@@ -821,9 +833,10 @@ class LoungeHostControlView(discord.ui.View):
 
         await refresh_lobby_message(_bot, _db, interaction.guild)
         total_mins = (new_expiry - reserved_at) // 60
+        vip_tag = " [👑 Unlimited VIP/Admin Extension]" if has_unlimited_extension else " (Standard Max: 5 Hours)"
         await interaction.followup.send(
             f"⏳ **Session extended by +30 minutes!**\n"
-            f"• Current Total Session: **{total_mins} mins** (Max: 5 Hours)\n"
+            f"• Current Total Session: **{total_mins} mins**{vip_tag}\n"
             f"• New Expiry: <t:{new_expiry}:R> (<t:{new_expiry}:t>)",
             ephemeral=True,
         )
