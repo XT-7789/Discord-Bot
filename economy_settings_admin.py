@@ -16,8 +16,8 @@ import advanced_systems
 import svip
 import casual_games
 
-GENERAL_KEYS = tuple(('starting_xc work_cooldown collect_cooldown land_income_per_land '
-    'work_crystal_chance mine_cooldown mine_crystal_chance exchange_xc_to_war_percent '
+GENERAL_KEYS = tuple(('starting_xc collect_cooldown land_income_per_land '
+    'mine_cooldown mine_crystal_chance exchange_xc_to_war_percent '
     'exchange_war_to_xc_percent daily_reward daily_cooldown transfer_min transfer_max '
     'transfer_tax_percent market_enabled market_fee_percent market_min_price market_max_price '
     'attack_cooldown capital_damage capital_reward_percent capital_repair_cost_per_hp '

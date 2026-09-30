@@ -17,10 +17,8 @@ from discord.ext import tasks
 
 DEFAULT_SETTINGS = {
     "starting_xc": "250",
-    "work_cooldown": "60",  # beta testing: one minute
     "collect_cooldown": "60",
     "land_income_per_land": "100",
-    "work_crystal_chance": "2",
     "mine_cooldown": "60",
     "mine_crystal_chance": "1",
     "daily_reward": "50",
@@ -31,15 +29,6 @@ DEFAULT_SETTINGS = {
     "exchange_xc_to_war_percent": "100000",
     "exchange_war_to_xc_percent": "1",
     "economy_shop_enabled": "1",
-    "job_drop_base_chance": "6",
-    "job_drop_tenure_multiplier": "1",
-    "job_drop_max_chance": "25",
-    "job_keep_recommendation": "1",
-    "job_keep_apology": "1",
-    "job_inactivity_enabled": "1",
-    "job_warning_days": "7",
-    "job_fire_days": "14",
-    "job_log_channel_id": "0",
     "army_recruit_default_category_id": "0",
     "army_recruit_default_sort": "manual",
     "mining_energy_enabled": "1", "mining_max_energy": "100",
@@ -203,15 +192,6 @@ def initialise(db: sqlite3.Connection) -> None:
             created_at INTEGER NOT NULL
         )
     """)
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS job_incentive_pool (
-            item_id INTEGER PRIMARY KEY,
-            amount INTEGER NOT NULL DEFAULT 1,
-            weight INTEGER NOT NULL DEFAULT 1,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            FOREIGN KEY(item_id) REFERENCES items(id)
-        )
-    """)
     db.execute("""CREATE TABLE IF NOT EXISTS mining_areas(
         id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,
         emoji TEXT NOT NULL DEFAULT '⛏️',description TEXT NOT NULL DEFAULT '',required_level INTEGER NOT NULL DEFAULT 1,
@@ -238,25 +218,19 @@ def initialise(db: sqlite3.Connection) -> None:
     db.execute("UPDATE economy_settings SET value='100000' WHERE key='exchange_xc_to_war_percent'")
     db.execute("UPDATE economy_settings SET value='1' WHERE key='exchange_war_to_xc_percent' AND value='100'")
     categories = [
-        ("Work & Career", "💼", 1, 0), ("Consumable", "🎟️", 2, 0),
-        ("Utility & Protection", "🧰", 3, 0), ("Materials & Resources", "⛏️", 4, 0),
-        ("Gear", "⚒️", 5, 0), ("War", "⚔️", 6, 0),
-        ("Collectables", "🏆", 7, 0), ("Misc", "📦", 99, 1),
+        ("Consumable", "🎟️", 1, 0),
+        ("Utility & Protection", "🧰", 2, 0), ("Materials & Resources", "⛏️", 3, 0),
+        ("Gear", "⚒️", 4, 0), ("War", "⚔️", 5, 0),
+        ("Collectables", "🏆", 6, 0), ("Misc", "📦", 99, 1),
     ]
     db.executemany("INSERT OR IGNORE INTO item_categories(label,emoji,position,system_category) VALUES(?,?,?,?)", categories)
     # Match old item labels to the new editable category library.
-    category_map = {"utility": "Utility & Protection", "war": "War", "collectible": "Collectables", "gear": "Gear", "material": "Materials & Resources", "job": "Work & Career", "misc": "Misc"}
+    category_map = {"utility": "Utility & Protection", "war": "War", "collectible": "Collectables", "gear": "Gear", "material": "Materials & Resources", "misc": "Misc"}
     for old_label, new_label in category_map.items():
         db.execute("UPDATE items SET category_id=(SELECT id FROM item_categories WHERE label=?) WHERE category=? AND category_id IS NULL", (new_label, old_label))
-    if db.execute("SELECT COUNT(*) AS c FROM jobs").fetchone()["c"] == 0:
-        db.executemany(
-            "INSERT INTO jobs (name, description, min_salary, max_salary) VALUES (?, ?, ?, ?)",
-            [
-                ("Recruit", "Entry-level work for the X BOT economy.", 80, 120),
-                ("Miner", "Processes supplies and earns steady XC.", 120, 180),
-                ("Trader", "Negotiates deals for a higher XC salary.", 180, 260),
-            ],
-        )
+    db.execute("DELETE FROM item_categories WHERE label='Work & Career'")
+    db.execute("DROP TABLE IF EXISTS jobs")
+    db.execute("DROP TABLE IF EXISTS job_incentive_pool")
     if db.execute("SELECT COUNT(*) AS c FROM items").fetchone()["c"] == 0:
         db.executemany(
             """INSERT INTO items(name,description,emoji,category,price,currency,sell_price,stock,effect,effect_value) VALUES(?,?,?,?,?,?,?,?,?,?)""",
@@ -340,53 +314,11 @@ def initialise(db: sqlite3.Connection) -> None:
         ("Balloon", "balloon_token", "Use this item for one Balloon Pop game without an XC bet."),
     ]:
         db.execute("UPDATE items SET effect=?,description=? WHERE name=? AND effect='none'", (item_effect, description, item_name))
-    # Department careers and their configurable incentive documents.
-    db.execute("""INSERT INTO items(name,description,emoji,category,category_id,price,currency,sell_price,stock,effect,effect_value,enabled,sellable,tradeable,shop_visible)
-        SELECT 'Letter of Recommendation','Required approval letter for department careers.','📜','work',(SELECT id FROM item_categories WHERE label='Work & Career'),0,'xc',0,-1,'none',0,1,0,0,0
-        WHERE NOT EXISTS(SELECT 1 FROM items WHERE name='Letter of Recommendation' COLLATE NOCASE)""")
-    db.execute("""INSERT INTO items(name,description,emoji,category,category_id,price,currency,sell_price,stock,effect,effect_value,enabled,sellable,tradeable,shop_visible)
-        SELECT 'Work Pass','Career incentive document used to unlock department jobs, reapply, or take vacation.','🎟️','work',(SELECT id FROM item_categories WHERE label='Work & Career'),0,'xc',0,-1,'job_bonus',0,1,0,0,0
-        WHERE NOT EXISTS(SELECT 1 FROM items WHERE name='Work Pass' COLLATE NOCASE)""")
-    department_jobs = [
-        ("Maintenance Department", "Maintain server operations and complete scheduled department work.", "⚠️", 30, 30, 4, "1526826551927115826"),
-        ("Public Relations Department", "Represent the community and coordinate public communications.", "📣", 30, 30, 4, "1527254483875270716"),
-        ("Security Department", "Protect community operations and support server security.", "🛡️", 30, 30, 4, "1519587111450185769"),
-        ("Department Manager/Commissioner", "Manage department staff, standards and daily operations.", "🔨", 80, 80, 2, "1536978781137412116"),
-        ("Assistant Director", "Coordinate senior department leadership and strategic work.", "🔨", 100, 100, 2, "1531235529608138913"),
-        ("Board of Executive Directors", "Provide executive oversight for X BOT departments.", "⚒️", 150, 150, 2, "1531206560267632760"),
-        ("X Council", "Provide senior council leadership and community oversight.", "🏛️", 300, 300, 1, "1523954152701431848"),
-        ("Administration", "Lead X BOT administration and executive server operations.", "🏢", 500, 500, 1, "1531176720097476708"),
-    ]
-    db.executemany("""INSERT INTO jobs(name,description,emoji,min_salary,max_salary,shifts_per_day,required_role_id,requirement_item_id,requirement_quantity,enabled)
-        VALUES(?,?,?,?,?,?,?,(SELECT id FROM items WHERE name='Work Pass'),1,1) ON CONFLICT(name) DO UPDATE SET description=excluded.description,emoji=excluded.emoji,
-        min_salary=excluded.min_salary,max_salary=excluded.max_salary,shifts_per_day=excluded.shifts_per_day,
-        required_role_id=excluded.required_role_id,requirement_item_id=excluded.requirement_item_id,requirement_quantity=1,enabled=1""", department_jobs)
-    db.execute("UPDATE jobs SET enabled=0 WHERE name IN ('Recruit','Miner','Trader')")
-    # Work Pass replaced the old recommendation letter. Remove unusable copies while preserving logs/history.
-    old_letter = db.execute("SELECT id FROM items WHERE name='Letter of Recommendation' COLLATE NOCASE").fetchone()
-    if old_letter:
-        db.execute("DELETE FROM inventories WHERE item_id=?", (old_letter["id"],))
-        db.execute("UPDATE items SET enabled=0,shop_visible=0,sellable=0,tradeable=0 WHERE id=?", (old_letter["id"],))
-    work_pass = db.execute("SELECT id FROM items WHERE name='Work Pass' COLLATE NOCASE").fetchone()
-    clover = db.execute("SELECT id FROM items WHERE name='Clover' COLLATE NOCASE").fetchone()
-    if work_pass:
-        for key in ("job_recommendation_item_id", "job_apology_item_id", "job_vacation_item_id"):
-            db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, str(work_pass["id"])))
-        db.execute("INSERT OR IGNORE INTO job_incentive_pool(item_id,amount,weight,enabled) VALUES(?,1,99,1)", (work_pass["id"],))
-    if clover:
-        db.execute("INSERT OR IGNORE INTO job_incentive_pool(item_id,amount,weight,enabled) VALUES(?,1,1,1)", (clover["id"],))
-    # X BOT is now a War Game + Casino bot, not a company/job economy.
-    # Retire the legacy job data every startup so it cannot return after a restart.
-    retired_job_items = [row["id"] for row in db.execute(
-        "SELECT id FROM items WHERE name IN ('Work Pass','Letter of Recommendation')"
-    ).fetchall()]
-    if retired_job_items:
-        marks = ",".join("?" for _ in retired_job_items)
-        db.execute(f"DELETE FROM inventories WHERE item_id IN ({marks})", retired_job_items)
-        db.execute(f"DELETE FROM job_incentive_pool WHERE item_id IN ({marks})", retired_job_items)
-        db.execute(f"DELETE FROM items WHERE id IN ({marks})", retired_job_items)
+    # Purge legacy company/job items and ensure jobs table is removed
+    db.execute("DELETE FROM items WHERE name IN ('Work Pass','Letter of Recommendation')")
     db.execute("UPDATE players SET job_id=NULL,job_started_at=0,job_warning_sent=0,work_shifts_today=0")
-    db.execute("DELETE FROM jobs")
+    db.execute("DROP TABLE IF EXISTS jobs")
+    db.execute("DROP TABLE IF EXISTS job_incentive_pool")
     areas = [
         ("Surface Mine","🪨","A safe starting mine for stone, coal and copper.",1,60,8,10,18,0,1),
         ("Iron Depths","🔩","Deeper tunnels rich in iron and silver.",6,75,10,18,28,1,2),
@@ -438,63 +370,11 @@ def setting(db, key: str) -> int:
     return int(row["value"]) if row else int(DEFAULT_SETTINGS[key])
 
 
-def roll_job_incentive(db: sqlite3.Connection, user_id: int, job_started_at: int, now: int | None = None):
-    """Roll and grant one weighted job incentive; return (item, amount, chance)."""
-    now = now or int(time.time())
-    tenure_days = max(0, (now - max(0, job_started_at)) // 86400) if job_started_at else 0
-    chance = min(
-        setting(db, "job_drop_max_chance"),
-        setting(db, "job_drop_base_chance") + tenure_days * setting(db, "job_drop_tenure_multiplier"),
-    )
-    if chance <= 0 or random.randint(1, 100) > chance:
-        return None, 0, chance
-    pool = db.execute("""SELECT p.*,i.name,i.emoji FROM job_incentive_pool p
-        JOIN items i ON i.id=p.item_id WHERE p.enabled=1 AND p.weight>0 AND p.amount>0 AND i.enabled=1""").fetchall()
-    if not pool:
-        return None, 0, chance
-    chosen = random.choices(pool, weights=[row["weight"] for row in pool], k=1)[0]
-    db.execute("""INSERT INTO inventories(user_id,item_id,quantity) VALUES(?,?,?)
-        ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=quantity+excluded.quantity""",
-        (user_id, chosen["item_id"], chosen["amount"]))
-    return chosen, chosen["amount"], chance
-
-
 def log(db, user_id: int, action: str, detail: str) -> None:
     db.execute(
         "INSERT INTO economy_logs (user_id, action, detail, created_at) VALUES (?, ?, ?, ?)",
         (user_id, action, detail, int(time.time())),
     )
-
-
-def process_job_inactivity(db: sqlite3.Connection, now: int | None = None):
-    """Apply warning/firing rules and return events for Discord delivery."""
-    if not setting(db, "job_inactivity_enabled"):
-        return []
-    now = now or int(time.time())
-    warning_seconds = setting(db, "job_warning_days") * 86400
-    fire_seconds = setting(db, "job_fire_days") * 86400
-    events = []
-    rows = db.execute("""SELECT p.user_id,p.display_name,p.last_work,p.job_started_at,p.job_warning_sent,j.name job_name
-        FROM players p JOIN jobs j ON j.id=p.job_id WHERE p.job_id IS NOT NULL""").fetchall()
-    for player in rows:
-        last_active = max(player["last_work"], player["job_started_at"])
-        inactive = max(0, now - last_active)
-        inactive_days = inactive // 86400
-        if inactive >= fire_seconds:
-            db.execute("UPDATE players SET job_id=NULL,job_started_at=0,job_warning_sent=0 WHERE user_id=?", (player["user_id"],))
-            log(db, player["user_id"], "job_inactivity_fired", f"Removed from {player['job_name']} after {inactive_days} inactive days")
-            events.append(("fired", player["user_id"], player["display_name"], player["job_name"], inactive_days))
-        elif inactive >= warning_seconds and not player["job_warning_sent"]:
-            db.execute("UPDATE players SET job_warning_sent=? WHERE user_id=?", (now, player["user_id"]))
-            log(db, player["user_id"], "job_inactivity_warning", f"Warning for {player['job_name']} after {inactive_days} inactive days")
-            events.append(("warning", player["user_id"], player["display_name"], player["job_name"], inactive_days))
-    db.commit()
-    return events
-
-
-def start_job_inactivity_task(bot: discord.Client, db: sqlite3.Connection) -> None:
-    """Retired: Job system is inactive; no background inactivity loop needed."""
-    return
 
 
 def find_item(db, name: str, user_id: int | None = None):

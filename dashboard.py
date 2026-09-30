@@ -506,7 +506,7 @@ def home():
     db = get_db()
     stats = db.execute("""SELECT COUNT(*) nations,COALESCE(SUM(xc),0) xc,COALESCE(SUM(bank_xc),0) bank_xc,COALESCE(SUM(money),0) war_credits,COALESCE(SUM(xcrystals),0) crystals,COALESCE(SUM(land),0) land,
         COALESCE((SELECT SUM(w.quantity*u.power) FROM player_war_units w JOIN war_unit_types u ON u.id=w.unit_type_id WHERE u.enabled=1),0) power,
-        (SELECT COUNT(*) FROM items WHERE enabled=1) items,(SELECT COUNT(*) FROM jobs WHERE enabled=1) jobs,
+        (SELECT COUNT(*) FROM items WHERE enabled=1) items,0 jobs,
         (SELECT COUNT(*) FROM market_listings WHERE active=1) listings,(SELECT COUNT(*) FROM battle_history) battles FROM players""").fetchone()
     active_war = db.execute("""SELECT w.*,a.name attacker_name,a.tag attacker_tag,d.name defender_name,d.tag defender_tag FROM wars w JOIN alliances a ON a.id=w.attacker_alliance_id JOIN alliances d ON d.id=w.defender_alliance_id WHERE w.active=1 ORDER BY w.id DESC LIMIT 1""").fetchone()
     recent = db.execute("SELECT * FROM economy_logs ORDER BY id DESC LIMIT 8").fetchall()
@@ -637,12 +637,12 @@ def players():
     db = get_db()
     search = request.args.get("q", "").strip(); sort = request.args.get("sort", "wallet")
     order = {"wallet":"p.xc DESC", "bank":"p.bank_xc DESC", "crystals":"p.xcrystals DESC", "power":"power DESC", "name":"display_name"}.get(sort, "p.xc DESC")
-    rows = db.execute(f"""SELECT p.*,j.name job_name,a.name alliance_name,a.tag alliance_tag,
+    rows = db.execute(f"""SELECT p.*,NULL job_name,a.name alliance_name,a.tag alliance_tag,
         COALESCE(x.level,1) activity_level,COALESCE(x.total_xp,0) activity_xp,
         COALESCE((SELECT SUM(w.quantity*u.power) FROM player_war_units w JOIN war_unit_types u ON u.id=w.unit_type_id WHERE w.user_id=p.user_id AND u.enabled=1),0) power,
         COALESCE((SELECT SUM(quantity) FROM inventories WHERE user_id=p.user_id),0) inventory_count,
         COALESCE((SELECT COUNT(*) FROM market_listings WHERE seller_id=p.user_id AND active=1),0) listing_count
-        FROM players p LEFT JOIN jobs j ON j.id=p.job_id LEFT JOIN alliance_members am ON am.user_id=p.user_id LEFT JOIN alliances a ON a.id=am.alliance_id LEFT JOIN xp_profiles x ON x.user_id=p.user_id
+        FROM players p LEFT JOIN alliance_members am ON am.user_id=p.user_id LEFT JOIN alliances a ON a.id=am.alliance_id LEFT JOIN xp_profiles x ON x.user_id=p.user_id
         WHERE (?='' OR p.display_name LIKE ? OR p.nation_name LIKE ? OR CAST(p.user_id AS TEXT) LIKE ?) ORDER BY {order}""", (search, f"%{search}%", f"%{search}%", f"%{search}%")).fetchall()
     db.close()
     body = render_template('dashboard/players.html', rows=rows, search=search, sort=sort)
@@ -652,7 +652,7 @@ def players():
 PLAYER_FORM = """
 <section class="panel"><h2>Edit User Profile</h2><div class="notice"><b>Discord Name:</b> {{player['display_name'] or 'Unknown'}} · <b>Discord ID:</b> {{player['user_id']}} · <b>Nation:</b> {{player['nation_name']}}<br>The Discord ID remains the safe database key; the Dashboard displays the username everywhere possible.</div><form class="fields" method="post"><div class="fields-grid">
 <label>Nation Name<input name="nation_name" value="{{player['nation_name']}}" required></label><label>Capital Name<input name="capital_name" value="{{player['capital_name']}}" required></label><label>Wallet XC<input type="number" min="0" name="xc" value="{{player['xc']}}" required></label><label>Bank XC<input type="number" min="0" name="bank_xc" value="{{player['bank_xc']}}" required></label><label>War Credits<input type="number" min="0" name="money" value="{{player['money']}}" required></label><label>XCrystals<input type="number" min="0" name="xcrystals" value="{{player['xcrystals']}}" required></label>
-<label>Job<select name="job_id"><option value="">None</option>{% for j in jobs %}<option value="{{j['id']}}" {% if player['job_id']==j['id'] %}selected{% endif %}>{{j['name']}}</option>{% endfor %}</select></label><label>Land<input type="number" min="0" name="land" value="{{player['land']}}" required></label><label>Capital HP<input type="number" min="0" max="100" name="capital_health" value="{{player['capital_health']}}" required></label>
+<label>Land<input type="number" min="0" name="land" value="{{player['land']}}" required></label><label>Capital HP<input type="number" min="0" max="100" name="capital_health" value="{{player['capital_health']}}" required></label>
 <label>Fortification Level<input type="number" min="0" name="fortification_level" value="{{war_state['fortification_level'] if war_state else 0}}"></label><label>Military Morale (%)<input type="number" min="0" max="100" name="morale" value="{{war_state['morale'] if war_state else 100}}"></label>
 </div><div class="actions"><button>Save User</button><a class="btn secondary" href="{{url_for('players')}}">Cancel</a></div></form></section>
 <section class="panel"><h2>Owned Items</h2><div class="pad"><details class="creator"><summary class="btn">＋ Add Item</summary><form class="fields" method="post" action="{{url_for('set_inventory',user_id=player['user_id'])}}"><div class="fields-grid"><label>Choose Item<select name="item_id">{% for item in available_items %}<option value="{{item['id']}}">{{item['emoji']}} {{item['name']}}</option>{% endfor %}</select></label><label>Quantity<input type="number" min="1" name="quantity" value="1"></label></div><button>Add Item</button></form></details></div><table><tr><th>Item</th><th>Quantity</th><th>Set Quantity</th></tr>{% for item in items %}<tr><td>{{item['emoji']}} {{item['name']}}</td><td>{{item['quantity']}}</td><td><form class="inline" method="post" action="{{url_for('set_inventory',user_id=player['user_id'])}}"><input type="hidden" name="item_id" value="{{item['id']}}"><input type="number" min="0" name="quantity" value="{{item['quantity']}}"><button>Set</button></form></td></tr>{% else %}<tr><td colspan="3">This user does not own any items.</td></tr>{% endfor %}</table></section>"""
@@ -685,7 +685,7 @@ def edit_player(user_id):
         except (ValueError, KeyError) as error:
             flash(str(error))
         player = db.execute("SELECT * FROM players WHERE user_id=?", (user_id,)).fetchone()
-    jobs_rows = db.execute("SELECT * FROM jobs ORDER BY name").fetchall()
+    jobs_rows = []
     item_rows = db.execute("""SELECT i.*,v.quantity FROM inventories v JOIN items i ON i.id=v.item_id WHERE v.user_id=? AND v.quantity>0 ORDER BY i.name""", (user_id,)).fetchall()
     available_items = db.execute("""SELECT id,name,emoji FROM items i WHERE enabled=1 AND NOT EXISTS(
         SELECT 1 FROM inventories v WHERE v.item_id=i.id AND v.user_id=? AND v.quantity>0) ORDER BY name""", (user_id,)).fetchall()
@@ -1026,8 +1026,6 @@ def item_usage_details(db, item_id):
     item_id = int(item_id)
     checks = (
         ("SELECT COUNT(*) count,COALESCE(SUM(quantity),0) total FROM inventories WHERE item_id=? AND quantity>0", "player inventories", "total"),
-        ("SELECT COUNT(*) count,COUNT(*) total FROM jobs WHERE requirement_item_id=?", "jobs", "count"),
-        ("SELECT COUNT(*) count,COUNT(*) total FROM job_incentive_pool WHERE item_id=?", "job reward pools", "count"),
         ("SELECT COUNT(*) count,COUNT(*) total FROM xp_rewards WHERE item_id=?", "level rewards", "count"),
         ("SELECT COUNT(*) count,COUNT(*) total FROM streak_rewards WHERE item_id=?", "activity streak rewards", "count"),
         ("SELECT COUNT(*) count,COALESCE(SUM(quantity),0) total FROM market_listings WHERE item_id=?", "market listings/history", "count"),
