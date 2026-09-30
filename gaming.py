@@ -14,6 +14,14 @@ DEFAULT_SETTINGS = {
     "game_channel_steam_id": "1552259761607671908",
     "game_channel_roblox_id": "1552237657424265236",
     "game_channel_mobile_id": "1552237704878620722",
+    "game_role_valorant_id": "0",
+    "game_channel_valorant_id": "0",
+    "game_role_minecraft_id": "0",
+    "game_channel_minecraft_id": "0",
+    "game_role_mlbb_id": "0",
+    "game_channel_mlbb_id": "0",
+    "game_role_genshin_id": "0",
+    "game_channel_genshin_id": "0",
     "device_role_pc_id": "0",
     "device_role_mobile_id": "0",
     "device_role_console_id": "0",
@@ -28,12 +36,40 @@ GAME_CONFIG = {
         "channel_key": "game_channel_steam_id",
         "color": discord.Color.dark_blue(),
     },
+    "valorant": {
+        "name": "Valorant",
+        "emoji": "🎯",
+        "role_key": "game_role_valorant_id",
+        "channel_key": "game_channel_valorant_id",
+        "color": discord.Color.from_rgb(255, 70, 85),
+    },
     "roblox": {
         "name": "Roblox",
         "emoji": "🟥",
         "role_key": "game_role_roblox_id",
         "channel_key": "game_channel_roblox_id",
         "color": discord.Color.red(),
+    },
+    "minecraft": {
+        "name": "Minecraft",
+        "emoji": "🟩",
+        "role_key": "game_role_minecraft_id",
+        "channel_key": "game_channel_minecraft_id",
+        "color": discord.Color.dark_green(),
+    },
+    "mlbb": {
+        "name": "MLBB",
+        "emoji": "🏆",
+        "role_key": "game_role_mlbb_id",
+        "channel_key": "game_channel_mlbb_id",
+        "color": discord.Color.gold(),
+    },
+    "genshin": {
+        "name": "Genshin Impact",
+        "emoji": "✨",
+        "role_key": "game_role_genshin_id",
+        "channel_key": "game_channel_genshin_id",
+        "color": discord.Color.teal(),
     },
     "mobile": {
         "name": "Mobile",
@@ -127,9 +163,16 @@ def save_game_profile(db, user_id: int, steam_id: str, roblox_name: str, mobile_
 class GameRolesButton(discord.ui.Button):
     def __init__(self, game_key: str, row: Optional[int] = None):
         cfg = GAME_CONFIG[game_key]
-        style = discord.ButtonStyle.primary if game_key == "steam" else (
-            discord.ButtonStyle.danger if game_key == "roblox" else discord.ButtonStyle.success
-        )
+        styles = {
+            "steam": discord.ButtonStyle.primary,
+            "valorant": discord.ButtonStyle.danger,
+            "roblox": discord.ButtonStyle.danger,
+            "minecraft": discord.ButtonStyle.success,
+            "mlbb": discord.ButtonStyle.primary,
+            "genshin": discord.ButtonStyle.secondary,
+            "mobile": discord.ButtonStyle.success,
+        }
+        style = styles.get(game_key, discord.ButtonStyle.primary)
         super().__init__(
             label=f"{cfg['emoji']} {cfg['name']}",
             style=style,
@@ -147,10 +190,14 @@ class GameRolesButton(discord.ui.Button):
         role_id_str = setting(db, GAME_CONFIG[self.game_key]["role_key"])
         role_id = int(role_id_str) if role_id_str.isdigit() else 0
 
-        role = interaction.guild.get_role(role_id)
+        role = interaction.guild.get_role(role_id) if role_id else None
         if not role:
-            # Fallback search by name if role was recreated
-            role = discord.utils.find(lambda r: self.game_key.lower() in r.name.lower(), interaction.guild.roles)
+            # Fallback search by name if role was recreated or not yet mapped in DB
+            target_name = GAME_CONFIG[self.game_key]["name"].lower()
+            role = discord.utils.find(
+                lambda r: target_name in r.name.lower() or self.game_key.lower() in r.name.lower(),
+                interaction.guild.roles,
+            )
 
         if not role:
             await interaction.response.send_message(
@@ -245,44 +292,52 @@ class DeviceRolesButton(discord.ui.Button):
                 )
 
 
-class GameRolesView(discord.ui.View):
+class UnifiedGamingRolesView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        for key in ("steam", "roblox", "mobile"):
-            self.add_item(GameRolesButton(key))
-
-
-class NewUserOnboardingView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        # Row 0: Devices
+        # Row 0: Devices (3 buttons)
         for key in ("pc", "mobile", "console"):
             self.add_item(DeviceRolesButton(key, row=0))
-        # Row 1: Games
-        for key in ("steam", "roblox", "mobile"):
+        # Row 1: PC & Multiplayer titles (4 buttons)
+        for key in ("steam", "valorant", "roblox", "minecraft"):
             self.add_item(GameRolesButton(key, row=1))
+        # Row 2: Mobile & RPG titles (3 buttons)
+        for key in ("mlbb", "genshin", "mobile"):
+            self.add_item(GameRolesButton(key, row=2))
 
 
-def build_onboarding_embed() -> discord.Embed:
+GameRolesView = UnifiedGamingRolesView
+NewUserOnboardingView = UnifiedGamingRolesView
+
+
+def build_gaming_roles_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🎮 Welcome to the Community! · Device & Game Selection",
+        title="🎮 [COMMUNITY & GAMING ROLES · 自选设备与游戏身分组]",
         description=(
             "Welcome! Select your **gaming devices** and **favorite games** below.\n"
-            "This unlocks game-specific chat channels, LFG squad notifications, and customizes your server profile!\n\n"
-            "🖥️ **Select Your Devices (Row 1):**\n"
-            "• `🖥️ PC` · PC / Desktop Gamers\n"
-            "• `📱 Mobile` · Mobile Phone / Tablet Gamers\n"
-            "• `🎮 Console` · PlayStation / Xbox / Nintendo Switch\n\n"
-            "🎮 **Select Your Games (Row 2):**\n"
+            "This unlocks game-specific chat channels, LFG squad notifications, and customizes your server profile!\n"
+            "欢迎选择您使用的**游戏设备**与常玩的**游戏**，自动解锁对应讨论区与组队开黑提醒！\n\n"
+            "🖥️ **Select Devices / 游戏设备 (Row 1):**\n"
+            "• `🖥️ PC` · PC / Desktop Gamers (电脑玩家)\n"
+            "• `📱 Mobile` · Smartphone / Tablet (手机平板玩家)\n"
+            "• `🎮 Console` · PS5 / Xbox / Switch (主机玩家)\n\n"
+            "🎯 **Select Games / 热门游戏 (Row 2 & 3):**\n"
             "• `🎮 Steam` · Steam Titles & PC Gaming\n"
-            "• `🟥 Roblox` · Roblox Games & Squads\n"
-            "• `📱 Mobile` · Mobile Legends, PUBG Mobile, etc.\n\n"
-            "-# 💡 Click any button to toggle the role on or off."
+            "• `🎯 Valorant` · 特战英豪 / 瓦罗兰特\n"
+            "• `🟥 Roblox` · Roblox Games & Community\n"
+            "• `🟩 Minecraft` · 我的世界 / MC 联机\n"
+            "• `🏆 MLBB` · Mobile Legends: Bang Bang\n"
+            "• `✨ Genshin Impact` · 原神 / 联机探讨\n"
+            "• `📱 Mobile` · Other Mobile Games (其他热门手游)\n\n"
+            "-# 💡 Click any button to toggle the role on or off at any time. (点击按钮即可随时添加或移除身份组)"
         ),
-        color=discord.Color.blue(),
+        color=0x3498DB,
     )
-    embed.set_footer(text="X BOT · New User Onboarding · Select your roles to get started")
+    embed.set_footer(text="X BOT · Gaming Community & Onboarding · Click to toggle roles")
     return embed
+
+
+build_onboarding_embed = build_gaming_roles_embed
 
 
 class LFGPartyView(discord.ui.View):
@@ -693,8 +748,12 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
         await interaction.response.send_message(content=content, embed=embed, view=view)
 
     lfg_choices = [
+        app_commands.Choice(name="Valorant", value="valorant"),
         app_commands.Choice(name="Roblox", value="roblox"),
         app_commands.Choice(name="Steam", value="steam"),
+        app_commands.Choice(name="Minecraft", value="minecraft"),
+        app_commands.Choice(name="MLBB", value="mlbb"),
+        app_commands.Choice(name="Genshin Impact", value="genshin"),
         app_commands.Choice(name="Mobile", value="mobile"),
         app_commands.Choice(name="Other", value="other"),
     ]
@@ -819,7 +878,11 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
             app_commands.Choice(name="Device: Mobile", value="mobile_device"),
             app_commands.Choice(name="Device: Console", value="console"),
             app_commands.Choice(name="Game: Steam", value="steam"),
+            app_commands.Choice(name="Game: Valorant", value="valorant"),
             app_commands.Choice(name="Game: Roblox", value="roblox"),
+            app_commands.Choice(name="Game: Minecraft", value="minecraft"),
+            app_commands.Choice(name="Game: MLBB", value="mlbb"),
+            app_commands.Choice(name="Game: Genshin Impact", value="genshin"),
             app_commands.Choice(name="Game: Mobile", value="mobile_game"),
         ],
     )

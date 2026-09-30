@@ -183,15 +183,17 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
     def test_new_user_onboarding_view(self):
         view = gaming.NewUserOnboardingView()
         self.assertIsNone(view.timeout)
-        self.assertEqual(len(view.children), 6)  # 3 device buttons + 3 game buttons
+        self.assertEqual(len(view.children), 10)  # 3 device buttons + 7 game buttons
         device_btns = [btn for btn in view.children if isinstance(btn, gaming.DeviceRolesButton)]
         game_btns = [btn for btn in view.children if isinstance(btn, gaming.GameRolesButton)]
         self.assertEqual(len(device_btns), 3)
-        self.assertEqual(len(game_btns), 3)
+        self.assertEqual(len(game_btns), 7)
         embed = gaming.build_onboarding_embed()
-        self.assertIn("Device & Game Selection", embed.title)
-        self.assertIn("PC", embed.description)
-        self.assertIn("Steam", embed.description)
+        self.assertIn("COMMUNITY & GAMING ROLES", embed.title)
+        self.assertIn("Valorant", embed.description)
+        self.assertIn("Minecraft", embed.description)
+        self.assertIn("MLBB", embed.description)
+        self.assertIn("Genshin Impact", embed.description)
 
     async def test_lfg_party_flow_and_cash_reward(self):
         host_id = 1001

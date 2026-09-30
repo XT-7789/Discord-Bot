@@ -1362,20 +1362,9 @@ class AdminPanel(discord.ui.LayoutView):
             if not target_ch:
                 await self.refresh(interaction, notice="❌ Target channel was not found.")
                 return
-            embed = discord.Embed(
-                title="🎮 [GAMING ZONE · SELECT YOUR GAMES]",
-                description=(
-                    "Choose the games you play to unlock discussion channels and receive LFG party pings!\n\n"
-                    "• **🎮 Steam**: PC games, Counter-Strike, Lethal Company, Steam discussions\n"
-                    "• **🟥 Roblox**: Blox Fruits, Doors, Brookhaven, Roblox teaming\n"
-                    "• **📱 Mobile**: Mobile Legends, PUBG Mobile, Brawl Stars, Gacha games\n\n"
-                    "-# Click a button below to toggle the role on or off at any time."
-                ),
-                color=0x3498DB,
-            )
-            embed.set_footer(text="X BOT · Gaming Community")
+            embed = gaming.build_gaming_roles_embed()
             await target_ch.send(embed=embed, view=gaming.GameRolesView())
-            await self.refresh(interaction, notice=f"✅ Gaming Roles panel posted in <#{target_cid}>!")
+            await self.refresh(interaction, notice=f"✅ Roles panel posted in <#{target_cid}>!")
             return
         if action == "server_post_onboarding_roles":
             target_cid, target_ch = self._resolve_target_channel(interaction)
