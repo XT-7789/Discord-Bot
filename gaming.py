@@ -306,23 +306,22 @@ NewUserOnboardingView = UnifiedGamingRolesView
 
 def build_gaming_roles_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🎮 [COMMUNITY & GAMING ROLES · 自选设备与游戏身分组]",
+        title="🎮 [COMMUNITY & GAMING ROLES]",
         description=(
             "Welcome! Select your **gaming devices** and **favorite games** below.\n"
-            "This unlocks game-specific chat channels, LFG squad notifications, and customizes your server profile!\n"
-            "欢迎选择您使用的**游戏设备**与常玩的**游戏**，自动解锁对应讨论区与组队开黑提醒！\n\n"
-            "🖥️ **Select Devices / 游戏设备 (Row 1):**\n"
-            "• `💻 PC` · PC / Desktop Gamers (电脑玩家)\n"
-            "• `📱 Mobile` · Smartphone / Tablet (手机平板玩家)\n"
-            "• `🎮 Console` · PS5 / Xbox / Switch (主机玩家)\n\n"
-            "🎯 **Select Games / 热门游戏 (Row 2 & 3):**\n"
+            "This unlocks game-specific chat channels, LFG squad notifications, and customizes your server profile!\n\n"
+            "🖥️ **Select Devices (Row 1):**\n"
+            "• `💻 PC` · PC / Desktop Gamers\n"
+            "• `📱 Mobile` · Smartphone / Tablet Gamers\n"
+            "• `🎮 Console` · PS5 / Xbox / Switch Gamers\n\n"
+            "🎯 **Select Games (Row 2 & 3):**\n"
             "• `🎮 Steam` · Steam Titles & PC Gaming\n"
-            "• `🎯 Valorant` · 特战英豪 / 瓦罗兰特\n"
+            "• `🎯 Valorant` · Riot Games & Competitive FPS\n"
             "• `🟥 Roblox` · Roblox Games & Community\n"
-            "• `🟩 Minecraft` · 我的世界 / MC 联机\n"
+            "• `🟩 Minecraft` · Survival, Creative & Multiplayer\n"
             "• `🏆 MLBB` · Mobile Legends: Bang Bang\n"
-            "• `✨ Genshin` · 原神 / 联机探讨\n\n"
-            "-# 💡 Click any button to toggle the role on or off at any time. (点击按钮即可随时添加或移除身份组)"
+            "• `✨ Genshin` · Genshin Impact & Co-op\n\n"
+            "-# 💡 Click any button to toggle the role on or off at any time."
         ),
         color=0x3498DB,
     )
