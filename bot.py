@@ -447,6 +447,8 @@ class XBot(discord.Client):
         applications.setup_persistent_views(self, db)
         tester_feedback.setup_persistent_views(self, db)
         self.add_view(deadzone.DeadzoneReviveView())
+        self.add_view(gaming.GameRolesView())
+        self.add_view(gaming.NewUserOnboardingView())
         self.add_view(lounges.LoungeLobbyView())
         self.add_view(lounges.LoungeHostControlView())
         for lid in range(1, 6):
@@ -559,9 +561,8 @@ bot.db = db
 
 @tasks.loop(minutes=10)
 async def season_settlement_loop():
-    """Close due Seasons even when nobody presses a command."""
-    for summary in war_tier.settle_expired_seasons(db):
-        print(f"Season settlement: {summary}")
+    """Disabled: War season settlement loop retired."""
+    pass
 
 
 @season_settlement_loop.before_loop
@@ -757,10 +758,6 @@ async def run_xb_prefix(message: discord.Message):
 @bot.event
 async def on_ready():
     print(f"Bot is online: {bot.user}")
-    for summary in war_tier.settle_expired_seasons(db):
-        print(f"Season settlement: {summary}")
-    if not season_settlement_loop.is_running():
-        season_settlement_loop.start()
     lounges.start_lounge_loop(bot, db)
     try:
         await deadzone.update_crypt_board(bot, db)

@@ -14,6 +14,9 @@ DEFAULT_SETTINGS = {
     "game_channel_steam_id": "1552259761607671908",
     "game_channel_roblox_id": "1552237657424265236",
     "game_channel_mobile_id": "1552237704878620722",
+    "device_role_pc_id": "0",
+    "device_role_mobile_id": "0",
+    "device_role_console_id": "0",
     "lfg_team_reward_cash": "500",
 }
 
@@ -38,6 +41,27 @@ GAME_CONFIG = {
         "role_key": "game_role_mobile_id",
         "channel_key": "game_channel_mobile_id",
         "color": discord.Color.green(),
+    },
+}
+
+DEVICE_CONFIG = {
+    "pc": {
+        "name": "PC",
+        "emoji": "🖥️",
+        "role_key": "device_role_pc_id",
+        "color": discord.Color.blue(),
+    },
+    "mobile": {
+        "name": "Mobile",
+        "emoji": "📱",
+        "role_key": "device_role_mobile_id",
+        "color": discord.Color.green(),
+    },
+    "console": {
+        "name": "Console",
+        "emoji": "🎮",
+        "role_key": "device_role_console_id",
+        "color": discord.Color.purple(),
     },
 }
 
@@ -101,7 +125,7 @@ def save_game_profile(db, user_id: int, steam_id: str, roblox_name: str, mobile_
 
 
 class GameRolesButton(discord.ui.Button):
-    def __init__(self, game_key: str):
+    def __init__(self, game_key: str, row: Optional[int] = None):
         cfg = GAME_CONFIG[game_key]
         style = discord.ButtonStyle.primary if game_key == "steam" else (
             discord.ButtonStyle.danger if game_key == "roblox" else discord.ButtonStyle.success
@@ -110,6 +134,7 @@ class GameRolesButton(discord.ui.Button):
             label=f"{cfg['emoji']} {cfg['name']}",
             style=style,
             custom_id=f"xbot_game_role_{game_key}",
+            row=row,
         )
         self.game_key = game_key
 
@@ -160,11 +185,104 @@ class GameRolesButton(discord.ui.Button):
                 )
 
 
+class DeviceRolesButton(discord.ui.Button):
+    def __init__(self, device_key: str, row: Optional[int] = None):
+        cfg = DEVICE_CONFIG[device_key]
+        super().__init__(
+            label=f"{cfg['emoji']} {cfg['name']}",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"xbot_device_role_{device_key}",
+            row=row,
+        )
+        self.device_key = device_key
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.guild:
+            await interaction.response.send_message("This can only be used inside a server.", ephemeral=True)
+            return
+
+        db = getattr(interaction.client, "xbot_db", None) or interaction.client.tree.xbot_db
+        role_id_str = setting(db, DEVICE_CONFIG[self.device_key]["role_key"])
+        role_id = int(role_id_str) if role_id_str.isdigit() else 0
+
+        role = interaction.guild.get_role(role_id) if role_id else None
+        if not role:
+            role = discord.utils.find(
+                lambda r: r.name.lower() == self.device_key.lower() or f"{self.device_key} player" in r.name.lower() or f"{self.device_key} gamer" in r.name.lower(),
+                interaction.guild.roles,
+            )
+
+        if not role:
+            await interaction.response.send_message(
+                f"❌ Role for **{DEVICE_CONFIG[self.device_key]['name']}** was not found on this server. Please contact an admin.",
+                ephemeral=True,
+            )
+            return
+
+        member = interaction.user
+        if role in member.roles:
+            try:
+                await member.remove_roles(role, reason="X BOT Device self-assign removal")
+                await interaction.response.send_message(
+                    f"🗑️ Removed device role **{role.name}**.", ephemeral=True
+                )
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "❌ Bot lacks permissions to manage your roles. Ensure the bot role is above the device roles.",
+                    ephemeral=True,
+                )
+        else:
+            try:
+                await member.add_roles(role, reason="X BOT Device self-assign addition")
+                await interaction.response.send_message(
+                    f"✅ Added device role **{role.name}**!",
+                    ephemeral=True,
+                )
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "❌ Bot lacks permissions to assign this role. Ensure the bot role is above the device roles.",
+                    ephemeral=True,
+                )
+
+
 class GameRolesView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         for key in ("steam", "roblox", "mobile"):
             self.add_item(GameRolesButton(key))
+
+
+class NewUserOnboardingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        # Row 0: Devices
+        for key in ("pc", "mobile", "console"):
+            self.add_item(DeviceRolesButton(key, row=0))
+        # Row 1: Games
+        for key in ("steam", "roblox", "mobile"):
+            self.add_item(GameRolesButton(key, row=1))
+
+
+def build_onboarding_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="🎮 Welcome to the Community! · Device & Game Selection",
+        description=(
+            "Welcome! Select your **gaming devices** and **favorite games** below.\n"
+            "This unlocks game-specific chat channels, LFG squad notifications, and customizes your server profile!\n\n"
+            "🖥️ **Select Your Devices (Row 1):**\n"
+            "• `🖥️ PC` · PC / Desktop Gamers\n"
+            "• `📱 Mobile` · Mobile Phone / Tablet Gamers\n"
+            "• `🎮 Console` · PlayStation / Xbox / Nintendo Switch\n\n"
+            "🎮 **Select Your Games (Row 2):**\n"
+            "• `🎮 Steam` · Steam Titles & PC Gaming\n"
+            "• `🟥 Roblox` · Roblox Games & Squads\n"
+            "• `📱 Mobile` · Mobile Legends, PUBG Mobile, etc.\n\n"
+            "-# 💡 Click any button to toggle the role on or off."
+        ),
+        color=discord.Color.blue(),
+    )
+    embed.set_footer(text="X BOT · New User Onboarding · Select your roles to get started")
+    return embed
 
 
 class LFGPartyView(discord.ui.View):
@@ -532,6 +650,7 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
     """Register all slash commands and listeners for the Gaming Zone."""
     bot.xbot_db = db
     bot.add_view(GameRolesView())
+    bot.add_view(NewUserOnboardingView())
 
     gaming_group = app_commands.Group(name="gaming", description="X BOT Gaming Zone commands")
 
@@ -682,5 +801,109 @@ def register_commands(bot, db, is_council_or_admin=None, staff_kwargs=None) -> N
         )
         embed.set_footer(text="Weekly gaming ranks reset every Monday at 00:00 UTC")
         await interaction.response.send_message(embed=embed)
+
+    @gaming_group.command(name="manage_roles", description="Staff tool: View or modify a member's device & game roles")
+    @app_commands.describe(
+        user="Target member to manage",
+        action="Action to perform",
+        role_type="Which device or game role to assign or remove",
+    )
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="View Roles", value="view"),
+            app_commands.Choice(name="Add Role", value="add"),
+            app_commands.Choice(name="Remove Role", value="remove"),
+        ],
+        role_type=[
+            app_commands.Choice(name="Device: PC", value="pc"),
+            app_commands.Choice(name="Device: Mobile", value="mobile_device"),
+            app_commands.Choice(name="Device: Console", value="console"),
+            app_commands.Choice(name="Game: Steam", value="steam"),
+            app_commands.Choice(name="Game: Roblox", value="roblox"),
+            app_commands.Choice(name="Game: Mobile", value="mobile_game"),
+        ],
+    )
+    async def gaming_manage_roles_command(
+        interaction: discord.Interaction,
+        user: discord.Member,
+        action: app_commands.Choice[str],
+        role_type: Optional[app_commands.Choice[str]] = None,
+    ):
+        if not interaction.guild:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+
+        is_admin = interaction.user.guild_permissions.manage_roles or interaction.user.guild_permissions.administrator
+        if is_council_or_admin and not is_admin:
+            is_admin = is_council_or_admin(interaction)
+
+        if not is_admin:
+            await interaction.response.send_message("❌ You do not have permission to manage member roles.", ephemeral=True)
+            return
+
+        if action.value == "view":
+            user_roles = []
+            for d_key, d_cfg in DEVICE_CONFIG.items():
+                r_id_str = setting(db, d_cfg["role_key"])
+                role = interaction.guild.get_role(int(r_id_str)) if r_id_str.isdigit() and int(r_id_str) > 0 else None
+                if not role:
+                    role = discord.utils.find(lambda r: r.name.lower() == d_key.lower() or f"{d_key} player" in r.name.lower() or f"{d_key} gamer" in r.name.lower(), interaction.guild.roles)
+                if role and role in user.roles:
+                    user_roles.append(f"• **Device:** {d_cfg['emoji']} {role.name}")
+
+            for g_key, g_cfg in GAME_CONFIG.items():
+                r_id_str = setting(db, g_cfg["role_key"])
+                role = interaction.guild.get_role(int(r_id_str)) if r_id_str.isdigit() and int(r_id_str) > 0 else None
+                if not role:
+                    role = discord.utils.find(lambda r: g_key.lower() in r.name.lower(), interaction.guild.roles)
+                if role and role in user.roles:
+                    user_roles.append(f"• **Game:** {g_cfg['emoji']} {role.name}")
+
+            summary = "\n".join(user_roles) if user_roles else "No device or game roles assigned."
+            embed = discord.Embed(
+                title=f"🎮 Roles for {user.display_name}",
+                description=summary,
+                color=discord.Color.blurple(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        if not role_type:
+            await interaction.response.send_message("Please specify a `role_type` when adding or removing roles.", ephemeral=True)
+            return
+
+        target_role = None
+        rtype = role_type.value
+        if rtype in ("pc", "mobile_device", "console"):
+            key = "mobile" if rtype == "mobile_device" else rtype
+            r_id_str = setting(db, DEVICE_CONFIG[key]["role_key"])
+            if r_id_str.isdigit() and int(r_id_str) > 0:
+                target_role = interaction.guild.get_role(int(r_id_str))
+            if not target_role:
+                target_role = discord.utils.find(lambda r: r.name.lower() == key.lower() or f"{key} player" in r.name.lower() or f"{key} gamer" in r.name.lower(), interaction.guild.roles)
+        else:
+            key = "mobile" if rtype == "mobile_game" else rtype
+            r_id_str = setting(db, GAME_CONFIG[key]["role_key"])
+            if r_id_str.isdigit() and int(r_id_str) > 0:
+                target_role = interaction.guild.get_role(int(r_id_str))
+            if not target_role:
+                target_role = discord.utils.find(lambda r: key.lower() in r.name.lower(), interaction.guild.roles)
+
+        if not target_role:
+            await interaction.response.send_message(f"❌ Role `{role_type.name}` could not be resolved on this server.", ephemeral=True)
+            return
+
+        if action.value == "add":
+            try:
+                await user.add_roles(target_role, reason=f"Staff {interaction.user} assigned via /gaming manage_roles")
+                await interaction.response.send_message(f"✅ Assigned **{target_role.name}** to {user.mention}.", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ Bot lacks permission to assign this role. Check role hierarchy.", ephemeral=True)
+        elif action.value == "remove":
+            try:
+                await user.remove_roles(target_role, reason=f"Staff {interaction.user} removed via /gaming manage_roles")
+                await interaction.response.send_message(f"🗑️ Removed **{target_role.name}** from {user.mention}.", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ Bot lacks permission to remove this role. Check role hierarchy.", ephemeral=True)
 
     bot.tree.add_command(gaming_group)

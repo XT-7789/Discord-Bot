@@ -67,11 +67,11 @@ def register(bot, db, create_player):
     })
     sections={
         'menu':('MAIN MENU','Select a system.', [('🎮 Play','play'),('💰 Economy','economy'),('👤 Profile','profile'),('🎯 Missions','missions')]),
-        'economy':('ECONOMY','Earn, trade and play.', [('💳 Finance','finance'),('💼 Earn','earn_menu'),('📊 Market','market_menu'),('⛏️ Mines','mining'),('🎰 Casino','casino'),('🏆 Rankings','rankings')]),
+        'economy':('ECONOMY','Earn, trade and play.', [('💳 Finance','finance'),('🎁 Daily','daily'),('🛒 Shop','shop'),('🎰 Casino','casino'),('🎒 Backpack','inventory'),('🏆 Rankings','rankings')]),
         'finance':('FINANCE','Your wallet and savings.', [('💰 Wallet','wallet'),('🏦 Bank','bank'),('📋 Assets','assets'),('💱 Exchange','exchange')]),
-        'earn_menu':('EARN','Collect rewards or make something.', [('🎁 Daily','daily'),('💼 Contracts','contracts'),('⛏️ Mines','mining'),('🛠️ Craft','craft'),('🏭 Production','production'),('🔬 Research','research')]),
-        'market_menu':('MARKET','Browse before you spend.', [('🛒 Shop','shop'),('🤝 Player Market','market'),('📈 Stocks','stock'),('🎒 Backpack','inventory')]),
-        'war':('WARFRONT','Your nation and armed forces.', [('🏙️ Cities','city'),('🪖 Army','army'),('➕ Recruit','recruit'),('🕊️ Diplomacy','diplomacy'),('⚔️ Attack','attack'),('🛡️ Defence','defence'),('📋 Reports','reports'),('🗺️ Overview','war_overview')]),
+        'earn_menu':('EARN','Collect rewards.', [('🎁 Daily','daily')]),
+        'market_menu':('MARKET','Browse before you spend.', [('🛒 Shop','shop'),('🎒 Backpack','inventory')]),
+        'war':('WARFRONT','Warfront is currently offline.', []),
         'profile':('PROFILE','', [('🏆 Collection','collection'),('🎒 Backpack','inventory'),('📋 Assets','assets'),('🎯 Missions','missions')]),
         'missions':('MISSIONS','Choose your goals.', [('🌱 Starter','mission_starter'),('☀️ Daily','mission_daily'),('📅 Weekly','mission_weekly')]),
     }
@@ -354,7 +354,7 @@ def register(bot, db, create_player):
                     text='### 🎯 Missions\nAll featured goals complete. Explore at your own pace.'
                     actions=[Nav(owner,'Missions','missions')]
                 block(text,actions)
-                block(f"### ⚔️ Warfront · Optional\nCities **{cities}** · Units **{units}**\nWar Credits **{player['money']:,}** · Separate from XC",[Nav(owner,'Warfront','war')])
+                block(f"### ⚔️ Warfront · Offline\nWarfront features and seasons are currently offline for maintenance.\nWar Credits · Separate from XC",[Nav(owner,'Warfront','war')])
                 footer(view,owner,key)
                 return prepare(view,owner,key,force=True)
             if key in {'economy','profile','war','missions','earn_menu','market_menu'}:
@@ -371,12 +371,8 @@ def register(bot, db, create_player):
                     daily=bot.xbot_overview_daily_button_builder(owner,key)
                     daily.disabled=not ready
                     daily.label='Claim Daily' if ready else 'Daily Collected'
-                    maximum=economy.setting(db,'mining_max_energy')
-                    elapsed=max(0,int(time.time())-int(player['mining_energy_updated']))
-                    energy=min(maximum,int(player['mining_energy'])+(elapsed//max(1,economy.setting(db,'mining_energy_regen_seconds')))*economy.setting(db,'mining_energy_regen_amount'))
                     status='Daily **Ready**' if ready else f'Daily <t:{ready_at}:R>'
-                    energy_text=f'Energy **{energy}/{maximum}**' if economy.setting(db,'mining_energy_enabled') else 'Energy costs off'
-                    block('💼 Earn',f'{status} · {energy_text}',[daily,*navs(('Mines','mining'),('Contracts','contracts'))])
+                    block('💼 Earn',f'{status}',[daily,*navs(('Daily','daily'))])
                 if key=='economy':
                     import economy_journey
                     for component in economy_journey.goal_block(bot,db,owner):
@@ -387,7 +383,7 @@ def register(bot, db, create_player):
                     view.box.add_item(discord.ui.TextDisplay('### 💳 Finance\n'+funds()))
                     view.box.add_item(discord.ui.ActionRow(bot.xbot_finance_button_builder(owner,'deposit',key),bot.xbot_finance_button_builder(owner,'withdraw',key),*navs(('Finance','finance'))))
                     earning()
-                    block('📊 Market','Items · Player trading · Stocks',navs(('Market','market_menu'),('Shop','shop'),('Stocks','stock')))
+                    block('📊 Market','Browse the shop or check your backpack.',navs(('Shop','shop'),('Backpack','inventory')))
                     membership=casino.cooldown_info(db,member,'blackjack')['tier'] if member is not None and hasattr(member,'roles') else 'Check VIP Status'
                     block('🎰 Casino',f'Membership **{membership}** · XC stakes can be lost.',navs(('Casino','casino'),('VIP Status','vip'),('Rankings','rankings')))
                 elif key=='profile':
@@ -399,13 +395,7 @@ def register(bot, db, create_player):
                     count=db.execute('SELECT COALESCE(SUM(quantity),0) FROM inventories WHERE user_id=?',(owner,)).fetchone()[0]
                     block('🎒 Collection',f'Backpack **{count:,} items**',navs(('Backpack','inventory'),('Assets','assets')))
                 elif key=='war':
-                    cities=db.execute('SELECT COUNT(*) FROM player_cities WHERE user_id=?',(owner,)).fetchone()[0]
-                    lands=db.execute('SELECT COUNT(*) FROM map_territories WHERE owner_user_id=?',(owner,)).fetchone()[0]
-                    units=db.execute('SELECT COALESCE(SUM(quantity),0) FROM player_war_units WHERE user_id=?',(owner,)).fetchone()[0]
-                    block('🏙️ Nation',f"Cities **{cities}** · Land **{lands}**\nWar Credits **{player['money']:,}**",navs(('Cities','city'),('Overview','war_overview')))
-                    block('🪖 Forces',f'Units **{units:,}**',navs(('Army','army'),('Recruit','recruit')))
-                    block('⚔️ Operations','Choose a target and review before launching.',navs(('Diplomacy','diplomacy'),('Attack','attack'),('Defence','defence')))
-                    block('📋 Intelligence','Review previous operations.',navs(('Reports','reports')))
+                    block('⚔️ Warfront Offline','Warfront operations, armies, cities, and seasons are currently offline for maintenance.',[])
                 elif key=='missions':
                     level=tier5.profile_summary(db,owner)['level']
                     for category in ('starter','daily','weekly'):
@@ -423,11 +413,10 @@ def register(bot, db, create_player):
                         block(category.title(),body,[button])
                 elif key=='earn_menu':
                     earning()
-                    block('🛠️ Workshop','Craft items and manage production.',navs(('Craft','craft'),('Production','production')))
-                    block('🔬 Development',f"War Credits **{player['money']:,}**",navs(('Research','research'),('Cities','city')))
+                    block('🎰 Casino & Games','Play Coinflip, Blackjack, Slots, Dice, Roulette, and Scratch to earn XC.',navs(('Casino','casino')))
+                    block('🛒 Shopping','Visit the shop to browse items and perks.',navs(('Shop','shop')))
                 elif key=='market_menu':
-                    block('🛒 Shopping',funds(),navs(('Shop','shop'),('Player Market','market')))
-                    block('📈 Investments','Review quotes and holdings before trading.',navs(('Stocks','stock'),('Assets','assets')))
+                    block('🛒 Shopping',funds(),navs(('Shop','shop')))
                     count=db.execute('SELECT COALESCE(SUM(quantity),0) FROM inventories WHERE user_id=?',(owner,)).fetchone()[0]
                     block('🎒 Inventory',f'Backpack **{count:,} items**',navs(('Backpack','inventory')))
                 footer(view,owner,key)

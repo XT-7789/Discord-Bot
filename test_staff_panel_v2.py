@@ -229,6 +229,14 @@ class StaffPanelV2Tests(unittest.IsolatedAsyncioTestCase):
         sent_view = post_roles_interaction.channel.send.call_args.kwargs.get("view")
         self.assertIsInstance(sent_view, gaming.GameRolesView)
 
+        # Test post onboarding roles to target channel
+        post_onboarding_interaction = self.make_interaction()
+        self.mock_bot.get_channel = Mock(return_value=post_onboarding_interaction.channel)
+        await panel.handle_action(post_onboarding_interaction, "server_post_onboarding_roles")
+        post_onboarding_interaction.channel.send.assert_awaited_once()
+        sent_onboarding_view = post_onboarding_interaction.channel.send.call_args.kwargs.get("view")
+        self.assertIsInstance(sent_onboarding_view, gaming.NewUserOnboardingView)
+
     async def test_deploy_panels_to_target_channel(self):
         target_channel_id = 888999
         target_channel = SimpleNamespace(id=target_channel_id, send=AsyncMock())

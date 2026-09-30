@@ -111,7 +111,7 @@ def build(panel, content):
         channel_select = take(lambda c: isinstance(c, AdminChannelSelect))
         form_select = listing(ApplicationFormSelect, 'forms')
         panel_actions = action(
-            'post_verification', 'post_application', 'server_post_deadzone',
+            'post_verification', 'server_post_onboarding_roles', 'post_application', 'server_post_deadzone',
             'server_post_gaming_roles', 'server_post_lounge_lobby', 'post_tester_feedback'
         )
         for field in fields: section(field.name, field.value)

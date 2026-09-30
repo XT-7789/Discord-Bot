@@ -26,6 +26,9 @@ class DummyGuild:
             make_role(1552259861654413312, "🎮 Steam"),
             make_role(1552259987667943515, "🟥 Roblox"),
             make_role(1552259988691488818, "📱 Mobile"),
+            make_role(1552260001111111111, "🖥️ PC"),
+            make_role(1552260002222222222, "📱 Mobile Device"),
+            make_role(1552260003333333333, "🎮 Console"),
         ]
 
     def get_role(self, role_id):
@@ -94,6 +97,9 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(gaming.setting(self.db, "game_channel_steam_id"), "1552259761607671908")
         self.assertEqual(gaming.setting(self.db, "game_channel_roblox_id"), "1552237657424265236")
         self.assertEqual(gaming.setting(self.db, "game_channel_mobile_id"), "1552237704878620722")
+        self.assertEqual(gaming.setting(self.db, "device_role_pc_id"), "0")
+        self.assertEqual(gaming.setting(self.db, "device_role_mobile_id"), "0")
+        self.assertEqual(gaming.setting(self.db, "device_role_console_id"), "0")
         self.assertEqual(gaming.setting(self.db, "lfg_team_reward_cash"), "500")
 
     def test_game_profile_crud(self):
@@ -142,6 +148,50 @@ class GamingZoneTests(unittest.IsolatedAsyncioTestCase):
         await button.callback(interaction)
         self.assertNotIn(steam_role, member.roles)
         self.assertIn("Removed role", interaction.response.send_message.call_args[0][0])
+
+    async def test_device_roles_button_toggle(self):
+        # Configure PC role
+        pc_role = self.guild.get_role(1552260001111111111)
+        self.db.execute("INSERT OR REPLACE INTO economy_settings(key, value) VALUES ('device_role_pc_id', '1552260001111111111')")
+        self.db.commit()
+
+        member = make_member(54321, self.guild)
+        button = gaming.DeviceRolesButton("pc")
+
+        client = MagicMock()
+        client.xbot_db = self.db
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.guild = self.guild
+        interaction.user = member
+        interaction.client = client
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+
+        # 1. Add PC role
+        self.assertNotIn(pc_role, member.roles)
+        await button.callback(interaction)
+        self.assertIn(pc_role, member.roles)
+        interaction.response.send_message.assert_awaited()
+        self.assertIn("Added device role", interaction.response.send_message.call_args[0][0])
+
+        # 2. Remove PC role
+        interaction.response.send_message.reset_mock()
+        await button.callback(interaction)
+        self.assertNotIn(pc_role, member.roles)
+        self.assertIn("Removed device role", interaction.response.send_message.call_args[0][0])
+
+    def test_new_user_onboarding_view(self):
+        view = gaming.NewUserOnboardingView()
+        self.assertIsNone(view.timeout)
+        self.assertEqual(len(view.children), 6)  # 3 device buttons + 3 game buttons
+        device_btns = [btn for btn in view.children if isinstance(btn, gaming.DeviceRolesButton)]
+        game_btns = [btn for btn in view.children if isinstance(btn, gaming.GameRolesButton)]
+        self.assertEqual(len(device_btns), 3)
+        self.assertEqual(len(game_btns), 3)
+        embed = gaming.build_onboarding_embed()
+        self.assertIn("Device & Game Selection", embed.title)
+        self.assertIn("PC", embed.description)
+        self.assertIn("Steam", embed.description)
 
     async def test_lfg_party_flow_and_cash_reward(self):
         host_id = 1001
