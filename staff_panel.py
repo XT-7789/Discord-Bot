@@ -778,10 +778,9 @@ class AdminPanel(discord.ui.LayoutView):
                 self.add_item(ApplicationFormSelect(self._page_rows(forms, "forms"), self.selected_form_id))
             self.add_item(AdminChannelSelect(placeholder="Target channel to deploy panel…", default_channel_id=self.target_channel_id, row=2))
             self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=3))
-            self.add_item(AdminActionButton("server_post_onboarding_roles", "Post Onboarding", emoji="🚀", style=discord.ButtonStyle.success, row=3))
+            self.add_item(AdminActionButton("server_post_gaming_roles", "Post Roles Panel", emoji="🎮", style=discord.ButtonStyle.success, row=3))
             self.add_item(AdminActionButton("post_application", "Post Application Form", emoji="📨", style=discord.ButtonStyle.primary, row=3))
-            self.add_item(AdminActionButton("server_post_deadzone", "Post Deadzone", emoji="⚰️", style=discord.ButtonStyle.secondary, row=3))
-            self.add_item(AdminActionButton("server_post_gaming_roles", "Post Gaming Roles", emoji="🎮", style=discord.ButtonStyle.secondary, row=4))
+            self.add_item(AdminActionButton("server_post_deadzone", "Post Deadzone", emoji="⚰️", style=discord.ButtonStyle.secondary, row=4))
             self.add_item(AdminActionButton("server_post_lounge_lobby", "Post Lounge Lobby", emoji="🛋️", style=discord.ButtonStyle.primary, row=4))
             self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel", emoji="🧪", style=discord.ButtonStyle.secondary, row=4))
         elif self.page == "server":
