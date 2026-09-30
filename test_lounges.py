@@ -137,12 +137,12 @@ class LoungesTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(host, text_ch.overwrites)
         self.assertTrue(text_ch.overwrites[host].view_channel)
 
-        # Reset permissions (idle/available state: visible to @everyone, locked from messaging/connecting)
+        # Reset permissions (idle/available state: hidden from @everyone until booked by host)
         await lounges.reset_lounge_permissions(self.guild, 1)
         self.assertNotIn(host, text_ch.overwrites)
-        self.assertTrue(text_ch.overwrites[self.guild.default_role].view_channel)
+        self.assertFalse(text_ch.overwrites[self.guild.default_role].view_channel)
         self.assertFalse(text_ch.overwrites[self.guild.default_role].send_messages)
-        self.assertTrue(vc_ch.overwrites[self.guild.default_role].view_channel)
+        self.assertFalse(vc_ch.overwrites[self.guild.default_role].view_channel)
         self.assertFalse(vc_ch.overwrites[self.guild.default_role].connect)
 
     async def test_clear_and_reopen_lounge(self):

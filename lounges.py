@@ -218,10 +218,10 @@ async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
             for target in list(text_ch.overwrites.keys()):
                 if isinstance(target, (discord.Member, discord.User)):
                     await text_ch.set_permissions(target, overwrite=None)
-            # Available idle state: visible to everyone so members can see available lounges, read-only until booked
+            # Idle state (no active booking): completely hidden from everyone until booked by a host
             await text_ch.set_permissions(
                 guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True),
+                overwrite=discord.PermissionOverwrite(view_channel=False, send_messages=False, read_message_history=False),
             )
         except discord.HTTPException:
             pass
@@ -231,10 +231,10 @@ async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
             for target in list(vc_ch.overwrites.keys()):
                 if isinstance(target, (discord.Member, discord.User)):
                     await vc_ch.set_permissions(target, overwrite=None)
-            # Available idle state: visible to everyone so members can see the voice channel (connect locked until reserved or host joins)
+            # Idle state (no active booking): completely hidden from everyone until booked by a host
             await vc_ch.set_permissions(
                 guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=True, connect=False, speak=False),
+                overwrite=discord.PermissionOverwrite(view_channel=False, connect=False, speak=False),
             )
         except discord.HTTPException:
             pass
