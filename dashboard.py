@@ -114,6 +114,13 @@ with get_db() as startup_db:
     tier7.initialise(startup_db)
     tier8.initialise(startup_db)
     casual_games.initialise(startup_db)
+    # Performance Indexes to fix slow loading
+    startup_db.execute("CREATE INDEX IF NOT EXISTS idx_pw_uid ON player_war_units(user_id);")
+    startup_db.execute("CREATE INDEX IF NOT EXISTS idx_inv_uid ON inventories(user_id);")
+    startup_db.execute("CREATE INDEX IF NOT EXISTS idx_ml_sid ON market_listings(seller_id);")
+    startup_db.execute("CREATE INDEX IF NOT EXISTS idx_am_uid ON alliance_members(user_id);")
+    startup_db.execute("CREATE INDEX IF NOT EXISTS idx_xp_uid ON xp_profiles(user_id);")
+
     startup_db.execute("""CREATE TABLE IF NOT EXISTS dashboard_role_access(
         role_id TEXT PRIMARY KEY, access_level TEXT NOT NULL,
         label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1
