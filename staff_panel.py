@@ -1091,9 +1091,10 @@ class AdminPanel(discord.ui.LayoutView):
                 try:
                     sleepers = self.db.execute("SELECT COUNT(*) FROM deadzone_members WHERE is_in_deadzone=1").fetchone()[0]
                     thawed = self.db.execute("SELECT COUNT(*) FROM deadzone_members WHERE is_in_deadzone=1 AND thaw_count>=5").fetchone()[0]
+                    threshold_days = deadzone.setting(self.db, "deadzone_days") or "7"
                 except Exception:
-                    sleepers, thawed = 0, 0
-                embed.add_field(name="Crypt Population", value=f"💀 **Active Sleepers:** `{sleepers}`\n🧊 **Thawed Comrades:** `{thawed}`\n⏰ **Auto Inactivity Threshold:** `7 days`", inline=False)
+                    sleepers, thawed, threshold_days = 0, 0, "7"
+                embed.add_field(name="Crypt Population", value=f"💀 **Active Sleepers:** `{sleepers}`\n🧊 **Thawed Comrades:** `{thawed}`\n⏰ **Auto Inactivity Threshold:** `{threshold_days} days`", inline=False)
         elif self.page == "applications":
             embed.description = f"**{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}** · **{len(self.pending_applications())}** awaiting review"
             form = self.selected_form()

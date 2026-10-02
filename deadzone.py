@@ -572,11 +572,13 @@ def build_deadzone_board_embed(db=None):
     rescue_xc = int(setting(database, "deadzone_rescue_reward_xc") or 250) if database else 250
     rescue_xp = int(setting(database, "deadzone_rescue_reward_xp") or 150) if database else 150
 
+    days = int(setting(database, "deadzone_days") or 7) if database else 7
+
     embed = discord.Embed(
         title="💀 [THE DEADZONE CRYPT]",
         description=(
             "### ⚠️ Cryo-Stasis & Inactivity Notice\n"
-            "Members who remain inactive for **7 days** without sending messages or joining voice channels "
+            f"Members who remain inactive for **{days} days** without sending messages or joining voice channels "
             "are placed into cryogenic slumber here in the **Deadzone**.\n\n"
             "**Demotion Penalties Applied:**\n"
             "• **Member** & **Music** perks are temporarily revoked.\n"
@@ -1332,6 +1334,28 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         db.commit()
         await interaction.response.send_message(f"✅ Deadzone **{channel_type.name}** set to {channel.mention} (`{channel.id}`).", ephemeral=True)
 
+    @deadzone_group.command(name="set_days", description="Admin: Configure inactivity threshold (e.g. 7 days or 14 days)")
+    @app_commands.describe(days="Number of inactive days before being placed in Deadzone (e.g. 7 or 14)")
+    @app_commands.choices(
+        days=[
+            app_commands.Choice(name="7 Days (Standard)", value=7),
+            app_commands.Choice(name="14 Days (Extended)", value=14),
+            app_commands.Choice(name="30 Days (Monthly)", value=30),
+        ]
+    )
+    async def dz_set_days(interaction: discord.Interaction, days: app_commands.Choice[int]):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can configure Deadzone settings."), ephemeral=True)
+            return
+
+        db.execute(
+            "INSERT INTO economy_settings(key, value) VALUES('deadzone_days', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(days.value),),
+        )
+        db.commit()
+        await update_crypt_board(bot, db)
+        await interaction.response.send_message(f"✅ Deadzone inactivity threshold updated to **{days.value} days** ({days.name}).", ephemeral=True)
+
     # Top-level standalone staff commands (accessible from staff_tools Admin Panel and slash)
     @bot.tree.command(name="deadzone_send", description="Admin: Demote an inactive member to Deadzone", **STAFF_COMMAND_KWARGS)
     @app_commands.describe(member="Member to demote", reason="Reason for demotion")
@@ -1363,7 +1387,7 @@ def register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS):
         else:
             await interaction.followup.send(f"⚠️ {member.mention} is not in the Deadzone.", ephemeral=True)
 
-    @bot.tree.command(name="deadzone_scan", description="Admin: Scan guild and demote members inactive for 7+ days", **STAFF_COMMAND_KWARGS)
+    @bot.tree.command(name="deadzone_scan", description="Admin: Scan guild and demote inactive members", **STAFF_COMMAND_KWARGS)
     async def deadzone_scan(interaction: discord.Interaction):
         if not is_council_or_admin(interaction):
             await interaction.response.send_message(view=xbot_ui.danger("🔒 Staff Command", "Only Administrators can trigger inactivity scans."), ephemeral=True)
