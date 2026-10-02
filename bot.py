@@ -67,8 +67,6 @@ RESOURCE_VALUES = {
 }
 
 # ---------- Database ----------
-import cloud_sync
-cloud_sync.download_db("xwar.db")
 
 db = sqlite3.connect("xwar.db", timeout=30)
 db.row_factory = sqlite3.Row
