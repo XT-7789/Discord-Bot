@@ -2932,6 +2932,6 @@ if __name__ == "__main__":
     # to restrict it to this machine only, or DASHBOARD_PORT to change 5000.
     app.run(
         host=os.getenv("DASHBOARD_HOST", "0.0.0.0"),
-        port=int(os.getenv("DASHBOARD_PORT", "5000")),
+        port=int(os.getenv("DASHBOARD_PORT", os.getenv("PORT", "5000"))),
         debug=False,
     )
