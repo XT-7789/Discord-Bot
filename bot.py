@@ -755,16 +755,9 @@ async def run_xb_prefix(message: discord.Message):
     return True
 
 
-@tasks.loop(minutes=30)
-async def auto_backup_task():
-    cloud_sync.upload_db(db)
-
 @bot.event
 async def on_ready():
     print(f"Bot is online: {bot.user}")
-    
-    if not auto_backup_task.is_running():
-        auto_backup_task.start()
         
     lounges.start_lounge_loop(bot, db)
     try:
