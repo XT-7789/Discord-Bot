@@ -116,25 +116,68 @@
 
 ---
 
-## 6. 死亡禁区与净化机制 (Deadzone Crypt)
+## 6. 死亡禁区沉寂与复活机制 (Deadzone Crypt & 1+2 Respawn)
 
-维护服务器活跃度、自动排查沉寂用户的核心防沉水系统：
+维护服务器活跃度、排查沉寂用户的核心防潜水与趣味互动系统：
 
 ```
-[30 天无发言/互动]
+[连续 7 天无发言 / 无进入语音]
        │
-       ▼ (自动触发移送)
-[移入 Deadzone Crypt] 
-       │  • 移除普通 Member 权限，仅能访问 #deadzone-crypt
-       │  • 发送通知至 #deadzone-notification
+       ▼ (后台定时轮询或管理员扫描触发)
+[移入 Deadzone Crypt (冷冻休眠)] 
+       │  • 暂时扣留 Member、Music/Premium Music 及等级称号 (Active/Elite 等)
+       │  • 赋予 Deadzone 专属身份组并记录原权限档案
+       │  • 向 #bot-notification 发布墓碑立碑通报 [TOMBSTONE ERECTED]
        ▼
-[7 天救赎观察期 (Redemption Window)]
-  ├── 途径 A: 玩家点击 [ ⚡ Revive Self ] (消耗活跃点或完成互动任务自救)
-  └── 途径 B: 好友点击 [ 🤝 Bail Friend ] (消耗 Cash 替好友赎身)
+[执行 1+2 复活协议 (1+2 Respawn Protocol)]
+  ├── 步骤 1 (解冻 Thaw Out - 5/5):
+  │     • 文字频道聊天: 发送 5 条消息 (每条 +1)
+  │     • 语音包厢挂机: 在 Lounge 1~5 语音每待 3 分钟自动 +1 解冻
+  │     • 附带幽灵玩法: 可在墓园执行 `/deadzone haunt` 呼唤活人并赚取 +30 XC
+  └── 步骤 2 (战友营救 Teammate Rescue):
+        • 解冻达成 5/5 后，由在世战友执行 `/deadzone rescue member:@沉睡者`
+        • 或在 #deadzone-crypt 展板点击 [ 🤝 Rescue Teammate ] 一键打捞
        │
-       ▼ (7 天内未完成救赎)
-[执行彻底净化 (Permanent Purge / Kick)]
+       ▼ (营救成功 / 复活完成)
+[全服欢庆与奖励结算]
+  ├── 本人复活: 完璧归还原有等级与身份组，获赠 +$100,000 Cash、+150 XC、+100 XP
+  ├── 救人战友 (Hero Bounty): 获赠 +$50,000 Cash、+250 XC、+150 XP
+  └── 5 分钟全服欢迎派对 (Welcome Party): 在主频道开启派对，前来打招呼的玩家每人领取 +$2,000 Cash!
 ```
+
+### 6.1 核心配置参数 (System Configuration & Defaults)
+| 配置键名 (DB Key) | 默认值 | 作用说明 |
+| :--- | :--- | :--- |
+| `deadzone_enabled` | `1` | 是否开启死亡禁区全套自动化系统 (0: 关闭, 1: 开启) |
+| `deadzone_days` | `7` 天 | 判定为沉寂不活跃的天数阈值 (默认 7 天无互动触发降级) |
+| `deadzone_role_id` | `1551839505168859196` | 死亡禁区专属身份组 ID (Deadzone) |
+| `deadzone_notification_channel_id` | `1526521131048370217` | 墓碑立碑、解冻完成、复活公告推送频道 (`#bot-notification`) |
+| `deadzone_party_channel_id` | `1524716540988231820` | 复活后 5 分钟欢迎派对发起频道 (`#general`) |
+| `deadzone_crypt_channel_id` | `1551840699631272006` | 死亡禁区常驻展板频道 (`#deadzone-crypt`) |
+| `deadzone_revive_bonus_cash` | `$100,000` | 沉睡者复活后获得的现金奖励 |
+| `deadzone_revive_bonus_xc` | `150 XC` | 沉睡者复活后获得的稀有 XC 奖励 |
+| `deadzone_revive_bonus_xp` | `100 XP` | 沉睡者复活后获得的经验加成 |
+| `deadzone_rescue_reward_cash`| `$50,000` | 营救战友的玩家获得的现金赏金 |
+| `deadzone_rescue_reward_xc`  | `250 XC` | 营救战友的玩家获得的稀有 XC 赏金 |
+| `deadzone_rescue_reward_xp`  | `150 XP` | 营救战友的玩家获得的经验赏金 |
+| `deadzone_haunt_reward_xc`   | `30 XC` | 处于禁区内的成员使用 `/deadzone haunt` 获得的奖励 |
+| `deadzone_party_duration`    | `300` 秒 (5分钟) | 复活派对持续时间 |
+| `deadzone_party_reward_cash` | `$2,000` | 派对期间进群发言打招呼成员获得的单次红包 |
+
+### 6.2 玩家指令体系 (Player Slash Commands)
+- `/deadzone status`: 查看服务器当前沉睡人数、自身休眠/活跃状态与历史复活次数。
+- `/deadzone scavenge`: 每日（冷却 20 小时）探索死亡禁区废墟拾荒，获得 `35 ~ 85 XC`。
+- `/deadzone haunt [target]`: 仅限禁区沉睡者使用（冷却 2 小时），向活着的好友发出哀鸣幽灵传讯，赚取 `+30 XC`。
+- `/deadzone wake [member]`: 呼唤或私信提醒沉睡战友醒来（管理员使用可直接强行唤醒）。
+- `/deadzone rescue [member]`: 营救已达成 5/5 解冻进度的战友，领取丰厚 Hero 赏金。
+
+### 6.3 管理员指令体系 (Staff & Admin Commands)
+- `/deadzone restore member:@user` 或 `/deadzone revive member:@user`: 强制唤醒沉睡者并恢复全套身份与奖励。
+- `/deadzone send member:@user reason:...`: 手动将指定玩家移入死亡禁区。
+- `/deadzone scan` (或 `/admin` -> Deadzone): 扫描全服 7 天未发言成员并批量移送。
+- `/deadzone party [member]`: 手动在聊天频道开启 5 分钟欢迎派对。
+- `/deadzone set_channel channel_type:... channel:#...`: 配置通知/派对/展板频道。
+
 
 ---
 
