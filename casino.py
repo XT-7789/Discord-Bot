@@ -150,17 +150,17 @@ async def take_bet(interaction, db, create_player, bet: int):
     minimum = game_settings["min_bet"] if game_settings and game_settings["min_bet"] > 0 else setting(db, "casino_min_bet")
     maximum = game_settings["max_bet"] if game_settings and game_settings["max_bet"] > 0 else setting(db, "casino_max_bet")
     if bet < minimum or bet > maximum:
-        await interaction.response.send_message(view=xbot_ui.danger("Invalid Bet", f"Bets must be between **{minimum:,} XC** and **{maximum:,} XC**."), ephemeral=True)
+        await interaction.response.send_message(view=xbot_ui.danger("Invalid Bet", f"Bets must be between **${minimum:,} Cash** and **${maximum:,} Cash**."), ephemeral=True)
         return None
     if game == "crash":
         limit = setting(db, "crash_daily_net_win_limit")
         net = crash_daily_net(db, interaction.user.id)
         if limit > 0 and net >= limit:
-            await interaction.response.send_message(view=xbot_ui.warning("📈 Crash Daily Limit", f"You have reached today's **{limit:,} XC** net-win limit for /crash. Please return tomorrow."), ephemeral=True)
+            await interaction.response.send_message(view=xbot_ui.warning("📈 Crash Daily Limit", f"You have reached today's **${limit:,} Cash** net-win limit for /crash. Please return tomorrow."), ephemeral=True)
             return None
     player = create_player(interaction.user)
-    if player["xc"] < bet:
-        await interaction.response.send_message(view=xbot_ui.danger("Not Enough XC", f"You need **{bet:,} XC** to place that bet."), ephemeral=True)
+    if player["money"] < bet:
+        await interaction.response.send_message(view=xbot_ui.danger("Not Enough Cash", f"You need **${bet:,} Cash** to place that bet."), ephemeral=True)
         return None
     now = int(time.time())
     vip = db.execute("SELECT * FROM casino_vip_members WHERE user_id=?", (interaction.user.id,)).fetchone()
@@ -178,7 +178,7 @@ async def take_bet(interaction, db, create_player, bet: int):
     if remaining > 0:
         await interaction.response.send_message(view=xbot_ui.warning("⏳ Casino Cooldown", cooldown_text(db,interaction.user,game)), ephemeral=True)
         return None
-    db.execute("UPDATE players SET xc=xc-? WHERE user_id=?", (bet, interaction.user.id))
+    db.execute("UPDATE players SET money=money-? WHERE user_id=?", (bet, interaction.user.id))
     db.execute("INSERT INTO casino_cooldowns(user_id,game,used_at) VALUES(?,?,?) ON CONFLICT(user_id,game) DO UPDATE SET used_at=excluded.used_at", (interaction.user.id, game, now))
     return player
 
@@ -195,12 +195,12 @@ def finish(db, user_id: int, action: str, bet: int, multiplier: float, detail: s
         if limit > 0 and payout > bet:
             payout = min(payout, bet + max(0, limit - current_net))
     if payout:
-        db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (payout, user_id))
+        db.execute("UPDATE players SET money=money+? WHERE user_id=?", (payout, user_id))
     profit = payout - bet
     if action == "casino_crash":
         db.execute("""INSERT INTO casino_daily_game_net(user_id,game,day,net_profit) VALUES(?,'crash',?,?)
             ON CONFLICT(user_id,game,day) DO UPDATE SET net_profit=net_profit+excluded.net_profit""", (user_id, casino_day(), profit))
-    db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,strftime('%s','now'))", (user_id, action, f"{detail} | bet {bet} XC | payout {payout} XC | profit {profit:+} XC"))
+    db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,strftime('%s','now'))", (user_id, action, f"{detail} | bet {bet} Cash | payout {payout} Cash | profit {profit:+} Cash"))
     db.execute("""INSERT INTO casino_stats(user_id,games_played,total_wagered,total_won,biggest_payout,updated_at)
         VALUES(?,1,?,?,?,strftime('%s','now')) ON CONFLICT(user_id) DO UPDATE SET
         games_played=games_played+1,total_wagered=total_wagered+excluded.total_wagered,
@@ -249,9 +249,9 @@ def draw_lottery(db):
     ticket_bag = [entry['user_id'] for entry in entries for _ in range(entry['tickets'])]
     winner_id = random.choice(ticket_bag)
     prize = round_row['prize_pool']
-    db.execute("UPDATE players SET xc=xc+? WHERE user_id=?", (prize, winner_id))
+    db.execute("UPDATE players SET money=money+? WHERE user_id=?", (prize, winner_id))
     db.execute("UPDATE lottery_rounds SET active=0,winner_id=?,drawn_at=strftime('%s','now') WHERE id=?", (winner_id, round_row['id']))
-    db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,strftime('%s','now'))", (winner_id, "lottery_win", f"Round #{round_row['id']}: +{prize} XC"))
+    db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,strftime('%s','now'))", (winner_id, "lottery_win", f"Round #{round_row['id']}: +${prize:,} Cash"))
     return winner_id, prize, len(ticket_bag)
 
 
@@ -342,20 +342,20 @@ def register_commands(bot, db, create_player) -> None:
         """A coloured end card with a same-bet Next Round button."""
         view = discord.ui.LayoutView(timeout=300)
         container = discord.ui.Container(accent_color=discord.Color(0x00D4FF) if payout>=stake else discord.Color(0xFF5470))
-        wallet=db.execute('SELECT xc FROM players WHERE user_id=?',(owner_id,)).fetchone()[0]
-        summary=f"Stake: **{stake:,} XC** · Total returned: **{payout:,} XC**\nNet result: **{payout-stake:+,} XC** · Wallet: **{wallet:,} XC**"
+        wallet=db.execute('SELECT money FROM players WHERE user_id=?',(owner_id,)).fetchone()[0]
+        summary=f"Stake: **${stake:,} Cash** · Total returned: **${payout:,} Cash**\nNet result: **{payout-stake:+,} Cash** · Cash Balance: **${wallet:,}**"
         if game in {'spin','balloonpop'} and args[-1]==0:
             summary+='\nItem-funded round: stake is the item value; the consumed item is not returned.'
         container.add_item(discord.ui.TextDisplay(f"-# ◈ X CASINO / ROUND COMPLETE\n## {title}\n{body}\n\n{summary}"))
         container.add_item(discord.ui.TextDisplay(cooldown_text(db,member,game)))
         container.add_item(discord.ui.Separator())
         replay=CasinoReplayButton(owner_id, game, command, args)
-        replay.label=f'Play Again · {stake:,} XC'[:80]
+        replay.label=f'Play Again · ${stake:,} Cash'[:80]
         if game in {'spin','balloonpop'} and args[-1]==0:
             replay.label='Play Again · Use Item'
         container.add_item(discord.ui.ActionRow(replay,ChangeBetButton(owner_id,game,stake),CasinoHubBackButton(owner_id),CasinoLobbyButton(owner_id)))
         container.add_item(discord.ui.ActionRow(FreeGameButton(owner_id)))
-        container.add_item(discord.ui.TextDisplay('-# Each click starts one paid round, subject to cooldown. No automatic bets. XC is a fictional game currency.'))
+        container.add_item(discord.ui.TextDisplay('-# Each click starts one paid round, subject to cooldown. No automatic bets.'))
         view.add_item(container)
         return view
 
@@ -382,17 +382,17 @@ def register_commands(bot, db, create_player) -> None:
             paid=int(primary)-owned
             total=paid*setting(db,'lottery_ticket_price')
             payment=f'{owned} inventory · {paid} paid' if owned else f'{paid} paid'
-            return f'Tickets **{int(primary):,}** · {payment} · Total cost **{total:,} XC**',total
+            return f'Tickets **{int(primary):,}** · {payment} · Total cost **${total:,} Cash**',total
         detail=''
         if len(args)>1:
             value=args[0] if game=='balloonpop' else args[1]
             value=getattr(value,'value',value)
             detail=f' · Choice **{str(value).title()}**'
-        return f'Stake **{int(primary):,} XC**{detail}',int(primary)
+        return f'Stake **${int(primary):,} Cash**{detail}',int(primary)
 
     class CasinoConfirmButton(discord.ui.Button):
         def __init__(self,panel):
-            super().__init__(label=f'Play · {panel.cost:,} XC'[:80],style=discord.ButtonStyle.success)
+            super().__init__(label=f'Play · ${panel.cost:,} Cash'[:80],style=discord.ButtonStyle.success)
             self.panel=panel
         async def callback(self,interaction):
             panel=self.panel
@@ -405,8 +405,8 @@ def register_commands(bot, db, create_player) -> None:
                 await interaction.response.edit_message(view=CasinoConfirmView(panel.owner_id,panel.game,panel.command,panel.args,panel.previous_bet,notice='Game settings changed. Review the updated cost and confirm again.'))
                 return
             player=create_player_from_id(panel.owner_id)
-            if player is None or int(player['xc'])<panel.cost:
-                await interaction.response.edit_message(view=CasinoBlockedView(panel,'You do not have enough XC for this round.'))
+            if player is None or int(player['money'])<panel.cost:
+                await interaction.response.edit_message(view=CasinoBlockedView(panel,'You do not have enough Cash for this round.'))
                 return
             info=cooldown_info(db,interaction.user,panel.game)
             if info['remaining']:
@@ -424,7 +424,7 @@ def register_commands(bot, db, create_player) -> None:
             super().__init__(timeout=300)
             self.panel=panel
             box=discord.ui.Container(accent_color=discord.Color(0xFFB020))
-            box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO\n## ROUND NOT STARTED\n{reason}\nNo XC was charged.'))
+            box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO\n## ROUND NOT STARTED\n{reason}\nNo Cash was charged.'))
             box.add_item(discord.ui.ActionRow(ChangeBetButton(panel.owner_id,panel.game,panel.previous_bet),FreeGameButton(panel.owner_id),CasinoHubBackButton(panel.owner_id)))
             self.add_item(box)
 
@@ -438,7 +438,7 @@ def register_commands(bot, db, create_player) -> None:
             summary,self.cost=preview_text(game,args,owner_id)
             self.summary=summary
             player=create_player_from_id(owner_id)
-            info=f'Wallet **{player["xc"]:,} XC**' if player else 'Wallet unavailable'
+            info=f'Cash Balance: **${player["money"]:,}**' if player else 'Balance unavailable'
             box=discord.ui.Container(accent_color=discord.Color(0x41D9D0))
             box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO / REVIEW\n## {game.replace("_"," ").upper()}\n{summary}\n{info}\nNothing is charged until you confirm.'+(f'\n\n{notice}' if notice else '')))
             box.add_item(discord.ui.ActionRow(CasinoConfirmButton(self),ChangeBetButton(owner_id,game,previous_bet),CasinoHubBackButton(owner_id)))
@@ -476,15 +476,15 @@ def register_commands(bot, db, create_player) -> None:
             player=create_player_from_id(owner_id)
             box=discord.ui.Container(accent_color=discord.Color(0x41D9D0))
             choice_line=f' · **{choice.title()}**' if game=='coinflip' else ''
-            box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO / SETUP\n## {game.upper()}\nWallet **{player["xc"]:,} XC** · Range **{minimum:,}–{maximum:,} XC**\nSelected **{self.amount:,} XC**{choice_line}\nChoose an amount, then review before playing.'))
+            box.add_item(discord.ui.TextDisplay(f'-# ✦ X CASINO / SETUP\n## {game.upper()}\nCash **${player["money"]:,}** · Range **${minimum:,}–${maximum:,}**\nSelected **${self.amount:,} Cash**{choice_line}\nChoose an amount, then review before playing.'))
             presets=[]
             for multiplier in (1,2,5):
                 value=minimum*multiplier
                 if value<=maximum and value not in [item[0] for item in presets]:presets.append((value,multiplier))
-            box.add_item(discord.ui.ActionRow(*[BetPickButton(self,f'{multi}× · {value:,}',('amount',value),discord.ButtonStyle.primary if value==self.amount else discord.ButtonStyle.secondary) for value,multi in presets]))
+            box.add_item(discord.ui.ActionRow(*[BetPickButton(self,f'{multi}× · ${value:,}',('amount',value),discord.ButtonStyle.primary if value==self.amount else discord.ButtonStyle.secondary) for value,multi in presets]))
             if game=='coinflip':
                 box.add_item(discord.ui.ActionRow(BetPickButton(self,'Heads',('choice','heads'),discord.ButtonStyle.primary if choice=='heads' else discord.ButtonStyle.secondary),BetPickButton(self,'Tails',('choice','tails'),discord.ButtonStyle.primary if choice=='tails' else discord.ButtonStyle.secondary)))
-            box.add_item(discord.ui.ActionRow(BetPickButton(self,f'Review · {self.amount:,} XC',('review',None),discord.ButtonStyle.success),BetPickButton(self,'Custom',('custom',None)),CasinoHubBackButton(owner_id)))
+            box.add_item(discord.ui.ActionRow(BetPickButton(self,f'Review · ${self.amount:,} Cash',('review',None),discord.ButtonStyle.success),BetPickButton(self,'Custom',('custom',None)),CasinoHubBackButton(owner_id)))
             box.add_item(discord.ui.ActionRow(FreeGameButton(owner_id)))
             self.add_item(box)
 
@@ -493,13 +493,13 @@ def register_commands(bot, db, create_player) -> None:
         def __init__(self, game: str, previous_bet=None):
             self.game = game
             super().__init__(title=f"Play {game.replace('_', ' ').title()}"[:45])
-            label = "Tickets" if game == "lottery" else "Bet (XC)"
-            placeholder = "1" if game == "lottery" else "Enter your XC bet"
+            label = "Tickets" if game == "lottery" else "Bet ($ Cash)"
+            placeholder = "1" if game == "lottery" else "Enter your Cash bet"
             rules=db.execute('SELECT * FROM casino_game_settings WHERE game=?',(game,)).fetchone()
             minimum=rules['min_bet'] if rules and rules['min_bet']>0 else setting(db,'casino_min_bet')
             maximum=rules['max_bet'] if rules and rules['max_bet']>0 else setting(db,'casino_max_bet')
             if game!='lottery':
-                label=f'Bet XC ({minimum:,}–{maximum:,})'[:45]
+                label=f'Bet Cash (${minimum:,}–${maximum:,})'[:45]
             suggested=previous_bet if previous_bet is not None and minimum<=previous_bet<=maximum else minimum
             self.primary = discord.ui.TextInput(label=label, placeholder=placeholder, default='1' if game=='lottery' else str(suggested), max_length=12)
             self.add_item(self.primary)
@@ -624,15 +624,15 @@ def register_commands(bot, db, create_player) -> None:
                 else:
                     profit = int(row['total_won']) - int(row['total_wagered'])
                     body = (f"Games played: **{row['games_played']:,}**\n"
-                            f"Total wagered: **{row['total_wagered']:,} XC**\n"
-                            f"Total payouts: **{row['total_won']:,} XC**\n"
-                            f"Net result: **{profit:+,} XC**\n"
-                            f"Biggest payout: **{row['biggest_payout']:,} XC**")
+                            f"Total wagered: **${row['total_wagered']:,} Cash**\n"
+                            f"Total payouts: **${row['total_won']:,} Cash**\n"
+                            f"Net result: **{profit:+,} Cash**\n"
+                            f"Biggest payout: **${row['biggest_payout']:,} Cash**")
                 await interaction.response.edit_message(view=CasinoDetailView(self.owner_id, "📊 Casino Record", body))
                 return
             if self.action == "casino_leaderboard":
                 rows = db.execute("SELECT * FROM casino_stats ORDER BY total_won-total_wagered DESC, biggest_payout DESC LIMIT 10").fetchall()
-                body = "\n".join(f"**{number}.** <@{row['user_id']}> — **{int(row['total_won']) - int(row['total_wagered']):+,} XC**" for number, row in enumerate(rows, 1)) or "No Casino games have been played yet."
+                body = "\n".join(f"**{number}.** <@{row['user_id']}> — **{int(row['total_won']) - int(row['total_wagered']):+,} Cash**" for number, row in enumerate(rows, 1)) or "No Casino games have been played yet."
                 await interaction.response.edit_message(view=CasinoDetailView(self.owner_id, "🏆 Casino Leaderboard", body))
                 return
             command = casino_command(interaction, self.action)
@@ -693,9 +693,9 @@ def register_commands(bot, db, create_player) -> None:
             net=int(record['total_won']-record['total_wagered']) if record else 0
             container.add_item(discord.ui.TextDisplay(
                 f"-# ✦ X SYSTEM / OVERVIEW\n## 🎰 Casino\n"
-                f"🪙 Wallet: **{player['xc']:,} XC**\n"
-                f"Rounds **{played:,}** · Net **{net:+,} XC**\n"
-                f"-# Optional games · Fictional XC · Stakes can be lost."
+                f"💵 Cash Balance: **${player['money']:,}**\n"
+                f"Rounds **{played:,}** · Net **{net:+,} Cash**\n"
+                f"-# Play games using your Cash balance · Stakes can be lost."
             ))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay('### 🎮 Games\nChoose a game, then review its bet and cooldown.'))
@@ -741,9 +741,9 @@ def register_commands(bot, db, create_player) -> None:
             await interaction.response.send_message(view=xbot_ui.panel("💎 Casino VIP Active", f"You have **{remaining} hour(s)** remaining.\nCasino cooldown reduction: **{setting(db, 'casino_vip_cooldown_percent')}%**.", colour=discord.Color.teal()), ephemeral=True)
             return
         cost = setting(db, "casino_vip_daily_cost")
-        if player["xc"] < cost:
-            await interaction.response.send_message(view=xbot_ui.danger("Not Enough XC", f"Casino VIP costs **{cost:,} XC** for 24 hours."), ephemeral=True); return
-        db.execute("UPDATE players SET xc=xc-? WHERE user_id=?", (cost, interaction.user.id))
+        if player["money"] < cost:
+            await interaction.response.send_message(view=xbot_ui.danger("Not Enough Cash", f"Casino VIP costs **${cost:,} Cash** for 24 hours."), ephemeral=True); return
+        db.execute("UPDATE players SET money=money-? WHERE user_id=?", (cost, interaction.user.id))
         expires_at = now + setting(db, "casino_vip_duration_seconds")
         db.execute("INSERT INTO casino_vip_members(user_id,expires_at,purchased_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET expires_at=excluded.expires_at,purchased_at=excluded.purchased_at", (interaction.user.id, expires_at, now))
         role = interaction.guild.get_role(setting(db, "casino_vip_role_id")) if interaction.guild else None
@@ -752,8 +752,8 @@ def register_commands(bot, db, create_player) -> None:
                 await interaction.user.add_roles(role, reason="Purchased X BOT Casino VIP")
             except discord.HTTPException:
                 pass
-        db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (interaction.user.id, "casino_vip_purchase", f"Casino VIP for 24 hours: -{cost} XC", now)); db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("💎 Casino VIP Activated", f"Paid **{cost:,} XC**.\nYour Casino cooldown is reduced by **{setting(db, 'casino_vip_cooldown_percent')}%** for 24 hours."), ephemeral=True)
+        db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,?)", (interaction.user.id, "casino_vip_purchase", f"Casino VIP for 24 hours: -${cost} Cash", now)); db.commit()
+        await interaction.response.send_message(view=xbot_ui.success("💎 Casino VIP Activated", f"Paid **${cost:,} Cash**.\nYour Casino cooldown is reduced by **{setting(db, 'casino_vip_cooldown_percent')}%** for 24 hours."), ephemeral=True)
 
     @bot.tree.command(name="casino_stats", description="View your X BOT Casino record")
     async def casino_stats(interaction: discord.Interaction):
@@ -765,13 +765,13 @@ def register_commands(bot, db, create_player) -> None:
         await interaction.response.send_message(view=xbot_ui.panel("🎰 Casino Record",
             f"🎰 **{interaction.user.display_name}'s Casino Record**\n"
             f"Games played: **{row['games_played']}**\n"
-            f"Total wagered: **{row['total_wagered']} XC**\n"
-            f"Total payouts: **{row['total_won']} XC**\n"
-            f"Net result: **{profit:+} XC**\n"
-            f"Biggest payout: **{row['biggest_payout']} XC**", colour=discord.Color.gold()))
+            f"Total wagered: **${row['total_wagered']:,} Cash**\n"
+            f"Total payouts: **${row['total_won']:,} Cash**\n"
+            f"Net result: **{profit:+,} Cash**\n"
+            f"Biggest payout: **${row['biggest_payout']:,} Cash**", colour=discord.Color.gold()))
 
     @bot.tree.command(name="dice", description="Casino: guess a dice number")
-    @app_commands.describe(bet="XC to bet", guess="Choose 1 to 6")
+    @app_commands.describe(bet="Cash to bet", guess="Choose 1 to 6")
     async def dice(interaction: discord.Interaction, bet: int, guess: app_commands.Range[int, 1, 6]):
         if await take_bet(interaction, db, create_player, bet) is None: return
         # A small positive edge keeps this a fun server game instead of a grind.
@@ -823,7 +823,7 @@ def register_commands(bot, db, create_player) -> None:
             colour = (discord.Color(0x00D4FF) if net>=0 else discord.Color(0xFF5470)) if self.finished else discord.Color(0x8B5CF6)
             container = discord.ui.Container(accent_color=colour)
             outcome=('Win' if net>0 else 'Loss' if net<0 else 'Push')
-            header = f"-# ◈ X CASINO / BLACKJACK\n## 🃏 Blackjack\n"+(f"### {outcome} · {net:+,} XC\n{self.result}" if self.finished else f"Your turn · Stake **{self.bet:,} XC**")
+            header = f"-# ◈ X CASINO / BLACKJACK\n## 🃏 Blackjack\n"+(f"### {outcome} · {net:+,} Cash\n{self.result}" if self.finished else f"Your turn · Stake **${self.bet:,} Cash**")
             container.add_item(discord.ui.TextDisplay(header))
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
@@ -834,12 +834,12 @@ def register_commands(bot, db, create_player) -> None:
             ))
             container.add_item(discord.ui.Separator())
             if self.finished:
-                wallet=db.execute('SELECT xc FROM players WHERE user_id=?',(self.owner_id,)).fetchone()[0]
-                container.add_item(discord.ui.TextDisplay(f'Stake: **{self.bet:,} XC** · Total returned: **{self.payout:,} XC**\nNet result: **{self.payout-self.bet:+,} XC** · Wallet: **{wallet:,} XC**'))
+                wallet=db.execute('SELECT money FROM players WHERE user_id=?',(self.owner_id,)).fetchone()[0]
+                container.add_item(discord.ui.TextDisplay(f'Stake: **${self.bet:,} Cash** · Total returned: **${self.payout:,} Cash**\nNet result: **{self.payout-self.bet:+,} Cash** · Cash Balance: **${wallet:,}**'))
                 if self.member is not None:
                     container.add_item(discord.ui.TextDisplay(cooldown_text(db,self.member,'blackjack')))
                 container.add_item(discord.ui.ActionRow(
-                    BlackjackButton(f"Play Again · {self.bet:,} XC", discord.ButtonStyle.success, "again"),
+                    BlackjackButton(f"Play Again · ${self.bet:,} Cash", discord.ButtonStyle.success, "again"),
                     ChangeBetButton(self.owner_id,'blackjack',self.bet),CasinoHubBackButton(self.owner_id),CasinoLobbyButton(self.owner_id),
                 ))
             else:
@@ -848,7 +848,7 @@ def register_commands(bot, db, create_player) -> None:
                     BlackjackButton("Stand · Finish Hand", discord.ButtonStyle.primary, "stand"),
                 ))
                 container.add_item(discord.ui.ActionRow(
-                    BlackjackButton(f"Double · +{self.bet:,} XC", discord.ButtonStyle.secondary, "double", len(self.player_cards) != 2),
+                    BlackjackButton(f"Double · +${self.bet:,} Cash", discord.ButtonStyle.secondary, "double", len(self.player_cards) != 2),
                     BlackjackButton("Surrender · Half Back", discord.ButtonStyle.secondary, "surrender", len(self.player_cards) != 2),
                     BlackjackButton("Quit · Lose Stake", discord.ButtonStyle.danger, "quit"),
                 ))
@@ -862,7 +862,7 @@ def register_commands(bot, db, create_player) -> None:
             self.payout = payout
             self.finished = True
             self.reveal = True
-            self.result = f"**{result}** " + (f"Payout: **{payout} XC**." if payout else f"You lost **{self.bet} XC**.")
+            self.result = f"**{result}** " + (f"Payout: **${payout:,} Cash**." if payout else f"You lost **${self.bet:,} Cash**.")
             self.rebuild()
             await interaction.edit_original_response(view=self)
 
@@ -915,7 +915,7 @@ def register_commands(bot, db, create_player) -> None:
                 self.reveal = True
                 payout, _ = finish(db, self.owner_id, "casino_blackjack", self.bet, 0.5, "surrendered")
                 self.payout = payout
-                self.result = f"**Surrendered.** Half your bet was returned: **{payout} XC**."
+                self.result = f"**Surrendered.** Half your bet was returned: **${payout:,} Cash**."
                 self.rebuild()
                 await interaction.edit_original_response(view=self)
                 return
@@ -923,7 +923,7 @@ def register_commands(bot, db, create_player) -> None:
                 self.finished = True
                 self.reveal = True
                 finish(db, self.owner_id, "casino_blackjack", self.bet, 0, "quit")
-                self.result = f"**Quit.** You lost **{self.bet} XC**."
+                self.result = f"**Quit.** You lost **${self.bet:,} Cash**."
                 self.rebuild()
                 await interaction.edit_original_response(view=self)
                 return
@@ -932,10 +932,10 @@ def register_commands(bot, db, create_player) -> None:
                     await interaction.followup.send("❌ Double Down is only available on your first two cards.", ephemeral=True)
                     return
                 player = create_player(interaction.user)
-                if player['xc'] < self.bet:
-                    await interaction.followup.send(f"❌ You need another **{self.bet} XC** to Double Down.", ephemeral=True)
+                if player['money'] < self.bet:
+                    await interaction.followup.send(f"❌ You need another **${self.bet:,} Cash** to Double Down.", ephemeral=True)
                     return
-                db.execute("UPDATE players SET xc=xc-? WHERE user_id=?", (self.bet, self.owner_id))
+                db.execute("UPDATE players SET money=money-? WHERE user_id=?", (self.bet, self.owner_id))
                 self.bet *= 2
                 self.player_cards.append(card())
                 player_total, dealer_total = hand_value(self.player_cards), hand_value(self.dealer_cards)
@@ -968,7 +968,7 @@ def register_commands(bot, db, create_player) -> None:
             payout, _ = finish(db, interaction.user.id, "casino_blackjack", bet, multiplier, f"natural blackjack, dealer {hand_value(dealer_cards)}")
             result = "Blackjack Push! Stake returned." if multiplier == 1 else "Blackjack!"
             view.payout = payout
-            view.finished = True; view.reveal = True; view.result = f"**{result}** Payout: **{payout} XC**."; view.rebuild()
+            view.finished = True; view.reveal = True; view.result = f"**{result}** Payout: **${payout:,} Cash**."; view.rebuild()
             await send_result(interaction,view)
             return
         await send_result(interaction,view)
@@ -980,7 +980,7 @@ def register_commands(bot, db, create_player) -> None:
         roll = [random.choice(symbols) for _ in range(3)]
         mult = 12 if len(set(roll)) == 1 and roll[0] == "7️⃣" else 6 if len(set(roll)) == 1 else 2 if len(set(roll)) == 2 else 0
         payout, _ = finish(db, interaction.user.id, "casino_slot", bet, mult, " ".join(roll))
-        await send_result(interaction, casino_result("🎰 Slot Result", f"## {' | '.join(roll)}\n" + (f"Won **{payout:,} XC**!" if payout else f"No match — lost **{bet:,} XC**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="slot", command=slot, args=(bet,)))
+        await send_result(interaction, casino_result("🎰 Slot Result", f"## {' | '.join(roll)}\n" + (f"Won **${payout:,} Cash**!" if payout else f"No match — lost **${bet:,} Cash**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="slot", command=slot, args=(bet,)))
 
     @bot.tree.command(name="roulette", description="Casino: bet red, black, or green")
     @app_commands.choices(choice=[app_commands.Choice(name="Red", value="red"), app_commands.Choice(name="Black", value="black"), app_commands.Choice(name="Green", value="green")])
@@ -989,7 +989,7 @@ def register_commands(bot, db, create_player) -> None:
         result = random.choices(["red", "black", "green"], weights=[48, 48, 4])[0]
         mult = 14 if result == "green" and choice.value == result else 2 if result == choice.value else 0
         payout, _ = finish(db, interaction.user.id, "casino_roulette", bet, mult, f"picked {choice.value}, wheel {result}")
-        await send_result(interaction, casino_result("🎡 Roulette Result", f"The wheel landed on **{result.title()}**. " + (f"Won **{payout:,} XC**!" if payout else f"Lost **{bet:,} XC**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="roulette", command=roulette, args=(bet, choice)))
+        await send_result(interaction, casino_result("🎡 Roulette Result", f"The wheel landed on **{result.title()}**. " + (f"Won **${payout:,} Cash**!" if payout else f"Lost **${bet:,} Cash**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="roulette", command=roulette, args=(bet, choice)))
 
     @bot.tree.command(name="scratch", description="Casino: scratch a virtual ticket")
     async def scratch(interaction: discord.Interaction, bet: int):
@@ -998,7 +998,7 @@ def register_commands(bot, db, create_player) -> None:
         # More frequent small prizes make Scratch welcoming for new players.
         mult = 12 if roll == 100 else 4 if roll >= 90 else 2 if roll >= 55 else 0
         payout, _ = finish(db, interaction.user.id, "casino_scratch", bet, mult, f"roll {roll}")
-        await send_result(interaction, casino_result("🎫 Scratch Result", f"Score: **{roll}/100** · " + (f"Won **{payout:,} XC**!" if payout else f"No prize — lost **{bet:,} XC**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="scratch", command=scratch, args=(bet,)))
+        await send_result(interaction, casino_result("🎫 Scratch Result", f"Score: **{roll}/100** · " + (f"Won **${payout:,} Cash**!" if payout else f"No prize — lost **${bet:,} Cash**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="scratch", command=scratch, args=(bet,)))
 
     @bot.tree.command(name="mines", description="Casino: choose how many mine tiles to risk")
     @app_commands.describe(safe_tiles="1–5 safe tiles to reveal")
@@ -1006,7 +1006,7 @@ def register_commands(bot, db, create_player) -> None:
         if await take_bet(interaction, db, create_player, bet) is None: return
         success = random.random() < (0.8 ** safe_tiles); mult = 1 + safe_tiles * 0.35 if success else 0
         payout, _ = finish(db, interaction.user.id, "casino_mines", bet, mult, f"revealed {safe_tiles} safe tiles")
-        await send_result(interaction, casino_result("💣 Mines Result", f"Tiles risked: **{safe_tiles}** · " + (f"Safe path! Won **{payout:,} XC**." if payout else f"Boom! Lost **{bet:,} XC**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="mines", command=mines, args=(bet, safe_tiles)))
+        await send_result(interaction, casino_result("💣 Mines Result", f"Tiles risked: **{safe_tiles}** · " + (f"Safe path! Won **${payout:,} Cash**." if payout else f"Boom! Lost **${bet:,} Cash**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="mines", command=mines, args=(bet, safe_tiles)))
 
     @bot.tree.command(name="crash", description="Casino: cash out before the crash")
     @app_commands.describe(cashout="Multiplier to cash out at, from 1.10 to 5.00")
@@ -1027,8 +1027,8 @@ def register_commands(bot, db, create_player) -> None:
         payout, profit = finish(db, interaction.user.id, "casino_crash", bet, mult, f"cashout {cashout:.2f}x, crashed {crash_at:.2f}x")
         limit = setting(db, "crash_daily_net_win_limit")
         net = crash_daily_net(db, interaction.user.id)
-        cap_note = f"\nToday's Crash net result: **{net:+,} / {limit:,} XC**." if limit else ""
-        await send_result(interaction, casino_result("📈 Crash Result", f"Crashed at **{crash_at:.2f}x** · " + (f"Cashed out for **{payout:,} XC**!" if payout else f"Lost **{bet:,} XC**.") + cap_note, won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="crash", command=crash, args=(bet, cashout)))
+        cap_note = f"\nToday's Crash net result: **{net:+,} / ${limit:,} Cash**." if limit else ""
+        await send_result(interaction, casino_result("📈 Crash Result", f"Crashed at **{crash_at:.2f}x** · " + (f"Cashed out for **${payout:,} Cash**!" if payout else f"Lost **${bet:,} Cash**.") + cap_note, won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="crash", command=crash, args=(bet, cashout)))
 
     @bot.tree.command(name="keno", description="Casino: pick five numbers from 1 to 10")
     @app_commands.describe(picks="Five different numbers, for example: 1,2,3,4,5")
@@ -1042,7 +1042,7 @@ def register_commands(bot, db, create_player) -> None:
         drawn = set(random.sample(range(1, 11), 5)); matches = len(chosen & drawn)
         mult = {5: 12, 4: 3, 3: 1.5}.get(matches, 0)
         payout, _ = finish(db, interaction.user.id, "casino_keno", bet, mult, f"picked {sorted(chosen)}, drawn {sorted(drawn)}, matches {matches}")
-        await send_result(interaction, casino_result("🔢 Keno Result", f"Drawn: **{', '.join(map(str, sorted(drawn)))}**\nMatches: **{matches}**\n" + (f"Payout: **{payout:,} XC**." if payout else f"Lost **{bet:,} XC**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="keno", command=keno, args=(bet, picks)))
+        await send_result(interaction, casino_result("🔢 Keno Result", f"Drawn: **{', '.join(map(str, sorted(drawn)))}**\nMatches: **{matches}**\n" + (f"Payout: **${payout:,} Cash**." if payout else f"Lost **${bet:,} Cash**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="keno", command=keno, args=(bet, picks)))
 
     @bot.tree.command(name="tower", description="Casino: climb a risky tower")
     @app_commands.describe(floors="How many floors to attempt, from 1 to 6")
@@ -1054,7 +1054,7 @@ def register_commands(bot, db, create_player) -> None:
             cleared += 1
         mult = round(1.35 ** floors, 2) if cleared == floors else 0
         payout, _ = finish(db, interaction.user.id, "casino_tower", bet, mult, f"cleared {cleared}/{floors}")
-        await send_result(interaction, casino_result("🗼 Tower Result", f"Cleared **{cleared}/{floors}** floors. " + (f"Payout: **{payout:,} XC**." if payout else f"The tower fell — lost **{bet:,} XC**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="tower", command=tower, args=(bet, floors)))
+        await send_result(interaction, casino_result("🗼 Tower Result", f"Cleared **{cleared}/{floors}** floors. " + (f"Payout: **${payout:,} Cash**." if payout else f"The tower fell — lost **${bet:,} Cash**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="tower", command=tower, args=(bet, floors)))
 
     @bot.tree.command(name="highlow", description="Casino: guess whether the next card is higher or lower")
     @app_commands.choices(choice=[app_commands.Choice(name="Higher", value="higher"), app_commands.Choice(name="Lower", value="lower")])
@@ -1065,7 +1065,7 @@ def register_commands(bot, db, create_player) -> None:
         elif (second > first and choice.value == "higher") or (second < first and choice.value == "lower"): mult, result = 2, "Correct"
         else: mult, result = 0, "Wrong"
         payout, _ = finish(db, interaction.user.id, "casino_highlow", bet, mult, f"{first} then {second}, chose {choice.value}")
-        await send_result(interaction, casino_result("🃏 High-Low Result", f"First: **{first}** → Next: **{second}** · **{result}**\n" + (f"Payout: **{payout:,} XC**." if payout else f"Lost **{bet:,} XC**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="highlow", command=highlow, args=(bet, choice)))
+        await send_result(interaction, casino_result("🃏 High-Low Result", f"First: **{first}** → Next: **{second}** · **{result}**\n" + (f"Payout: **${payout:,} Cash**." if payout else f"Lost **${bet:,} Cash**."), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="highlow", command=highlow, args=(bet, choice)))
 
     @bot.tree.command(name="balloonpop", description="Casino: pop a coloured balloon")
     @app_commands.choices(color=[app_commands.Choice(name="Red", value="red"), app_commands.Choice(name="Blue", value="blue"), app_commands.Choice(name="Gold", value="gold")])
@@ -1077,14 +1077,14 @@ def register_commands(bot, db, create_player) -> None:
             create_player(interaction.user)
             bet = consume_item(db, interaction.user.id, "Balloon")
             if not bet:
-                await interaction.response.send_message("❌ Enter an XC bet, or buy a **Balloon** item from `/shop`.", ephemeral=True)
+                await interaction.response.send_message("❌ Enter a Cash bet, or buy a **Balloon** item from `/shop`.", ephemeral=True)
                 return
             used_item = True
         elif await take_bet(interaction, db, create_player, bet) is None: return
         result = random.choices(["red", "blue", "gold"], weights=[44, 44, 12])[0]
         mult = 5 if result == "gold" and color.value == result else 2 if result == color.value else 0
         payout, _ = finish(db, interaction.user.id, "casino_balloonpop", bet, mult, f"picked {color.value}, popped {result}, item={used_item}")
-        await send_result(interaction, casino_result("🎈 Balloon Pop", f"The **{result}** balloon popped. " + (f"Won **{payout:,} XC**!" if payout else ("Your Balloon was used." if used_item else f"Lost **{bet:,} XC**.")), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="balloonpop", command=balloonpop, args=(color, 0 if used_item else bet)))
+        await send_result(interaction, casino_result("🎈 Balloon Pop", f"The **{result}** balloon popped. " + (f"Won **${payout:,} Cash**!" if payout else ("Your Balloon was used." if used_item else f"Lost **${bet:,} Cash**.")), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="balloonpop", command=balloonpop, args=(color, 0 if used_item else bet)))
 
     @bot.tree.command(name="lottery", description="Casino: buy tickets for the X BOT Lottery prize pool")
     @app_commands.describe(tickets="How many tickets to buy")
@@ -1109,8 +1109,8 @@ def register_commands(bot, db, create_player) -> None:
         db.execute("INSERT INTO economy_logs(user_id,action,detail,created_at) VALUES(?,?,?,strftime('%s','now'))", (interaction.user.id, "lottery_ticket", f"Round #{round_row['id']}: {tickets} tickets"))
         db.commit()
         updated = db.execute("SELECT prize_pool FROM lottery_rounds WHERE id=?", (round_row['id'],)).fetchone()
-        payment = f"{bet} XC" if not item_tickets else f"{item_tickets} inventory ticket(s)" + (f" + {bet} XC" if bet else "")
-        await interaction.response.send_message(view=xbot_ui.success("🎟️ Lottery Entry", f"Entered **{tickets} ticket(s)** using **{payment}**.\nRound **#{round_row['id']}** prize pool: **{updated['prize_pool']:,} XC**."))
+        payment = f"${bet:,} Cash" if not item_tickets else f"{item_tickets} inventory ticket(s)" + (f" + ${bet:,} Cash" if bet else "")
+        await interaction.response.send_message(view=xbot_ui.success("🎟️ Lottery Entry", f"Entered **{tickets} ticket(s)** using **{payment}**.\nRound **#{round_row['id']}** prize pool: **${updated['prize_pool']:,} Cash**."))
 
     @bot.tree.command(name="lottery_draw", description="Admin: draw the current X BOT Lottery round")
     async def lottery_draw(interaction: discord.Interaction):
@@ -1119,10 +1119,10 @@ def register_commands(bot, db, create_player) -> None:
             return
         winner_id, prize, ticket_count = draw_lottery(db)
         if winner_id is None:
-            await interaction.response.send_message(f"🎟️ There are no tickets in the current Lottery round. Prize pool remains **{prize} XC**.", ephemeral=True)
+            await interaction.response.send_message(f"🎟️ There are no tickets in the current Lottery round. Prize pool remains **${prize:,} Cash**.", ephemeral=True)
             return
         db.commit()
-        await interaction.response.send_message(view=xbot_ui.success("🎉 Lottery Round Complete", f"Winner: <@{winner_id}>\nPrize: **{prize:,} XC**\nTickets entered: **{ticket_count}**"))
+        await interaction.response.send_message(view=xbot_ui.success("🎉 Lottery Round Complete", f"Winner: <@{winner_id}>\nPrize: **${prize:,} Cash**\nTickets entered: **{ticket_count}**"))
 
     @bot.tree.command(name="spin", description="Casino: spin the X BOT prize wheel")
     async def spin(interaction: discord.Interaction, bet: int = 0):
@@ -1133,13 +1133,13 @@ def register_commands(bot, db, create_player) -> None:
             create_player(interaction.user)
             bet = consume_item(db, interaction.user.id, "Spin Token")
             if not bet:
-                await interaction.response.send_message("❌ Enter an XC bet, or buy a **Spin Token** from `/shop`.", ephemeral=True)
+                await interaction.response.send_message("❌ Enter a Cash bet, or buy a **Spin Token** from `/shop`.", ephemeral=True)
                 return
             used_item = True
         elif await take_bet(interaction, db, create_player, bet) is None: return
         prize = random.choices([(0, "Miss"), (1.5, "Small prize"), (2, "Double"), (5, "Jackpot")], weights=[45, 30, 20, 5])[0]
         payout, _ = finish(db, interaction.user.id, "casino_spin", bet, prize[0], f"{prize[1]}, item={used_item}")
-        await send_result(interaction, casino_result("🎡 Prize Wheel", f"Result: **{prize[1]}** · " + (f"Won **{payout:,} XC**!" if payout else ("Your Spin Token was used." if used_item else f"Lost **{bet:,} XC**.")), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="spin", command=spin, args=(0 if used_item else bet,)))
+        await send_result(interaction, casino_result("🎡 Prize Wheel", f"Result: **{prize[1]}** · " + (f"Won **${payout:,} Cash**!" if payout else ("Your Spin Token was used." if used_item else f"Lost **${bet:,} Cash**.")), won=bool(payout), stake=bet, payout=payout, member=interaction.user, owner_id=interaction.user.id, game="spin", command=spin, args=(0 if used_item else bet,)))
 
     # Used by Economy Centre to open Casino in the same message.
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
