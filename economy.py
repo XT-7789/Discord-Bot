@@ -1323,6 +1323,9 @@ def register_commands(bot, db, create_player) -> None:
 
     @bot.tree.command(name="mine", description="Mine materials in your selected area")
     async def mine(interaction: discord.Interaction):
+        if not setting(db, "mining_enabled"):
+            await interaction.response.send_message("⛏️ Mining is currently closed by the administration.", ephemeral=True)
+            return
         player = create_player(interaction.user); now = int(time.time())
         pickaxe = db.execute("""SELECT items.*,inventories.quantity FROM items INNER JOIN inventories ON inventories.item_id=items.id
             WHERE inventories.user_id=? AND items.id=?""", (interaction.user.id, player['equipped_pickaxe_id'] or -1)).fetchone()
@@ -1599,6 +1602,9 @@ def register_commands(bot, db, create_player) -> None:
 
     @bot.tree.command(name="mining", description="Open the X BOT interactive Mining Hub")
     async def mining(interaction: discord.Interaction):
+        if not setting(db, "mining_enabled"):
+            await interaction.response.send_message("⛏️ The Mining Hub is currently closed by the administration.", ephemeral=True)
+            return
         await interaction.response.defer()
         create_player(interaction.user)
         await interaction.edit_original_response(view=build_mining_hub(interaction.user.id))
