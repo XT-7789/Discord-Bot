@@ -704,6 +704,19 @@ class LoungeBookingSelectView(discord.ui.View):
             # Post Host Control Panel in the lounge text channel
             tc = guild.get_channel(info["text_id"])
             if tc:
+                try:
+                    for p in await tc.pins():
+                        try:
+                            await p.unpin()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                try:
+                    await tc.purge(limit=100)
+                except Exception:
+                    pass
+
                 lounge_data = get_lounge_row(_db, self.chosen_lounge_id)
                 embed = build_host_control_embed(lounge_data)
                 view = LoungeHostControlView()
