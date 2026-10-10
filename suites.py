@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
     "suite_admin_channel_id": "1552329383681986633",
     "suite_min_level": "10",
     "suite_senior_level": "20",
-    "suite_category_id": "0",
+    "suite_category_id": "1527538020700389498",
 }
 
 _bot: Optional[discord.Client] = None
@@ -50,6 +50,11 @@ def initialise(db):
     """Ensure database schema for Private Suites exists."""
     for key, val in DEFAULT_SETTINGS.items():
         db.execute("INSERT OR IGNORE INTO economy_settings(key,value) VALUES(?,?)", (key, val))
+
+    db.execute(
+        "UPDATE economy_settings SET value='1527538020700389498' WHERE key='suite_category_id' AND (value='0' OR value='' OR value IS NULL)"
+    )
+    db.commit()
 
     db.execute("""CREATE TABLE IF NOT EXISTS suite_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -348,7 +353,7 @@ class SuiteApproveModal(discord.ui.Modal):
             duration_label = "Permanent (Lifetime)"
 
         # Target category lookup
-        cat_id = int(setting(_db, "suite_category_id") or 0)
+        cat_id = int(setting(_db, "suite_category_id") or 1527538020700389498)
         target_category = guild.get_channel(cat_id) if cat_id else None
 
         if not target_category:

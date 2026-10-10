@@ -1616,4 +1616,74 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         else:
             await interaction.followup.send(f"⚠️ Suite #{suite_id} not found.", ephemeral=True)
 
+    @lounge_admin.command(name="set_suite_category", description="Admin: Set target Category ID for Private Suites")
+    @app_commands.describe(category_id="Category ID where private suites should be created")
+    async def lounge_set_suite_category(interaction: discord.Interaction, category_id: str):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message("🔒 Only Administrators can manage settings.", ephemeral=True)
+            return
+
+        try:
+            cid = int(category_id.strip())
+        except ValueError:
+            await interaction.response.send_message("⚠️ Category ID must be a numeric Discord snowflake ID.", ephemeral=True)
+            return
+
+        cat = interaction.guild.get_channel(cid)
+        if not cat:
+            await interaction.response.send_message(f"⚠️ Category with ID `{category_id}` was not found in this server.", ephemeral=True)
+            return
+
+        import suites
+        suites.set_setting(db, "suite_category_id", str(cid))
+        await interaction.response.send_message(f"✅ Private Suite Category set to **{cat.name}** (`{cat.id}`)!", ephemeral=True)
+
+    @lounge_admin.command(name="sync_suites_category", description="Admin: Move all active private suite channels to the target category")
+    async def lounge_sync_suites_category(interaction: discord.Interaction):
+        if not is_council_or_admin(interaction):
+            await interaction.response.send_message("🔒 Only Administrators can manage suites.", ephemeral=True)
+            return
+
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        import suites
+        cat_id = int(suites.setting(db, "suite_category_id") or 1527538020700389498)
+        target_cat = interaction.guild.get_channel(cat_id)
+        if not target_cat:
+            await interaction.followup.send(f"⚠️ Target category ID `{cat_id}` not found in this server.", ephemeral=True)
+            return
+
+        moved = 0
+        handled_ch_ids = set()
+
+        rows = db.execute("SELECT * FROM suite_requests WHERE status='approved'").fetchall()
+        for r in rows:
+            for ch_key in ("text_channel_id", "voice_channel_id"):
+                ch = interaction.guild.get_channel(r[ch_key])
+                if ch and ch.category_id != target_cat.id:
+                    try:
+                        await ch.edit(category=target_cat)
+                        moved += 1
+                        handled_ch_ids.add(ch.id)
+                    except Exception:
+                        pass
+
+        # Also relocate any suite channels located in lounge category
+        lounge1 = LOUNGES.get(1)
+        if lounge1:
+            lounge1_ch = interaction.guild.get_channel(lounge1["text_id"])
+            if lounge1_ch and lounge1_ch.category:
+                lounge_ch_ids = {inf["text_id"] for inf in LOUNGES.values()} | {inf["vc_id"] for inf in LOUNGES.values()}
+                for ch in list(lounge1_ch.category.channels):
+                    if ch.id not in lounge_ch_ids and ch.id not in handled_ch_ids:
+                        if ch.name.startswith("💬・") or ch.name.startswith("🔊・") or "gay" in ch.name.lower():
+                            try:
+                                await ch.edit(category=target_cat)
+                                moved += 1
+                            except Exception:
+                                pass
+
+        await interaction.followup.send(f"✅ Moved {moved} suite channels into category **{target_cat.name}** (`{target_cat.id}`)!", ephemeral=True)
+
     bot.tree.add_command(lounge_admin, **STAFF_COMMAND_KWARGS)
