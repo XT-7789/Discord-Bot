@@ -314,9 +314,9 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
                     ),
                     color=0xF1C40F,
                 )
-                summary_embed.set_footer(text="X BOT · Lounge Voice Activity Protocol")
+                summary_embed.set_footer(text="X BOT · Lounge Voice Activity Protocol · Auto-deletes in 10 mins")
                 try:
-                    await tc.send(embed=summary_embed)
+                    await tc.send(embed=summary_embed, delete_after=600)
                 except Exception:
                     pass
 
