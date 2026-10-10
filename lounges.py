@@ -54,6 +54,7 @@ _squad_ping_cooldowns = {}
 _lounge_squad_time = {}
 _lounge_empty_since = {}
 _lounge_empty_warned = {}
+_lounge_session_rewards = {}
 
 
 def setting(db, key):
@@ -289,11 +290,36 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
     _lounge_squad_time.pop(lounge_id, None)
     _lounge_empty_since.pop(lounge_id, None)
     _lounge_empty_warned.pop(lounge_id, None)
+    session_rewards = _lounge_session_rewards.pop(lounge_id, None)
 
-    # 5. Announce clean reopen in the text channel
+    # 5. Announce session settlement & clean reopen in the text channel
     if guild:
         tc = guild.get_channel(info["text_id"])
         if tc:
+            if session_rewards:
+                total_cash = sum(s["cash"] for s in session_rewards.values())
+                total_xc = sum(s["xc"] for s in session_rewards.values())
+                total_xp = sum(s["xp"] for s in session_rewards.values())
+                breakdown = [
+                    f"• **{s['name']}** ({s['minutes']}m in VC): **+${s['cash']:,} Cash**, **+{s['xc']:,} XC**, **+{s['xp']:,} XP**"
+                    for s in sorted(session_rewards.values(), key=lambda x: x["cash"], reverse=True)
+                ]
+                summary_embed = discord.Embed(
+                    title="📊 [LOUNGE SESSION VOICE SETTLEMENT]",
+                    description=(
+                        f"🎙️ **Session Earnings Summary:**\n"
+                        f"💰 **Total Cash: +${total_cash:,}** · 💎 **Total XC: +{total_xc:,}** · ⭐ **Total XP: +{total_xp:,}**\n\n"
+                        f"**Participant Breakdown:**\n" + "\n".join(breakdown[:15]) +
+                        f"\n\n-# All rewards have been deposited directly into participants' accounts."
+                    ),
+                    color=0xF1C40F,
+                )
+                summary_embed.set_footer(text="X BOT · Lounge Voice Activity Protocol")
+                try:
+                    await tc.send(embed=summary_embed)
+                except Exception:
+                    pass
+
             embed = discord.Embed(
                 title=f"🟢 [{info['name'].upper()} IS NOW OPEN]",
                 description=(
@@ -1361,8 +1387,6 @@ async def lounge_check_loop():
                                     )
                                     embed.set_footer(text="X BOT · Deadzone Division · Lounge Voice Protocol")
                                     await tc.send(embed=embed)
-                                else:
-                                    await tc.send(f"🔥 **[Cryo-Thaw Warming]** {member.mention} is defrosting in voice chat! Progress: **{new_thaw}/5**")
                             except Exception:
                                 pass
 
@@ -1375,11 +1399,21 @@ async def lounge_check_loop():
                 _db.commit()
                 # Award +25 XP
                 await leveling.grant_xp(_bot, _db, member, 25, "lounge_voice")
-                if tc:
-                    try:
-                        await tc.send(f"🎁 **[Lounge VC Perk]** {member.mention} earned **+$1,000 Cash**, **+10 XC**, and **+25 XP** for active voice chatting in {vc.mention}!")
-                    except Exception:
-                        pass
+
+                # Accumulate session rewards silently (no chat spam!)
+                lounge_stats = _lounge_session_rewards.setdefault(lid, {})
+                user_stats = lounge_stats.setdefault(uid, {
+                    "name": member.display_name,
+                    "cash": 0,
+                    "xc": 0,
+                    "xp": 0,
+                    "minutes": 0,
+                })
+                user_stats["name"] = member.display_name
+                user_stats["cash"] += 1000
+                user_stats["xc"] += 10
+                user_stats["xp"] += 25
+                user_stats["minutes"] += 5
 
         # 3. Squad Playtime & Gamer Supply Drop: 30+ minutes (1800s) of squad voice chat (2+ members)
         human_members = [
