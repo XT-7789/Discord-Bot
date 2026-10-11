@@ -280,7 +280,7 @@ async def _announce(bot, db, member, new_level, rewards):
     custom = next((r["announcement"] for r in reversed(rewards) if r["announcement"]), "")
     text = (custom or setting(db, "xp_announcement_template")).replace("{mention}", member.mention).replace("{user}", member.display_name).replace("{level}", str(new_level)).replace("{reward}", reward_text)
     channel_id = int(setting(db, "xp_announcement_channel_id") or 0)
-    channel = bot.get_channel(channel_id) if channel_id else member.guild.system_channel
+    channel = bot.get_channel(channel_id) if channel_id else None
     if channel:
         try: await channel.send(view=xbot_ui.success(f"🎉 Level {new_level} Announcement", text))
         except discord.HTTPException: pass

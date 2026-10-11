@@ -466,7 +466,8 @@ class XBot(discord.Client):
         except Exception:
             pass
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS | {
-            "lounge_admin", "code_create", "code_disable", "application_review", "verify"
+            "lounge_admin", "code_create", "code_disable", "application_review", "verify", "autoclear",
+            "setannouncementchat", "setannouncement", "announcementshow", "level_rewards"
         }
 
         def hide_panel_commands(command_guild, allowed_names):
@@ -778,6 +779,12 @@ async def on_ready():
                         print(f"[Startup Audit] Stripped regular music from {member} ({member.id})")
                     except discord.HTTPException:
                         pass
+        try:
+            synced = await leveling.sync_guild_member_levels(bot, db, guild)
+            if synced:
+                print(f"[Startup Level Sync] Synced {synced} member level profiles from Discord roles in {guild.name}")
+        except Exception as e:
+            print(f"[Startup Level Sync Error] {e}")
 
 
 REGULAR_MUSIC_ROLE_ID = 1505437186219311236
