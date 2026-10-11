@@ -1,6 +1,6 @@
 import time
 import sqlite3
-from typing import Optional
+from typing import Optional, Set
 
 import discord
 from discord import app_commands
@@ -10,10 +10,12 @@ import xbot_ui
 
 _bot: Optional[discord.Client] = None
 _db: Optional[sqlite3.Connection] = None
+_monitored_channels: Set[int] = set()
 
 
 def initialise(db):
-    """Ensure database table for autoclear channels exists."""
+    """Ensure database table for autoclear channels exists and load channel cache."""
+    global _monitored_channels
     db.execute("""
     CREATE TABLE IF NOT EXISTS autoclear_channels (
         channel_id INTEGER PRIMARY KEY,
@@ -27,19 +29,33 @@ def initialise(db):
     """)
     db.commit()
 
+    try:
+        rows = db.execute("SELECT channel_id FROM autoclear_channels").fetchall()
+        _monitored_channels = {
+            r["channel_id"] if hasattr(r, "keys") else r[0]
+            for r in rows
+        }
+    except Exception:
+        _monitored_channels = set()
+
 
 async def handle_message(bot: discord.Client, db, message: discord.Message):
-    """Track message activity in monitored auto-clear channels."""
+    """Track message activity in monitored auto-clear channels with zero DB overhead on normal channels."""
     if not message.guild or message.author.bot:
         return
+    # O(1) in-memory fast check - bypass 99.99% of normal server chatter instantly
+    if message.channel.id not in _monitored_channels:
+        return
+
     now = int(time.time())
-    row = db.execute("SELECT channel_id FROM autoclear_channels WHERE channel_id=?", (message.channel.id,)).fetchone()
-    if row:
+    try:
         db.execute(
             "UPDATE autoclear_channels SET last_message_at=?, is_cleared=0 WHERE channel_id=?",
             (now, message.channel.id),
         )
         db.commit()
+    except Exception:
+        pass
 
 
 @tasks.loop(seconds=15)
@@ -62,7 +78,14 @@ async def autoclear_loop():
         idle_limit_secs = idle_mins * 60
         last_msg = int(r.get("last_message_at", 0))
 
+        # Retrieve channel with cache-fallback
         ch = _bot.get_channel(ch_id)
+        if not ch:
+            try:
+                ch = await _bot.fetch_channel(ch_id)
+            except Exception:
+                continue
+
         if not ch or not hasattr(ch, "purge"):
             continue
 
@@ -96,6 +119,13 @@ async def autoclear_loop():
                 pass
 
 
+@autoclear_loop.before_loop
+async def before_autoclear():
+    """Wait until the bot gateway connection is fully online and ready before looping."""
+    if _bot:
+        await _bot.wait_until_ready()
+
+
 def start_autoclear_loop(bot: discord.Client, db):
     """Start the autoclear background task loop."""
     global _bot, _db
@@ -127,18 +157,20 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
             return
 
         target_ch = channel or interaction.channel
-        if not isinstance(target_ch, discord.TextChannel):
-            await interaction.response.send_message("⚠️ Auto-clear can only be configured on standard text channels.", ephemeral=True)
+        if not target_ch or not hasattr(target_ch, "purge"):
+            await interaction.response.send_message("⚠️ Auto-clear can only be configured on text channels.", ephemeral=True)
             return
 
+        guild_id = interaction.guild.id if interaction.guild else 0
         now = int(time.time())
         db.execute(
             """INSERT INTO autoclear_channels(channel_id, guild_id, idle_minutes, last_message_at, is_cleared, created_by, created_at)
             VALUES(?,?,?,?,0,?,?)
             ON CONFLICT(channel_id) DO UPDATE SET idle_minutes=excluded.idle_minutes, is_cleared=0""",
-            (target_ch.id, interaction.guild.id, minutes, now, interaction.user.id, now),
+            (target_ch.id, guild_id, minutes, now, interaction.user.id, now),
         )
         db.commit()
+        _monitored_channels.add(target_ch.id)
 
         embed = discord.Embed(
             title="👻 [GHOST CHAT AUTO-CLEAR ENABLED]",
@@ -163,6 +195,10 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
             return
 
         target_ch = channel or interaction.channel
+        if not target_ch:
+            await interaction.response.send_message("⚠️ Target channel not found.", ephemeral=True)
+            return
+
         row = db.execute("SELECT channel_id FROM autoclear_channels WHERE channel_id=?", (target_ch.id,)).fetchone()
         if not row:
             await interaction.response.send_message(f"⚠️ {target_ch.mention} is not currently in auto-clear mode.", ephemeral=True)
@@ -170,6 +206,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
 
         db.execute("DELETE FROM autoclear_channels WHERE channel_id=?", (target_ch.id,))
         db.commit()
+        _monitored_channels.discard(target_ch.id)
 
         await interaction.response.send_message(
             f"✅ **Ghost Chat Mode disabled** for {target_ch.mention}. Messages will no longer be auto-purged.",
@@ -182,6 +219,10 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
             await interaction.response.send_message("🔒 Only Administrators can view Ghost Chat settings.", ephemeral=True)
             return
 
+        if not interaction.guild:
+            await interaction.response.send_message("⚠️ This command can only be used in a server.", ephemeral=True)
+            return
+
         rows = db.execute("SELECT * FROM autoclear_channels WHERE guild_id=?", (interaction.guild.id,)).fetchall()
         if not rows:
             await interaction.response.send_message("ℹ️ No channels are currently configured for Ghost Chat auto-clear.", ephemeral=True)
@@ -191,7 +232,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         lines = []
         for r in rows:
             ch = interaction.guild.get_channel(r["channel_id"])
-            ch_mention = ch.mention if ch else f"`<#{r['channel_id']}>`"
+            ch_mention = ch.mention if ch else f"<#{r['channel_id']}>"
             idle_mins = r["idle_minutes"]
             is_cleared = r["is_cleared"]
             last_msg = r["last_message_at"]
@@ -224,7 +265,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
             return
 
         target_ch = channel or interaction.channel
-        if not isinstance(target_ch, discord.TextChannel):
+        if not target_ch or not hasattr(target_ch, "purge"):
             await interaction.response.send_message("⚠️ Can only wipe text channels.", ephemeral=True)
             return
 

@@ -1260,6 +1260,11 @@ async def lounge_check_loop():
     for lid, info in LOUNGES.items():
         tc_id = info.get("text_id")
         tc = _bot.get_channel(tc_id) if _bot else None
+        if not tc and _bot:
+            try:
+                tc = await _bot.fetch_channel(tc_id)
+            except Exception:
+                pass
         if not tc:
             continue
         try:
@@ -1671,6 +1676,11 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         import suites
         cat_id = int(suites.setting(db, "suite_category_id") or 1527538020700389498)
         target_cat = interaction.guild.get_channel(cat_id)
+        if not target_cat:
+            try:
+                target_cat = await interaction.guild.fetch_channel(cat_id)
+            except Exception:
+                pass
         if not target_cat:
             await interaction.followup.send(f"⚠️ Target category ID `{cat_id}` not found in this server.", ephemeral=True)
             return
