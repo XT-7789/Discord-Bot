@@ -33,6 +33,7 @@ import deadzone
 import gaming
 import lounges
 import suites
+import autoclear
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -145,6 +146,7 @@ casual_games.initialise(db)
 deadzone.initialise(db)
 gaming.initialise(db)
 lounges.initialise(db)
+autoclear.initialise(db)
 
 # Add missing columns safely for old databases.
 columns = {
@@ -760,6 +762,7 @@ async def on_ready():
     print(f"Bot is online: {bot.user}")
         
     lounges.start_lounge_loop(bot, db)
+    autoclear.start_autoclear_loop(bot, db)
     try:
         await deadzone.update_crypt_board(bot, db)
     except Exception:
@@ -809,6 +812,7 @@ async def on_message(message: discord.Message):
         return
     await leveling.handle_message(bot, db, message)
     await deadzone.handle_message(bot, db, message)
+    await autoclear.handle_message(bot, db, message)
     await run_xb_prefix(message)
 
 
@@ -1162,6 +1166,7 @@ for _retired_command in (
         bot.tree.remove_command(_retired_command, guild=discord.Object(id=_staff_guild_id))
 
 lounges.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
+autoclear.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 # Mark all registered commands as wrapped for consistency and testing
 for _cmd in bot.tree.get_commands():
