@@ -1255,6 +1255,27 @@ async def lounge_check_loop():
         return
 
     now = int(time.time())
+
+    # Auto-cleanup settlement embeds older than 10 minutes (even across bot restarts)
+    for lid, info in LOUNGES.items():
+        tc_id = info.get("text_id")
+        tc = _bot.get_channel(tc_id) if _bot else None
+        if not tc:
+            continue
+        try:
+            async for msg in tc.history(limit=10):
+                if getattr(msg, "author", None) == _bot.user and msg.embeds:
+                    for emb in msg.embeds:
+                        if emb.title and "LOUNGE SESSION VOICE SETTLEMENT" in emb.title:
+                            msg_age = now - int(msg.created_at.timestamp())
+                            if msg_age >= 600:
+                                try:
+                                    await msg.delete()
+                                except Exception:
+                                    pass
+        except Exception:
+            pass
+
     active_lounges = _db.execute("SELECT * FROM server_lounges WHERE status='occupied'").fetchall()
 
     for row in active_lounges:
