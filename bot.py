@@ -301,7 +301,7 @@ PUBLIC_PLAYER_COMMANDS = {
 # These commands are deliberately retained for Administration / Moderators.
 # Their own permission checks and Dashboard Command Access rules still apply.
 STAFF_SLASH_COMMANDS = {
-    "admin", "say",
+    "admin", "say", "clear",
     # Kept temporarily until the second Staff Centre migration. These tools
     # must not disappear before their button-driven replacements are ready.
     "inrole", "role", "spawn", "remove_item", "economy_adjust",
@@ -466,7 +466,7 @@ class XBot(discord.Client):
         except Exception:
             pass
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS | {
-            "lounge_admin", "code_create", "code_disable", "application_review", "verify", "autoclear",
+            "lounge_admin", "code_create", "code_disable", "application_review", "verify", "autoclear", "clear",
             "setannouncementchat", "setannouncement", "announcementshow", "level_rewards"
         }
 

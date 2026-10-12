@@ -280,3 +280,47 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
             await interaction.followup.send(f"⚠️ Failed to wipe {target_ch.mention}: {e}", ephemeral=True)
 
     bot.tree.add_command(autoclear_group, **STAFF_COMMAND_KWARGS)
+
+    @bot.tree.command(name="clear", description="Admin: Bulk clear/purge messages in this channel", **STAFF_COMMAND_KWARGS)
+    @app_commands.describe(
+        amount="Number of messages to delete (1-300, default: 50)",
+        member="Optional: only delete messages from this specific member",
+    )
+    async def clear_command(
+        interaction: discord.Interaction,
+        amount: app_commands.Range[int, 1, 300] = 50,
+        member: Optional[discord.Member] = None,
+    ):
+        can_run = False
+        if getattr(interaction.user, "guild_permissions", None) and (
+            interaction.user.guild_permissions.manage_messages or interaction.user.guild_permissions.administrator
+        ):
+            can_run = True
+        elif is_council_or_admin and is_council_or_admin(interaction):
+            can_run = True
+
+        if not can_run:
+            await interaction.response.send_message("🔒 Only Administrators or Staff with Manage Messages permission can use /clear.", ephemeral=True)
+            return
+
+        target_ch = interaction.channel
+        if not target_ch or not hasattr(target_ch, "purge"):
+            await interaction.response.send_message("⚠️ Messages can only be cleared in text channels.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            check_fn = (lambda m: m.author.id == member.id) if member else None
+            deleted = await target_ch.purge(limit=amount, check=check_fn)
+            user_suffix = f" from {member.mention}" if member else ""
+            embed = discord.Embed(
+                title="🧹 Chat Cleared",
+                description=f"Successfully deleted **{len(deleted)}** message(s){user_suffix} in {target_ch.mention}.",
+                color=0x2ECC71,
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Error: The bot does not have `Manage Messages` permission in this channel.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Failed to clear messages: {e}", ephemeral=True)
