@@ -358,7 +358,7 @@ async def grant_xp(bot, db, member, amount, source):
     total = row["total_xp"] + amount; new_level = level_for_xp(total)
     field = "message_xp" if source == "message" else "voice_xp"; timestamp = "last_message_xp" if source == "message" else "last_voice_xp"
     db.execute(f"UPDATE xp_profiles SET total_xp=?,weekly_xp=?,level=?,{field}={field}+?,{timestamp}=?,last_week_key=? WHERE user_id=?", (total, weekly + amount, new_level, amount, int(time.time()), week_key, member.id))
-    _update_activity_streak(db, member); db.commit()
+    db.commit()
     if new_level > old_level:
         rewards = await _apply_rewards(db, member, old_level, new_level)
         await _announce(bot, db, member, new_level, rewards)
@@ -469,7 +469,6 @@ def register_commands(bot, db, is_council_or_admin=None):
             f"📈 **Total EXP:** **{row['total_xp']:,} XP**\n"
             f"📊 **Progress to Level {row['level'] + 1}:** {progress:,} / {needed:,} XP (`{pct}%`)\n"
             f"🎁 **Next Unlock:** {next_text}\n"
-            f"🔥 **Activity Streak:** **{row['current_streak']} days** (Best: {row['best_streak']})\n"
             f"📡 **Status:** {dz_status}\n\n"
             f"💬 Messages: `{row['message_xp']:,} XP` · 🔊 Voice: `{row['voice_xp']:,} XP`"
         )
