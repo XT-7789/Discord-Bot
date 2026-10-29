@@ -13,6 +13,57 @@ import xbot_ui
 REGULAR_MUSIC_ROLE_ID = 1505437186219311236
 PREMIUM_MUSIC_ROLE_ID = 1526237128093339848
 
+LEVEL_PERKS = {
+    2: {
+        "name": "Member",
+        "emoji": "👤",
+        "role_id": 1505437941647015986,
+        "perk": "Unlock image & link posting · Auto-removes Guest role",
+    },
+    5: {
+        "name": "Music",
+        "emoji": "🎵",
+        "role_id": 1505437186219311236,
+        "perk": "Full access to Music Bot & Voice lounge music controls",
+    },
+    10: {
+        "name": "Elite",
+        "emoji": "⭐",
+        "role_id": 1522478703819362334,
+        "perk": "Soundboard Master & Server Nickname modification",
+    },
+    20: {
+        "name": "Senior",
+        "emoji": "🏆",
+        "role_id": 1526851111128928307,
+        "perk": "Lounge Host Authority · Expanded party capacity & external emojis",
+    },
+    40: {
+        "name": "Mythic",
+        "emoji": "💗",
+        "role_id": 1526851320118509648,
+        "perk": "⚡ Instant Suite Auto-Approval · Skip admin review for Private Suites",
+    },
+    60: {
+        "name": "Titan",
+        "emoji": "👑",
+        "role_id": 1534198146807234722,
+        "perk": "Hidden VIP Lounge access & exclusive discussion channel",
+    },
+    80: {
+        "name": "Ascendant",
+        "emoji": "🌌",
+        "role_id": 1534198492656959616,
+        "perk": "Priority Speaker · Voice dominance & leading presence",
+    },
+    100: {
+        "name": "Legend",
+        "emoji": "💠",
+        "role_id": 1534198526571970701,
+        "perk": "Server Top Legend · Custom color identity & permanent spotlight",
+    },
+}
+
 DEFAULTS = {
     "xp_enabled": "1", "xp_message_enabled": "1", "xp_message_min": "15", "xp_message_max": "25",
     "xp_message_cooldown": "60", "xp_voice_enabled": "1", "xp_voice_per_minute": "5",
@@ -447,29 +498,27 @@ def register_commands(bot, db, is_council_or_admin=None):
             "SELECT name, emoji FROM xp_rewards WHERE enabled=1 AND level<=? ORDER BY level DESC LIMIT 1",
             (row["level"],),
         ).fetchone()
-        title_text = f"{unlocked['emoji']} {unlocked['name']}" if unlocked else "👤 Novice / Guest"
+        title_text = f"{unlocked['emoji']} {unlocked['name']}" if unlocked else "👤 Novice"
 
-        next_reward = db.execute(
-            "SELECT level, name, emoji FROM xp_rewards WHERE enabled=1 AND level>? ORDER BY level ASC LIMIT 1",
-            (row["level"],),
-        ).fetchone()
-        next_text = f"Level {next_reward['level']} ({next_reward['emoji']} {next_reward['name']})" if next_reward else "Max Level Reached! 👑"
+        # Determine highest milestone perk unlocked
+        active_perks = [info for lvl, info in sorted(LEVEL_PERKS.items()) if row["level"] >= lvl]
+        current_perk_text = f"{active_perks[-1]['emoji']} **{active_perks[-1]['name']}**\n   └ *{active_perks[-1]['perk']}*" if active_perks else "🌱 *Chat & join voice to reach Lv.2 Member*"
 
-        dz_status = "🟢 Active"
-        try:
-            dz_row = db.execute("SELECT is_in_deadzone FROM deadzone_members WHERE user_id=?", (target.id,)).fetchone()
-            if dz_row and dz_row["is_in_deadzone"]:
-                dz_status = "💀 In Deadzone"
-        except sqlite3.OperationalError:
-            pass
+        # Determine next milestone perk
+        next_milestones = [(lvl, info) for lvl, info in sorted(LEVEL_PERKS.items()) if row["level"] < lvl]
+        if next_milestones:
+            next_lvl, next_info = next_milestones[0]
+            next_text = f"**Level {next_lvl} {next_info['emoji']} {next_info['name']}**\n   └ *{next_info['perk']}*"
+        else:
+            next_text = "👑 **Maximum Server Rank Achieved!**"
 
         body = (
             f"⭐ **Current Level:** **Level {row['level']}** ({title_text})\n"
             f"🏆 **Server Rank:** #{server_rank}\n"
             f"📈 **Total EXP:** **{row['total_xp']:,} XP**\n"
-            f"📊 **Progress to Level {row['level'] + 1}:** {progress:,} / {needed:,} XP (`{pct}%`)\n"
-            f"🎁 **Next Unlock:** {next_text}\n"
-            f"📡 **Status:** {dz_status}\n\n"
+            f"📊 **Progress to Level {row['level'] + 1}:** {progress:,} / {needed:,} XP (`{pct}%`)\n\n"
+            f"🎁 **Unlocked Perk:**\n{current_perk_text}\n\n"
+            f"🚀 **Next Milestone:**\n{next_text}\n\n"
             f"💬 Messages: `{row['message_xp']:,} XP` · 🔊 Voice: `{row['voice_xp']:,} XP`"
         )
         await interaction.response.send_message(
@@ -477,19 +526,26 @@ def register_commands(bot, db, is_council_or_admin=None):
         )
 
 
-    @bot.tree.command(name="level_rewards", description="View X BOT level reward roles")
+    @bot.tree.command(name="level_rewards", description="View X BOT level reward roles and perks")
     async def level_rewards(interaction: discord.Interaction):
-        rows = db.execute("SELECT * FROM xp_rewards WHERE enabled=1 ORDER BY level").fetchall()
         lines = []
-        for r in rows:
-            rewards = []
-            if r["role_id"]: rewards.append(f"<@&{r['role_id']}>")
-            if r["item_id"] and r["item_quantity"]: rewards.append(f"{r['item_quantity']}x item #{r['item_id']}")
-            if r["xc"]: rewards.append(f"{r['xc']} XC")
-            if r["war_credits"]: rewards.append(f"{r['war_credits']} War Credits")
-            if r["xcrystals"]: rewards.append(f"{r['xcrystals']} XCrystals")
-            lines.append(f"{r['emoji']} **Level {r['level']} — {r['name']}** · " + (", ".join(rewards) or "No configured payout"))
-        await interaction.response.send_message(view=xbot_ui.panel("🎁 X BOT Level Rewards", "\n".join(lines) or "No level rewards are configured yet.", colour=discord.Color.purple()))
+        for lvl, info in sorted(LEVEL_PERKS.items()):
+            role_mention = f"<@&{info['role_id']}>"
+            lines.append(
+                f"{info['emoji']} **Level {lvl} · {info['name']}** · {role_mention}\n"
+                f"   └ 🎁 **Perk:** *{info['perk']}*"
+            )
+        body = (
+            "Rank up by actively chatting and hanging out in Voice Lounges!\n\n"
+            + "\n\n".join(lines)
+        )
+        embed = discord.Embed(
+            title="👑 X BOT Level Progression & Perks",
+            description=body,
+            colour=discord.Color.purple(),
+        )
+        embed.set_footer(text="X BOT Level System · Perks unlock automatically upon leveling up")
+        await interaction.response.send_message(embed=embed)
 
     @bot.tree.command(name="setlevel", description="Admin: set a member's X BOT activity level")
     @app_commands.default_permissions(administrator=True)

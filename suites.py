@@ -10,7 +10,6 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-import deadzone
 import leveling
 import xbot_ui
 
@@ -110,16 +109,6 @@ async def handle_suite_request_start(interaction: discord.Interaction):
         await interaction.response.send_message("Database unavailable.", ephemeral=True)
         return
 
-    # Check deadzone
-    dz = deadzone.member_status(_db, interaction.user.id)
-    if dz and dz["is_in_deadzone"]:
-        await interaction.response.send_message(
-            "💀 **You are currently in the Deadzone.**\n"
-            "You must thaw out and be rescued by a comrade before requesting a Private Suite.",
-            ephemeral=True,
-        )
-        return
-
     # Level requirement check (Min Level 10)
     prof = leveling.profile(_db, interaction.user.id)
     level = int(prof["level"] if prof else 1)
@@ -211,6 +200,61 @@ class PrivateSuiteRequestModal(discord.ui.Modal):
         senior_level = int(setting(_db, "suite_senior_level") or 20)
         is_senior = self.user_level >= senior_level
 
+        # Check if Level 40+ Mythic member for Instant Auto-Approval
+        MYTHIC_AUTO_LEVEL = 40
+        if self.user_level >= MYTHIC_AUTO_LEVEL and interaction.guild:
+            duration_label = "Permanent (Mythic Lv.40+ VIP Privilege)"
+            expires_at = 0
+            try:
+                bot_user = _bot.user if _bot and _bot.user else interaction.guild.me
+                bot_id = bot_user.id if bot_user else 0
+                text_ch, voice_ch = await provision_suite_channels(
+                    guild=interaction.guild,
+                    applicant=user,
+                    request_id=request_id,
+                    custom_name=custom_name,
+                    duration_label=duration_label,
+                    expires_at=expires_at,
+                    approver_id=bot_id,
+                    approver_mention="⚡ **Mythic VIP Auto-Approval**",
+                    admin_note=f"Instant auto-approval unlocked for Level {self.user_level} Mythic+ member.",
+                )
+
+                if admin_channel:
+                    try:
+                        admin_embed = discord.Embed(
+                            title=f"⚡ [PRIVATE SUITE AUTO-APPROVED · #{request_id}]",
+                            description=(
+                                f"👤 **Host:** {user.mention} (`{user.display_name}` · `{user.id}`)\n"
+                                f"🎖️ **Rank Standing:** 💗 **LEVEL {self.user_level} MYTHIC+ (VIP Instant Approval)**\n\n"
+                                f"🏷️ **Suite Name:** `{custom_name}`\n"
+                                f"📝 **Purpose & Activities:**\n>>> {purpose}\n\n"
+                                f"🔊 **Voice Channel:** {voice_ch.mention}\n"
+                                f"💬 **Text Channel:** {text_ch.mention}\n"
+                                f"⚡ **Status:** Automatically provisioned instantly."
+                            ),
+                            color=0xFF69B4,
+                        )
+                        admin_embed.set_footer(text=f"X BOT · Private Suite System · #{request_id}")
+                        await admin_channel.send(
+                            content=f"⚡ **Mythic Auto-Approval: Private Suite #{request_id} created for {user.mention} (Lv.{self.user_level})!**",
+                            embed=admin_embed,
+                        )
+                    except Exception:
+                        pass
+
+                await interaction.followup.send(
+                    f"🎉 **Mythic VIP Instant Auto-Approval!**\n"
+                    f"Because you are **Level {self.user_level} (Mythic+)**, your Private Suite **\"{custom_name}\"** was approved and created instantly without waiting for admin review!\n\n"
+                    f"💬 **Text Channel:** {text_ch.mention}\n"
+                    f"🔊 **Voice Channel:** {voice_ch.mention}\n\n"
+                    f"Head over to your suite to invite your squad!",
+                    ephemeral=True,
+                )
+                return
+            except Exception as err:
+                print(f"[Suite Auto-Approval Error] {err}")
+
         # Build notification embed for admins
         if is_senior:
             color = 0xF1C40F  # Gold
@@ -301,6 +345,99 @@ class SuiteAdminReviewView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
 
+async def provision_suite_channels(
+    guild: discord.Guild,
+    applicant: discord.Member,
+    request_id: int,
+    custom_name: str,
+    duration_label: str,
+    expires_at: int,
+    approver_id: int,
+    approver_mention: str,
+    admin_note: str = "",
+):
+    global _db
+    now = int(time.time())
+
+    cat_id = int(setting(_db, "suite_category_id") or 1527538020700389498)
+    target_category = guild.get_channel(cat_id) if cat_id else None
+
+    if not target_category:
+        import lounges
+        info = lounges.LOUNGES.get(1)
+        if info:
+            lounge1_ch = guild.get_channel(info["text_id"])
+            if lounge1_ch and lounge1_ch.category:
+                target_category = lounge1_ch.category
+
+    if not target_category:
+        for cat in guild.categories:
+            if "suite" in cat.name.lower():
+                target_category = cat
+                break
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+        applicant: discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            connect=True,
+            speak=True,
+            embed_links=True,
+            attach_files=True,
+        ),
+    }
+
+    clean_name = re.sub(r"[^\w\s-]", "", custom_name).strip() or f"suite-{request_id}"
+
+    voice_ch = await guild.create_voice_channel(
+        name=f"???{clean_name}",
+        category=target_category,
+        overwrites=overwrites,
+        reason=f"X BOT Private Suite for {applicant.display_name}",
+    )
+    text_ch = await guild.create_text_channel(
+        name=f"???{clean_name.lower().replace(' ', '-')}",
+        category=target_category,
+        overwrites=overwrites,
+        reason=f"X BOT Private Suite for {applicant.display_name}",
+    )
+
+    _db.execute(
+        """UPDATE suite_requests
+        SET status='approved', admin_id=?, voice_channel_id=?, text_channel_id=?, duration_str=?, expires_at=?, reviewed_at=?
+        WHERE id=?""",
+        (approver_id, voice_ch.id, text_ch.id, duration_label, expires_at, now, request_id),
+    )
+    _db.commit()
+
+    welcome_embed = discord.Embed(
+        title=f"?? Welcome to your Private Suite: {custom_name}!",
+        description=(
+            f"?? {applicant.mention}, **your Private Suite application has been approved by {approver_mention}!**\n\n"
+            f"??? **Suite Name:** `{custom_name}`\n"
+            f"? **Duration:** `{duration_label}`\n"
+            f"?? **Voice Channel:** {voice_ch.mention}\n"
+            f"?? **Text Channel:** {text_ch.mention}\n"
+            + (f"?? **Note:** {admin_note}\n" if admin_note else "")
+            + "\n????????????????????????\n"
+            f"??? **Suite Host Controls:**\n"
+            f"? Use the buttons below to invite your squadmates or remove members.\n"
+            f"? Only invited members will be granted access to your private suite."
+        ),
+        color=0x2ECC71,
+    )
+    welcome_embed.set_footer(text=f"X BOT ? Private Suite #{request_id}")
+
+    host_view = SuiteHostControlView(request_id)
+    try:
+        await text_ch.send(content=f"{applicant.mention} ?? **Your Private Suite is ready!**", embed=welcome_embed, view=host_view)
+    except Exception:
+        pass
+
+    return text_ch, voice_ch
+
+
 class SuiteApproveModal(discord.ui.Modal):
     """Modal for administrator to specify suite duration and optional notes."""
     def __init__(self, request_id: int):
@@ -330,7 +467,7 @@ class SuiteApproveModal(discord.ui.Modal):
 
         req = _db.execute("SELECT * FROM suite_requests WHERE id=?", (self.request_id,)).fetchone()
         if not req or req["status"] != "pending":
-            await interaction.followup.send("⚠️ This request has already been processed or no longer exists.", ephemeral=True)
+            await interaction.followup.send("?? This request has already been processed or no longer exists.", ephemeral=True)
             return
 
         guild = interaction.guild
@@ -352,26 +489,6 @@ class SuiteApproveModal(discord.ui.Modal):
         else:
             duration_label = "Permanent (Lifetime)"
 
-        # Target category lookup
-        cat_id = int(setting(_db, "suite_category_id") or 1527538020700389498)
-        target_category = guild.get_channel(cat_id) if cat_id else None
-
-        if not target_category:
-            # Fall back to category of Lounge 1 or create dedicated category
-            import lounges
-            info = lounges.LOUNGES.get(1)
-            if info:
-                lounge1_ch = guild.get_channel(info["text_id"])
-                if lounge1_ch and lounge1_ch.category:
-                    target_category = lounge1_ch.category
-
-        if not target_category:
-            # Look for existing category named 'PRIVATE SUITES'
-            for cat in guild.categories:
-                if "suite" in cat.name.lower():
-                    target_category = cat
-                    break
-
         applicant = guild.get_member(req["user_id"])
         if not applicant:
             try:
@@ -380,85 +497,24 @@ class SuiteApproveModal(discord.ui.Modal):
                 pass
 
         if not applicant:
-            await interaction.followup.send("⚠️ Applicant is no longer in the Discord server.", ephemeral=True)
+            await interaction.followup.send("?? Applicant is no longer in the Discord server.", ephemeral=True)
             return
 
-        # Prepare permissions
-        # @everyone: hidden
-        # applicant: view, send, speak, connect
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
-            applicant: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                connect=True,
-                speak=True,
-                embed_links=True,
-                attach_files=True,
-            ),
-            interaction.user: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                connect=True,
-                speak=True,
-                manage_channels=True,
-                manage_messages=True,
-            ),
-        }
-
-        clean_name = re.sub(r"[^\w\s-]", "", req["custom_name"]).strip() or f"suite-{req['id']}"
-
         try:
-            # Create Voice & Text channels
-            voice_ch = await guild.create_voice_channel(
-                name=f"🔊・{clean_name}",
-                category=target_category,
-                overwrites=overwrites,
-                reason=f"X BOT Private Suite approved for {applicant.display_name}",
-            )
-            text_ch = await guild.create_text_channel(
-                name=f"💬・{clean_name.lower().replace(' ', '-')}",
-                category=target_category,
-                overwrites=overwrites,
-                reason=f"X BOT Private Suite approved for {applicant.display_name}",
+            text_ch, voice_ch = await provision_suite_channels(
+                guild=guild,
+                applicant=applicant,
+                request_id=self.request_id,
+                custom_name=req["custom_name"],
+                duration_label=duration_label,
+                expires_at=expires_at,
+                approver_id=interaction.user.id,
+                approver_mention=interaction.user.mention,
+                admin_note=admin_note,
             )
         except discord.HTTPException as err:
-            await interaction.followup.send(f"❌ Failed to create channels: {err}", ephemeral=True)
+            await interaction.followup.send(f"? Failed to create channels: {err}", ephemeral=True)
             return
-
-        # Update Database
-        _db.execute(
-            """UPDATE suite_requests
-            SET status='approved', admin_id=?, voice_channel_id=?, text_channel_id=?, duration_str=?, expires_at=?, reviewed_at=?
-            WHERE id=?""",
-            (interaction.user.id, voice_ch.id, text_ch.id, duration_label, expires_at, now, self.request_id),
-        )
-        _db.commit()
-
-        # Send welcome panel into suite text channel
-        welcome_embed = discord.Embed(
-            title=f"👑 Welcome to your Private Suite: {req['custom_name']}!",
-            description=(
-                f"🎉 {applicant.mention}, **your Private Suite application has been approved by {interaction.user.mention}!**\n\n"
-                f"🏷️ **Suite Name:** `{req['custom_name']}`\n"
-                f"⏳ **Duration:** `{duration_label}`\n"
-                f"🔊 **Voice Channel:** {voice_ch.mention}\n"
-                f"💬 **Text Channel:** {text_ch.mention}\n"
-                + (f"📌 **Admin Note:** {admin_note}\n" if admin_note else "")
-                + "\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🛡️ **Suite Host Controls:**\n"
-                f"• Use the buttons below to invite your squadmates or remove members.\n"
-                f"• Only invited members will be granted access to your private suite."
-            ),
-            color=0x2ECC71,
-        )
-        welcome_embed.set_footer(text=f"X BOT · Private Suite #{self.request_id}")
-
-        host_view = SuiteHostControlView(self.request_id)
-        try:
-            await text_ch.send(content=f"{applicant.mention} 👑 **Your Private Suite is ready!**", embed=welcome_embed, view=host_view)
-        except Exception:
-            pass
 
         # Update the original admin review message
         try:
@@ -467,7 +523,7 @@ class SuiteApproveModal(discord.ui.Modal):
                 updated_embed.color = 0x2ECC71
                 updated_embed.add_field(
                     name="Status",
-                    value=f"✅ **APPROVED** by {interaction.user.mention} (<t:{now}:R>)\n• Voice: {voice_ch.mention}\n• Text: {text_ch.mention}\n• Duration: `{duration_label}`",
+                    value=f"? **APPROVED** by {interaction.user.mention} (<t:{now}:R>)\n? Voice: {voice_ch.mention}\n? Text: {text_ch.mention}\n? Duration: `{duration_label}`",
                     inline=False,
                 )
                 await interaction.message.edit(embed=updated_embed, view=None)
@@ -477,12 +533,12 @@ class SuiteApproveModal(discord.ui.Modal):
         # Notify applicant in DM
         try:
             dm_embed = discord.Embed(
-                title=f"🎉 Private Suite Approved: {req['custom_name']}!",
+                title=f"?? Private Suite Approved: {req['custom_name']}!",
                 description=(
                     f"Great news! Your request for **\"{req['custom_name']}\"** was approved by **{interaction.user.display_name}**.\n\n"
-                    f"• 🔊 **Voice Channel:** {voice_ch.mention}\n"
-                    f"• 💬 **Text Channel:** {text_ch.mention}\n"
-                    f"• ⏳ **Duration:** `{duration_label}`\n\n"
+                    f"? ?? **Voice Channel:** {voice_ch.mention}\n"
+                    f"? ?? **Text Channel:** {text_ch.mention}\n"
+                    f"? ? **Duration:** `{duration_label}`\n\n"
                     f"Head over to your text channel to manage your squad and invite your friends!"
                 ),
                 color=0x2ECC71,
@@ -492,10 +548,10 @@ class SuiteApproveModal(discord.ui.Modal):
             pass
 
         await interaction.followup.send(
-            f"✅ **Private Suite #{self.request_id} Approved!**\n"
-            f"• Channels Created: {text_ch.mention} & {voice_ch.mention}\n"
-            f"• Host: {applicant.mention}\n"
-            f"• Duration: `{duration_label}`",
+            f"? **Private Suite #{self.request_id} Approved!**\n"
+            f"? Channels Created: {text_ch.mention} & {voice_ch.mention}\n"
+            f"? Host: {applicant.mention}\n"
+            f"? Duration: `{duration_label}`",
             ephemeral=True,
         )
 
@@ -656,12 +712,6 @@ class SuiteMemberSelectView(discord.ui.View):
         vc = guild.get_channel(suite["voice_channel_id"])
 
         if self.mode == "invite":
-            # Check deadzone
-            dz = deadzone.member_status(_db, target.id)
-            if dz and dz["is_in_deadzone"]:
-                await interaction.response.send_message("💀 That member is in the Deadzone and cannot be invited.", ephemeral=True)
-                return
-
             overwrite = discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
