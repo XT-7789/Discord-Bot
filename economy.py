@@ -1072,7 +1072,7 @@ def register_commands(bot, db, create_player) -> None:
         elif effect in ("xp_boost_1h", "xp_boost_2h"):
             notice = "[Info] XP Boost: Chat bonus activation will be available in the upcoming update."
         elif effect == "vip_lounge":
-            notice = "[Info] VIP Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
+            notice = "[Info] X Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
         elif effect == "server_megaphone":
             notice = "[Info] Server Megaphone: Server-wide broadcast will be available in the upcoming update."
         elif effect == "red_packet":
@@ -1199,7 +1199,7 @@ def register_commands(bot, db, create_player) -> None:
             elif effect in ("xp_boost_1h", "xp_boost_2h"):
                 notice = "[Info] XP Boost: Chat bonus activation will be available in the upcoming update."
             elif effect == "vip_lounge":
-                notice = "[Info] VIP Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
+                notice = "[Info] X Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
             elif effect == "server_megaphone":
                 notice = "[Info] Server Megaphone: Server-wide broadcast will be available in the upcoming update."
             elif effect == "red_packet":

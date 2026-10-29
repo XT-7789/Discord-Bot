@@ -807,7 +807,7 @@ class LoungeHostControlView(discord.ui.View):
         is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
         has_vip_pass = False
         if not is_admin:
-            vip_item = _db.execute("SELECT id FROM items WHERE (name='VIP Lounge Pass' OR effect='vip_lounge')").fetchone()
+            vip_item = _db.execute("SELECT id FROM items WHERE (name='X Lounge Pass' OR name='VIP Lounge Pass' OR effect='vip_lounge')").fetchone()
             if vip_item:
                 owned = _db.execute("SELECT quantity FROM inventories WHERE user_id=? AND item_id=? AND quantity>0", (interaction.user.id, vip_item["id"])).fetchone()
                 has_vip_pass = bool(owned)
@@ -817,7 +817,7 @@ class LoungeHostControlView(discord.ui.View):
         if not has_unlimited_extension and (new_expiry - reserved_at) > max_duration:
             await interaction.response.send_message(
                 f"[Limit Reached] Standard session limit is {max_duration // 60} minutes (5 Hours).\n"
-                f"-# Administrators and VIP Lounge Pass holders enjoy unlimited extensions.",
+                f"-# Administrators and X Lounge Pass holders enjoy unlimited extensions.",
                 ephemeral=True,
             )
             return

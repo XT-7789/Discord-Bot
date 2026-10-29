@@ -22,12 +22,13 @@ def migrate(db_path="xwar.db"):
     c.execute("UPDATE items SET name = 'Xustom Tag Voucher' WHERE name = 'Custom Tag Voucher'")
     c.execute("UPDATE items SET name = 'XP Boost (1h)', price = 5000, effect = 'xp_boost_1h', effect_value = 60, description = 'Grants 1 hour of 1.5x XP bonus for chatting and participating in server activities.' WHERE name = 'XP Boost (2h)'")
     c.execute("UPDATE items SET name = 'Premium Music Pass (7 Days)' WHERE name = 'Premium Music Pass'")
+    c.execute("UPDATE items SET name = 'X Lounge Pass' WHERE name = 'VIP Lounge Pass'")
 
     # 1. Disable all items not in the approved 5 items list
     active_names = (
         'Xustom Tag Voucher',
         'XP Boost (1h)',
-        'VIP Lounge Pass',
+        'X Lounge Pass',
         'Cash Red Packet',
         'Premium Music Pass (7 Days)'
     )
@@ -76,7 +77,7 @@ def migrate(db_path="xwar.db"):
             "emoji": ""
         },
         {
-            "name": "VIP Lounge Pass",
+            "name": "X Lounge Pass",
             "description": "Create a private VIP Suite lounge with custom limits, bitrate, and management tools.",
             "category": "Perks",
             "category_id": 6824,
@@ -90,7 +91,7 @@ def migrate(db_path="xwar.db"):
             "shop_visible": 1,
             "sellable": 0,
             "tradeable": 0,
-            "aliases": "vip_lounge,lounge_pass",
+            "aliases": "VIP Lounge Pass,vip_lounge,lounge_pass,x_lounge",
             "emoji": ""
         },
         {
