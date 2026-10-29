@@ -19,8 +19,8 @@ def migrate(db_path="xwar.db"):
         )
     """)
 
-    # If old 'Custom Tag' exists, rename to avoid collision or update it
-    c.execute("UPDATE items SET name = 'Legacy Custom Tag', enabled = 0, shop_visible = 0 WHERE name = 'Custom Tag'")
+    # If old 'Custom Tag' exists, rename to avoid collision or delete if legacy already exists
+    c.execute("DELETE FROM items WHERE name = 'Custom Tag'")
 
     # 2. Seed / Update the 6 new core social/utility perk items
     new_items = [
