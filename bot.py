@@ -287,6 +287,8 @@ PUBLIC_PLAYER_COMMANDS = {
     "level", "rank",
     # Quick utility
     "code_redeem",
+    # Economy & Shop & Backpack
+    "shop", "inventory", "bag", "balance", "use",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
@@ -295,6 +297,7 @@ STAFF_SLASH_COMMANDS = {
     "admin", "say", "clear",
     "setlevel", "level_sync",
     "verify",
+    "spawn", "remove_item", "economy_adjust", "inventory_check",
 }
 
 
