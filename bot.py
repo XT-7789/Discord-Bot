@@ -12,24 +12,24 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 import economy
-import casino
+# [FROZEN] import casino
 import xbot_ui
-import war_system
-import war_tier
+# [FROZEN] import war_system
+# [FROZEN] import war_tier
 import economy_extra
 import advanced_systems
 import leveling
 import applications
 import staff_panel
 import tester_feedback
-import tier4
-import tier5
-import tier6
-import tier7
-import tier8
+# [FROZEN] import tier4
+# [FROZEN] import tier5
+# [FROZEN] import tier6
+# [FROZEN] import tier7
+# [FROZEN] import tier8
 import system_ui
-import casual_games
-import deadzone
+# [FROZEN] import casual_games
+# [FROZEN] import deadzone
 import gaming
 import lounges
 import suites
@@ -129,21 +129,21 @@ CREATE TABLE IF NOT EXISTS wars (
 db.commit()
 
 economy.initialise(db)
-casino.initialise(db)
-war_system.initialise(db)
-war_tier.initialise(db)
+# [FROZEN] casino.initialise(db)
+# [FROZEN] war_system.initialise(db)
+# [FROZEN] war_tier.initialise(db)
 economy_extra.initialise(db)
 advanced_systems.initialise(db)
 leveling.initialise(db)
 applications.initialise(db)
 tester_feedback.initialise(db)
-tier4.initialise(db)
-tier5.initialise(db)
-tier6.initialise(db)
-tier7.initialise(db)
-tier8.initialise(db)
-casual_games.initialise(db)
-deadzone.initialise(db)
+# [FROZEN] tier4.initialise(db)
+# [FROZEN] tier5.initialise(db)
+# [FROZEN] tier6.initialise(db)
+# [FROZEN] tier7.initialise(db)
+# [FROZEN] tier8.initialise(db)
+# [FROZEN] casual_games.initialise(db)
+# [FROZEN] deadzone.initialise(db)
 gaming.initialise(db)
 lounges.initialise(db)
 autoclear.initialise(db)
@@ -264,7 +264,7 @@ def get_active_war():
 
 
 def alliance_power(alliance_id: int):
-    return war_system.alliance_total_power(db, alliance_id)
+    return 0
 
 
 def is_server_admin(interaction: discord.Interaction):
@@ -282,34 +282,21 @@ STAFF_COMMAND_KWARGS = {"guild": discord.Object(id=_staff_guild_id)} if _staff_g
 # Public player catalogue.  All other player actions stay available through
 # the Lobby panels, without filling Discord's slash-command picker.
 PUBLIC_PLAYER_COMMANDS = {
-    # Main panels: short, memorable direct access for ordinary players.
-    "menu", "overview", "profile", "economy", "shop", "backpack", "market", "mining", "stock",
-    "warfront", "city", "army", "recruit", "diplomacy", "casino", "craft", "research",
-    # Fast actions that are still useful without opening a panel first.
-    "collect", "mine", "sell_item", "map_detail", "map", "claim_land",
-    "attack", "balance", "code_redeem", "daily", "deadzone",
-    "level", "rank",
-    # Direct slash commands restored for convenient fast access without menu-clicking fatigue.
-    "exchange", "pay", "bank", "leaderboard",
-    "coinflip", "blackjack", "slot", "dice", "roulette", "scratch",
     # Gaming Zone & LFG squad recruitment
     "gaming", "lfg",
     # Dynamic 5 Lounges reservation and management
     "lounge",
+    # Activity Level & Rank
+    "level", "rank",
+    # Quick utility
+    "code_redeem",
 }
 
 # These commands are deliberately retained for Administration / Moderators.
 # Their own permission checks and Dashboard Command Access rules still apply.
 STAFF_SLASH_COMMANDS = {
     "admin", "say", "clear",
-    # Kept temporarily until the second Staff Centre migration. These tools
-    # must not disappear before their button-driven replacements are ready.
-    "inrole", "role", "spawn", "remove_item", "economy_adjust",
-    "inventory_check", "lottery_draw", "setlevel", "server_settings",
-    "forces_check",
-    "level",
-    "deadzone_restore", "deadzone_scan", "deadzone_send", "level_sync",
-    "war_start", "war_end",
+    "setlevel", "level_sync",
     "verify",
 }
 
@@ -448,7 +435,7 @@ class XBot(discord.Client):
     async def setup_hook(self):
         applications.setup_persistent_views(self, db)
         tester_feedback.setup_persistent_views(self, db)
-        self.add_view(deadzone.DeadzoneReviveView())
+        # [FROZEN] self.add_view(deadzone.DeadzoneReviveView())
         self.add_view(gaming.GameRolesView())
         self.add_view(gaming.NewUserOnboardingView())
         self.add_view(lounges.LoungeLobbyView())
@@ -520,10 +507,10 @@ class XBot(discord.Client):
             await self.tree.sync()
             report_sync(None, global_hidden)
             restore_panel_commands(None, global_hidden)
-        casino.start_vip_cleanup_task(self, db)
+        # [FROZEN] casino.start_vip_cleanup_task(self, db)
         leveling.start_voice_task(self, db)
-        tier4.start_backup_task(self, db)
-        deadzone.start_deadzone_task(self, db)
+        # [FROZEN] tier4.start_backup_task(self, db)
+        # [FROZEN] deadzone.start_deadzone_task(self, db)
 
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type == discord.InteractionType.component and interaction.data:
@@ -765,7 +752,8 @@ async def on_ready():
     lounges.start_lounge_loop(bot, db)
     autoclear.start_autoclear_loop(bot, db)
     try:
-        await deadzone.update_crypt_board(bot, db)
+        pass
+        # [FROZEN] await deadzone.update_crypt_board(bot, db)
     except Exception:
         pass
     # Startup audit: remove regular Music role from members who have Premium Music
@@ -818,7 +806,7 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     await leveling.handle_message(bot, db, message)
-    await deadzone.handle_message(bot, db, message)
+    # [FROZEN] await deadzone.handle_message(bot, db, message)
     await autoclear.handle_message(bot, db, message)
     await run_xb_prefix(message)
 
@@ -828,7 +816,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     if member.bot:
         return
     if after.channel is not None:
-        deadzone.touch_activity(db, member.id)
+        pass
+        # [FROZEN] deadzone.touch_activity(db, member.id)
     await lounges.handle_voice_state_update(bot, db, member, before, after)
 
 
@@ -1033,11 +1022,9 @@ async def show_service_branch(interaction: discord.Interaction, player: Optional
         "Active" if data["capital_health"] > 0 else "Conquered"
     )
 
-    unit_rows = [unit for unit in war_system.units_for_player(db, selected_player.id, enabled_only=True)
-                 if unit["branch"] in branches and int(unit["quantity"]) > 0]
-    branch_power = sum(unit["quantity"] * unit["power"] for unit in unit_rows)
-    branch = next(iter(branches)) if len(branches) == 1 else "land"
-    service_title = war_tier.service_names(db, selected_player.id).get(branch, title)
+    unit_rows = []
+    branch_power = 0
+    service_title = title
     view = discord.ui.LayoutView(timeout=180)
     container = discord.ui.Container(accent_color=colour)
     container.add_item(discord.ui.TextDisplay(
@@ -1127,17 +1114,17 @@ async def capital(interaction: discord.Interaction, name: Optional[str] = None):
 # The old fixed mine commands are intentionally retired. A later beta will add
 # configurable Wabbit-style pickaxes and weighted material drops.
 economy.register_commands(bot, db, create_player)
-casino.register_commands(bot, db, create_player)
+# [FROZEN] casino.register_commands(bot, db, create_player)
 economy_extra.register_commands(bot, db, create_player, economy.find_item)
-war_tier.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
-tier4.register_commands(bot, db, create_player)
-tier5.register_commands(bot, db, create_player)
-tier6.register_commands(bot, db, create_player)
+# [FROZEN] war_tier.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
+# [FROZEN] tier4.register_commands(bot, db, create_player)
+# [FROZEN] tier5.register_commands(bot, db, create_player)
+# [FROZEN] tier6.register_commands(bot, db, create_player)
 advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db, is_council_or_admin)
 applications.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 staff_panel.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
-deadzone.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
+# [FROZEN] deadzone.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 # X Community has retired the old company/job economy.  Keep the historical
 # database tables for old logs, but do not publish these commands any more.
@@ -1361,7 +1348,7 @@ async def war_end(
 
 # ---------- War ----------
 
-@bot.tree.command(name="attack", description="Attack another Nation")
+# [FROZEN] attack command\n# @bot.tree.command(name="attack", description="Attack another Nation")\nasync def _frozen_attack(interaction, target):\n    await interaction.response.send_message("⚔️ War Mode has been frozen.", ephemeral=True)\n    return\nasync def _old_attack_disabled
 @app_commands.describe(target="Choose a player to attack")
 async def attack(interaction: discord.Interaction, target: discord.Member):
     if target.bot:
@@ -1686,9 +1673,9 @@ async def attack(interaction: discord.Interaction, target: discord.Member):
 # Tier 7 replaces the legacy /warfront and /attack registrations above after every
 # dependency and panel builder exists.  It keeps the same two command names,
 # so Discord's command catalogue does not grow.
-tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
-tier8.register_commands(bot, db, create_player)
-casual_games.register(bot, db, create_player)
+# [FROZEN] tier7.register_commands(bot, db, create_player, get_active_war, get_alliance_for_user)
+# [FROZEN] tier8.register_commands(bot, db, create_player)
+# [FROZEN] casual_games.register(bot, db, create_player)
 system_ui.register(bot, db, create_player)
 gaming.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
