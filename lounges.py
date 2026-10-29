@@ -140,7 +140,7 @@ def get_lounge_by_channel(db, channel_id: int):
 # ---------- Discord Channel Overwrite / Permission Logic ----------
 
 async def apply_lounge_permissions(guild: discord.Guild, lounge_id: int, host_member: discord.Member, privacy: str, invited_ids: list):
-    """Set up permissions for text and voice channels based on host and privacy mode."""
+    """Set up permissions for text and voice channels in parallel single-call operations."""
     info = LOUNGES.get(lounge_id)
     if not info or not guild:
         return
@@ -148,65 +148,48 @@ async def apply_lounge_permissions(guild: discord.Guild, lounge_id: int, host_me
     text_ch = guild.get_channel(info["text_id"])
     vc_ch = guild.get_channel(info["vc_id"])
 
-    # 1. Base overwrite for @everyone
     if privacy == "private":
-        # Private: hidden/locked from public
         text_everyone = discord.PermissionOverwrite(view_channel=False, send_messages=False, read_message_history=False)
         vc_everyone = discord.PermissionOverwrite(view_channel=False, connect=False, speak=False)
     else:
-        # Public: open to all server members
         text_everyone = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         vc_everyone = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
 
-    if text_ch:
-        try:
-            await text_ch.set_permissions(guild.default_role, overwrite=text_everyone)
-            # Host full access
-            await text_ch.set_permissions(
-                host_member,
-                overwrite=discord.PermissionOverwrite(
-                    view_channel=True, send_messages=True, embed_links=True,
-                    attach_files=True, read_message_history=True, mention_everyone=False
-                ),
-            )
-            # Invited members access
-            for uid in invited_ids:
-                m = guild.get_member(uid)
-                if m:
-                    await text_ch.set_permissions(
-                        m,
-                        overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-                    )
-        except discord.HTTPException:
-            pass
+    text_overwrites = {
+        guild.default_role: text_everyone,
+        host_member: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, embed_links=True,
+            attach_files=True, read_message_history=True, mention_everyone=False
+        ),
+    }
+    vc_overwrites = {
+        guild.default_role: vc_everyone,
+        host_member: discord.PermissionOverwrite(
+            view_channel=True, connect=True, speak=True,
+            stream=True, use_voice_activation=True, move_members=True
+        ),
+    }
 
+    for uid in invited_ids:
+        m = guild.get_member(uid)
+        if m:
+            text_overwrites[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+            vc_overwrites[m] = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True, stream=True, use_voice_activation=True)
+
+    tasks_to_run = []
+    if text_ch:
+        tasks_to_run.append(text_ch.edit(overwrites=text_overwrites))
     if vc_ch:
+        tasks_to_run.append(vc_ch.edit(overwrites=vc_overwrites))
+    if tasks_to_run:
         try:
-            await vc_ch.set_permissions(guild.default_role, overwrite=vc_everyone)
-            # Host full access
-            await vc_ch.set_permissions(
-                host_member,
-                overwrite=discord.PermissionOverwrite(
-                    view_channel=True, connect=True, speak=True,
-                    stream=True, use_voice_activation=True, move_members=True
-                ),
-            )
-            # Invited members access
-            for uid in invited_ids:
-                m = guild.get_member(uid)
-                if m:
-                    await vc_ch.set_permissions(
-                        m,
-                        overwrite=discord.PermissionOverwrite(
-                            view_channel=True, connect=True, speak=True, stream=True, use_voice_activation=True
-                        ),
-                    )
-        except discord.HTTPException:
+            await asyncio.gather(*tasks_to_run, return_exceptions=True)
+        except Exception:
             pass
 
 
 async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
-    """Reset text and VC permissions to standard default (available to everyone)."""
+    """Reset text and VC permissions to hidden idle state in parallel single-call operations."""
     info = LOUNGES.get(lounge_id)
     if not info or not guild:
         return
@@ -214,30 +197,22 @@ async def reset_lounge_permissions(guild: discord.Guild, lounge_id: int):
     text_ch = guild.get_channel(info["text_id"])
     vc_ch = guild.get_channel(info["vc_id"])
 
-    if text_ch:
-        try:
-            for target in list(text_ch.overwrites.keys()):
-                if isinstance(target, (discord.Member, discord.User)):
-                    await text_ch.set_permissions(target, overwrite=None)
-            # Idle state (no active booking): completely hidden from everyone until booked by a host
-            await text_ch.set_permissions(
-                guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=False, send_messages=False, read_message_history=False),
-            )
-        except discord.HTTPException:
-            pass
+    text_idle = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False, send_messages=False, read_message_history=False)
+    }
+    vc_idle = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False, speak=False)
+    }
 
+    tasks_to_run = []
+    if text_ch:
+        tasks_to_run.append(text_ch.edit(overwrites=text_idle))
     if vc_ch:
+        tasks_to_run.append(vc_ch.edit(overwrites=vc_idle))
+    if tasks_to_run:
         try:
-            for target in list(vc_ch.overwrites.keys()):
-                if isinstance(target, (discord.Member, discord.User)):
-                    await vc_ch.set_permissions(target, overwrite=None)
-            # Idle state (no active booking): completely hidden from everyone until booked by a host
-            await vc_ch.set_permissions(
-                guild.default_role,
-                overwrite=discord.PermissionOverwrite(view_channel=False, connect=False, speak=False),
-            )
-        except discord.HTTPException:
+            await asyncio.gather(*tasks_to_run, return_exceptions=True)
+        except Exception:
             pass
 
 
@@ -305,10 +280,10 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
                     for s in sorted(session_rewards.values(), key=lambda x: x["cash"], reverse=True)
                 ]
                 summary_embed = discord.Embed(
-                    title="📊 [LOUNGE SESSION VOICE SETTLEMENT]",
+                    title="[LOUNGE SESSION VOICE SETTLEMENT]",
                     description=(
-                        f"🎙️ **Session Earnings Summary:**\n"
-                        f"💰 **Total Cash: +${total_cash:,}** · 💎 **Total XC: +{total_xc:,}** · ⭐ **Total XP: +{total_xp:,}**\n\n"
+                        f"**Session Earnings Summary:**\n"
+                        f"**Total Cash: +${total_cash:,}** · **Total XC: +{total_xc:,}** · **Total XP: +{total_xp:,}**\n\n"
                         f"**Participant Breakdown:**\n" + "\n".join(breakdown[:15]) +
                         f"\n\n-# All rewards have been deposited directly into participants' accounts."
                     ),
@@ -321,13 +296,13 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
                     pass
 
             embed = discord.Embed(
-                title=f"🟢 [{info['name'].upper()} IS NOW OPEN]",
+                title=f"[{info['name'].upper()} IS NOW OPEN]",
                 description=(
-                    f"✨ **This lounge has been thoroughly sanitized and reopened!**\n\n"
-                    f"🛋️ **How to Reserve:**\n"
-                    f"• Visit the Lounge Lobby panel, or run `/lounge menu`\n"
+                    f"**This lounge has been reset and reopened.**\n\n"
+                    f"**How to Reserve:**\n"
+                    f"• Visit the Lounge Lobby panel, or run `/lounge`\n"
                     f"• Choose your session duration and privacy setting\n"
-                    f"• Invite your friends and squadmates for private chats & voice sessions!\n\n"
+                    f"• Invite members for voice & squad sessions\n\n"
                     f"-# Reset reason: `{reason}`"
                 ),
                 color=0x2ECC71,
@@ -346,7 +321,7 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
 # ---------- Lounge UI Views & Embeds ----------
 
 def build_lobby_embed(db):
-    """Build the public real-time Lounge Lobby status board."""
+    """Build the public real-time Lounge Lobby status board without emojis."""
     lounges_list = get_all_lounges(db)
     now = int(time.time())
 
@@ -364,52 +339,49 @@ def build_lobby_embed(db):
             rem = max(0, l["expires_at"] - now)
             mins = rem // 60
             host_text = f"<@{l['host_user_id']}>"
-            priv_badge = "🔒 Private" if l["privacy"] == "private" else "🌐 Public"
+            priv_badge = "Private" if l["privacy"] == "private" else "Public"
 
-            # Check if currently empty / pending auto-clean
             empty_info = ""
             if lid in _lounge_empty_since:
                 empty_timeout = int(setting(db, "lounge_empty_timeout_seconds") or 90)
                 reset_time = _lounge_empty_since[lid] + empty_timeout
-                empty_info = f"\n   ⚠️ *VC Empty — auto-resetting <t:{reset_time}:R>*"
+                empty_info = f"\n   *VC Empty - resetting <t:{reset_time}:R>*"
 
             lines.append(
-                f"🔴 **{name}** · **Occupied** by {host_text} ({priv_badge})\n"
-                f"   ⏳ Remaining: `{mins} mins` (<t:{l['expires_at']}:R>)\n"
-                f"   Channels: <#{text_id}> · <#{vc_id}>{empty_info}"
+                f"**{name}** · Occupied by {host_text} ({priv_badge})\n"
+                f"   Remaining: `{mins} mins` (<t:{l['expires_at']}:R>)\n"
+                f"   Channels: <#{text_id}> | <#{vc_id}>{empty_info}"
             )
         else:
             available_count += 1
             lines.append(
-                f"🟢 **{name}** · **Available**\n"
-                f"   ✨ Ready for reservation · <#{text_id}> · <#{vc_id}>"
+                f"**{name}** · Available\n"
+                f"   Ready for booking · <#{text_id}> | <#{vc_id}>"
             )
 
     desc = (
-        f"### 🛋️ Welcome to Server Lounges & Suites\n"
-        f"Reserve an instant private lounge for squad gaming and study sessions, or apply for an exclusive long-term Private Suite.\n\n"
-        f"📊 **Live Status:** `{available_count}/5 Lounges Free`\n\n"
+        f"### Lounge Lobby\n"
+        f"Reserve a temporary lounge for squad gaming or group sessions.\n\n"
+        f"**Live Status:** `{available_count}/5 Lounges Available`\n\n"
         + "\n\n".join(lines)
         + "\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"### 📜 Booking Rules & Access\n"
-        f"> 🛡️ **Eligibility:** Requires <@&1505437941647015986> (`Level 2+` or verified Member)\n"
-        f"> ⏱️ **Duration:** Initial 30m ~ 3h booking · Extendable up to 5h max\n"
-        f"> 🔒 **Host Controls:** Whitelist friends, kick trolls, toggle Private/Public & call Squads\n"
-        f"> 🧹 **Auto-Clean:** Bot automatically clears chat, disconnects VC & resets permissions on expiry\n\n"
-        f"### 🎁 Voice Perks & Activity Rewards\n"
-        f"> 💰 **Voice Rewards:** Active chatters in VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
-        f"> 🧊 **Cryo-Thaw:** Deadzone sleepers defrost **+1** every 3 minutes in Lounge VC!\n\n"
-        f"### 👑 Exclusive Private Suites (Level 10+)\n"
-        f"> Want a permanent, custom-named sanctuary? Level 10+ Elite members can click **[👑 Request Private Suite]** below to apply to Server Administration!"
+        f"### Information & Rules\n"
+        f"• **Eligibility:** Requires Member role (<@&1505437941647015986>, Level 2+)\n"
+        f"• **Duration:** 30 minutes to 3 hours initial booking (extendable up to 5h max)\n"
+        f"• **Host Controls:** Whitelist friends, kick members, toggle Private/Public, extend time\n"
+        f"• **Auto-Clean:** Messages are wiped and permissions reset when session concludes\n"
+        f"• **Voice XP:** Earn XP and rewards while chatting in voice lounges\n\n"
+        f"### Private Suites (Level 10+)\n"
+        f"Level 10+ members can apply for an exclusive long-term Private Suite below."
     )
 
     embed = discord.Embed(
-        title="🛋️ [X BOT SERVER LOUNGES · RESERVATION LOBBY]",
+        title="[LOUNGE RESERVATION LOBBY]",
         description=desc,
-        color=0x5865F2 if available_count > 0 else 0xE74C3C,
+        color=0x2B2D31 if available_count == 0 else 0x5865F2,
     )
-    embed.set_footer(text="X BOT · Select an action button below to proceed")
+    embed.set_footer(text="X BOT · Select an action below")
     return embed
 
 
@@ -438,7 +410,7 @@ async def refresh_lobby_message(bot: discord.Client, db, guild: discord.Guild = 
 
 
 def build_host_control_embed(lounge_data: dict):
-    """Build the host control panel embed inside the lounge text channel."""
+    """Build the host control panel embed inside the lounge text channel without emojis."""
     name = lounge_data["name"]
     expires_at = lounge_data["expires_at"]
     privacy = lounge_data["privacy"]
@@ -449,119 +421,106 @@ def build_host_control_embed(lounge_data: dict):
     except Exception:
         invited = []
 
-    invited_mentions = ", ".join(f"<@{uid}>" for uid in invited) if invited else "*None yet (use Invite button below)*"
-    priv_display = "🔒 **Private** (Only Host & Invited members can view/join)" if privacy == "private" else "🌐 **Public** (Open to all server members)"
+    invited_mentions = ", ".join(f"<@{uid}>" for uid in invited) if invited else "*None (use Invite Member below)*"
+    priv_display = "**Private** (Host & invited members only)" if privacy == "private" else "**Public** (Open to all members)"
 
     embed = discord.Embed(
-        title=f"👑 [{name.upper()} HOST CONTROL HUB]",
+        title=f"[{name.upper()} HOST CONTROL PANEL]",
         description=(
-            f"Welcome to your private lounge, <@{host_id}>!\n\n"
-            f"⏳ **Session Expiry:** <t:{expires_at}:R> (<t:{expires_at}:t>)\n"
-            f"🛡️ **Privacy Status:** {priv_display}\n"
-            f"👥 **Invited Members:** {invited_mentions}\n\n"
+            f"Host: <@{host_id}>\n\n"
+            f"• **Session Expiry:** <t:{expires_at}:R> (<t:{expires_at}:t>)\n"
+            f"• **Privacy Mode:** {priv_display}\n"
+            f"• **Invited Members:** {invited_mentions}\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎮 **Host Management Actions:**\n"
-            f"• **➕ Invite Member:** Grant instant Text & VC access + send invitation DM\n"
-            f"• **👢 Kick Member:** Revoke access and disconnect from VC immediately\n"
-            f"• **🔒 Toggle Privacy:** Switch between Private and Public on the fly\n"
-            f"• **⏱️ Extend (+30m):** Add extra time (up to max limit)\n"
-            f"• **🚪 End Session:** Wrap up early to clean chat and release the room\n\n"
-            f"-# ⚠️ When time expires, text chat is automatically purged and VC members disconnected."
+            f"Host Actions:\n"
+            f"• **Invite Member:** Grant text and voice access to a member\n"
+            f"• **Kick Member:** Revoke access and disconnect from voice\n"
+            f"• **Toggle Privacy:** Switch between Private and Public mode\n"
+            f"• **Extend (+30m):** Add additional time to session\n"
+            f"• **End Session:** Conclude session and reset room immediately\n"
+            f"• **Ping Squad:** Send a squad recruitment notification\n\n"
+            f"-# When time expires, chat is automatically wiped and voice disconnected."
         ),
-        color=0x9B59B6,
+        color=0x5865F2,
     )
-    embed.set_footer(text="X BOT · Lounge Host Hub · Session Active")
+    embed.set_footer(text="X BOT · Host Control Panel")
     return embed
 
 
 # ---------- Interactive UI Views ----------
 
 class LoungeLobbyView(discord.ui.View):
-    """Persistent public view for the Lounge Lobby."""
+    """Persistent public view for the Lounge Lobby without emojis."""
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Request Lounge (1~3h)", emoji="🛎️", style=discord.ButtonStyle.primary, row=0, custom_id="lounge_lobby_request")
+    @discord.ui.button(label="Request Lounge (1-3h)", style=discord.ButtonStyle.primary, row=0, custom_id="lounge_lobby_request")
     async def request_lounge_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         if not _db:
-            await interaction.response.send_message("Database unavailable. Please try again shortly.", ephemeral=True)
+            await interaction.response.send_message("[Error] Database unavailable. Please try again shortly.", ephemeral=True)
             return
 
-        # Check Member role requirement
         val = setting(_db, "verification_member_role_id")
         member_role_id = int(val) if val and val.isdigit() and int(val) > 0 else 1505437941647015986
         user_roles = getattr(interaction.user, "roles", [])
         is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
         has_member = any(r.id == member_role_id for r in user_roles) or is_admin
 
-        # Check Deadzone stasis
-        dz_status = deadzone.member_status(_db, interaction.user.id)
-        if dz_status and dz_status["is_in_deadzone"]:
-            await interaction.response.send_message(
-                "💀 **Access Denied:** You are currently trapped in cryogenic stasis in the **Deadzone**!\n"
-                "You must thaw out and have a comrade rescue you back to life before requesting a private lounge.",
-                ephemeral=True,
-            )
-            return
-
         if not has_member:
             await interaction.response.send_message(
-                f"🔒 **Member Role Required:**\n"
-                f"You need the <@&{member_role_id}> role (Level 2+ or verified Member) to request a Lounge!\n"
-                f"Please verify or participate in chat to unlock Lounge booking.",
+                f"[Restricted] You need the <@&{member_role_id}> role (Level 2+ or verified Member) to request a Lounge.\n"
+                f"Please participate in chat to reach Level 2 and unlock Lounge booking.",
                 ephemeral=True,
             )
             return
 
-        # Check if user already hosts a lounge
         active = get_active_lounge_by_host(_db, interaction.user.id)
         if active:
             info = LOUNGES.get(active["lounge_id"], {})
             await interaction.response.send_message(
-                f"⚠️ You are already hosting **{active['name']}**!\n"
+                f"[Notice] You are already hosting **{active['name']}**.\n"
                 f"Go to your active lounge: <#{info.get('text_id')}>\n"
                 f"You can only host one lounge at a time.",
                 ephemeral=True,
             )
             return
 
-        # Check for free lounges
         all_l = get_all_lounges(_db)
         free_lounges = [l for l in all_l if l["status"] == "available"]
         if not free_lounges:
             await interaction.response.send_message(
-                "❌ **All 5 Lounges are currently occupied!**\n"
-                "Please check back shortly or check the remaining timers in the Lobby board.",
+                "[Occupied] All 5 Lounges are currently occupied.\n"
+                "Please check back shortly or check remaining timers in the Lobby board.",
                 ephemeral=True,
             )
             return
 
         view = LoungeBookingSelectView(free_lounges)
-        await interaction.response.send_message("🛋️ **Select your Lounge & Booking Details:**", view=view, ephemeral=True)
+        await interaction.response.send_message("**Select your Lounge & Booking Details:**", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Request Private Suite (Lv.10+)", emoji="👑", style=discord.ButtonStyle.success, row=0, custom_id="lounge_lobby_request_suite")
+    @discord.ui.button(label="Request Private Suite (Lv.10+)", style=discord.ButtonStyle.success, row=0, custom_id="lounge_lobby_request_suite")
     async def request_suite_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         import suites
         await suites.handle_suite_request_start(interaction)
 
-    @discord.ui.button(label="My Active Lounge", emoji="📋", style=discord.ButtonStyle.secondary, row=1, custom_id="lounge_lobby_mystatus")
+    @discord.ui.button(label="My Active Lounge", style=discord.ButtonStyle.secondary, row=1, custom_id="lounge_lobby_mystatus")
     async def my_status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         if not _db:
-            await interaction.response.send_message("Database unavailable.", ephemeral=True)
+            await interaction.response.send_message("[Error] Database unavailable.", ephemeral=True)
             return
 
         active = get_active_lounge_by_host(_db, interaction.user.id)
         if not active:
-            await interaction.response.send_message("ℹ️ You do not currently host an active lounge.", ephemeral=True)
+            await interaction.response.send_message("[Info] You do not currently host an active lounge.", ephemeral=True)
             return
 
         now = int(time.time())
         rem = max(0, active["expires_at"] - now) // 60
         info = LOUNGES.get(active["lounge_id"], {})
         await interaction.response.send_message(
-            f"👑 **Your Active Reservation:**\n"
+            f"**Your Active Reservation:**\n"
             f"• Lounge: **{active['name']}**\n"
             f"• Time Remaining: `{rem} mins` (<t:{active['expires_at']}:R>)\n"
             f"• Text Channel: <#{info.get('text_id')}>\n"
@@ -569,11 +528,11 @@ class LoungeLobbyView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="Refresh Lobby", emoji="🔄", style=discord.ButtonStyle.secondary, row=1, custom_id="lounge_lobby_refresh")
+    @discord.ui.button(label="Refresh Lobby", style=discord.ButtonStyle.secondary, row=1, custom_id="lounge_lobby_refresh")
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         if not _db:
-            await interaction.response.send_message("Database unavailable.", ephemeral=True)
+            await interaction.response.send_message("[Error] Database unavailable.", ephemeral=True)
             return
 
         embed = build_lobby_embed(_db)
@@ -581,7 +540,7 @@ class LoungeLobbyView(discord.ui.View):
 
 
 class LoungeBookingSelectView(discord.ui.View):
-    """View presenting lounge selection and duration options to the requester."""
+    """View presenting lounge selection and duration options without emojis."""
     def __init__(self, free_lounges):
         super().__init__(timeout=120)
         self.free_lounges = free_lounges
@@ -591,13 +550,12 @@ class LoungeBookingSelectView(discord.ui.View):
                 label=l["name"],
                 value=str(l["lounge_id"]),
                 description=f"Reserve {l['name']} for your squad",
-                emoji="🛋️",
             )
             for l in free_lounges
         ]
 
         self.select_lounge = discord.ui.Select(
-            placeholder="Step 1: Choose an available Lounge…",
+            placeholder="Step 1: Choose an available Lounge...",
             options=options,
             row=0,
         )
@@ -609,13 +567,13 @@ class LoungeBookingSelectView(discord.ui.View):
         self.chosen_privacy = "private"
 
         duration_options = [
-            discord.SelectOption(label="30 Minutes", value="30", emoji="⚡"),
-            discord.SelectOption(label="1 Hour", value="60", emoji="⏱️"),
-            discord.SelectOption(label="2 Hours", value="120", emoji="⏳"),
-            discord.SelectOption(label="3 Hours (Recommended Initial Max)", value="180", default=True, emoji="🕒"),
+            discord.SelectOption(label="30 Minutes", value="30"),
+            discord.SelectOption(label="1 Hour", value="60"),
+            discord.SelectOption(label="2 Hours", value="120"),
+            discord.SelectOption(label="3 Hours (Recommended Initial Max)", value="180", default=True),
         ]
         self.select_duration = discord.ui.Select(
-            placeholder="Step 2: Choose session duration…",
+            placeholder="Step 2: Choose session duration...",
             options=duration_options,
             row=1,
         )
@@ -623,11 +581,11 @@ class LoungeBookingSelectView(discord.ui.View):
         self.add_item(self.select_duration)
 
         privacy_options = [
-            discord.SelectOption(label="Private (Host + Invited Only)", value="private", default=True, emoji="🔒"),
-            discord.SelectOption(label="Public (Open to All Members)", value="public", emoji="🌐"),
+            discord.SelectOption(label="Private (Host + Invited Only)", value="private", default=True),
+            discord.SelectOption(label="Public (Open to All Members)", value="public"),
         ]
         self.select_privacy = discord.ui.Select(
-            placeholder="Step 3: Choose privacy mode…",
+            placeholder="Step 3: Choose privacy mode...",
             options=privacy_options,
             row=2,
         )
@@ -637,7 +595,6 @@ class LoungeBookingSelectView(discord.ui.View):
         self.confirm_btn = discord.ui.Button(
             label="Confirm & Reserve Lounge",
             style=discord.ButtonStyle.success,
-            emoji="✅",
             row=3,
         )
         self.confirm_btn.callback = self.on_confirm
@@ -661,23 +618,21 @@ class LoungeBookingSelectView(discord.ui.View):
             await interaction.response.defer(ephemeral=True)
 
         if not _db:
-            await interaction.followup.send("Database error.", ephemeral=True)
+            await interaction.followup.send("[Error] Database unavailable.", ephemeral=True)
             return
 
-        # Double check Member role
         val = setting(_db, "verification_member_role_id")
         member_role_id = int(val) if val and val.isdigit() and int(val) > 0 else 1505437941647015986
         user_roles = getattr(interaction.user, "roles", [])
         is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
         if not is_admin and not any(r.id == member_role_id for r in user_roles):
-            await interaction.followup.send("🔒 You need the Member role to reserve a lounge.", ephemeral=True)
+            await interaction.followup.send("[Restricted] You need the Member role to reserve a lounge.", ephemeral=True)
             return
 
-        # Double check if lounge is still free
         current = get_lounge_row(_db, self.chosen_lounge_id)
         if not current or current["status"] != "available":
             await interaction.followup.send(
-                "⚠️ This lounge was just reserved by someone else! Please pick another.",
+                "[Unavailable] This lounge was just reserved by someone else. Please pick another.",
                 ephemeral=True,
             )
             return
@@ -685,7 +640,7 @@ class LoungeBookingSelectView(discord.ui.View):
         now = int(time.time())
         expires_at = now + (self.chosen_duration * 60)
 
-        # Reserve in database
+        # 1. Update database state immediately
         _db.execute(
             """UPDATE server_lounges
             SET status='occupied', host_user_id=?, host_name=?, privacy=?,
@@ -695,89 +650,78 @@ class LoungeBookingSelectView(discord.ui.View):
         )
         _db.commit()
 
-        # Apply channel permissions
-        guild = interaction.guild
         info = LOUNGES[self.chosen_lounge_id]
-        if guild:
-            await apply_lounge_permissions(guild, self.chosen_lounge_id, interaction.user, self.chosen_privacy, [])
+        guild = interaction.guild
 
-            # Post Host Control Panel in the lounge text channel
-            tc = guild.get_channel(info["text_id"])
-            if tc:
-                try:
-                    for p in await tc.pins():
-                        try:
-                            await p.unpin()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                try:
-                    await tc.purge(limit=100)
-                except Exception:
-                    pass
-
-                lounge_data = get_lounge_row(_db, self.chosen_lounge_id)
-                embed = build_host_control_embed(lounge_data)
-                view = LoungeHostControlView()
-                try:
-                    ctrl_msg = await tc.send(
-                        content=f"🎉 {interaction.user.mention} **Your lounge session has begun!**",
-                        embed=embed,
-                        view=view,
-                    )
-                    try:
-                        await ctrl_msg.pin(reason="Lounge Host Control Panel")
-                    except Exception:
-                        pass
-                    _db.execute("UPDATE server_lounges SET control_message_id=? WHERE lounge_id=?", (ctrl_msg.id, self.chosen_lounge_id))
-                    _db.commit()
-                except Exception:
-                    pass
-
-        # Update lobby board
-        await refresh_lobby_message(_bot, _db, guild)
-
+        # 2. Reply instantly to user (Zero delay)
         await interaction.followup.send(
-            f"🎉 **{info['name']} reserved successfully!**\n"
-            f"• Mode: **{self.chosen_privacy.title()}**\n"
-            f"• Duration: **{self.chosen_duration} minutes** (Expires <t:{expires_at}:R>)\n"
-            f"• Enter your lounge: <#{info['text_id']}> (VC: <#{info['vc_id']}>)\n"
-            f"Check the pinned host panel in the text chat to invite members!",
+            f"**{info['name']} reserved successfully.**\n"
+            f"• Mode: {self.chosen_privacy.title()}\n"
+            f"• Duration: {self.chosen_duration} minutes (Expires <t:{expires_at}:R>)\n"
+            f"• Text Channel: <#{info['text_id']}>\n"
+            f"• Voice Channel: <#{info['vc_id']}>\n"
+            f"Check the host control panel in your lounge text chat to invite members.",
             ephemeral=True,
         )
 
+        # 3. Setup channels and refresh lobby in background
+        async def _async_setup():
+            if guild:
+                await apply_lounge_permissions(guild, self.chosen_lounge_id, interaction.user, self.chosen_privacy, [])
+                tc = guild.get_channel(info["text_id"])
+                if tc:
+                    try:
+                        await tc.purge(limit=100)
+                    except Exception:
+                        pass
+                    lounge_data = get_lounge_row(_db, self.chosen_lounge_id)
+                    embed = build_host_control_embed(lounge_data)
+                    view = LoungeHostControlView()
+                    try:
+                        ctrl_msg = await tc.send(
+                            content=f"{interaction.user.mention} **Your lounge session has started.**",
+                            embed=embed,
+                            view=view,
+                        )
+                        _db.execute("UPDATE server_lounges SET control_message_id=? WHERE lounge_id=?", (ctrl_msg.id, self.chosen_lounge_id))
+                        _db.commit()
+                    except Exception:
+                        pass
+            await refresh_lobby_message(_bot, _db, guild)
+
+        asyncio.create_task(_async_setup())
+
 
 class LoungeHostControlView(discord.ui.View):
-    """Persistent control hub posted in the lounge text chat for the Host."""
+    """Persistent control hub posted in the lounge text chat for the Host without emojis."""
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Invite Member", emoji="➕", style=discord.ButtonStyle.primary, custom_id="lounge_host_invite")
+    @discord.ui.button(label="Invite Member", style=discord.ButtonStyle.primary, custom_id="lounge_host_invite")
     async def invite_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         lounge = get_lounge_by_channel(_db, interaction.channel_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("❌ This lounge is not currently active.", ephemeral=True)
+            await interaction.response.send_message("[Error] This lounge is not currently active.", ephemeral=True)
             return
 
         if interaction.user.id != lounge["host_user_id"] and not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("🔒 Only the Lounge Host can invite members.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only the Lounge Host can invite members.", ephemeral=True)
             return
 
         view = LoungeMemberSelectView(lounge["lounge_id"], action="invite")
         await interaction.response.send_message("Select a member to invite to your Lounge:", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Kick Member", emoji="👢", style=discord.ButtonStyle.secondary, custom_id="lounge_host_kick")
+    @discord.ui.button(label="Kick Member", style=discord.ButtonStyle.secondary, custom_id="lounge_host_kick")
     async def kick_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         lounge = get_lounge_by_channel(_db, interaction.channel_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("❌ This lounge is not currently active.", ephemeral=True)
+            await interaction.response.send_message("[Error] This lounge is not currently active.", ephemeral=True)
             return
 
         if interaction.user.id != lounge["host_user_id"] and not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("🔒 Only the Lounge Host can kick members.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only the Lounge Host can kick members.", ephemeral=True)
             return
 
         try:
@@ -786,22 +730,22 @@ class LoungeHostControlView(discord.ui.View):
             invited = []
 
         if not invited:
-            await interaction.response.send_message("ℹ️ You have not invited any members yet.", ephemeral=True)
+            await interaction.response.send_message("[Info] You have not invited any members yet.", ephemeral=True)
             return
 
         view = LoungeMemberSelectView(lounge["lounge_id"], action="kick", invited_ids=invited)
         await interaction.response.send_message("Select a member to remove from your Lounge:", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Toggle Privacy", emoji="🔒", style=discord.ButtonStyle.secondary, custom_id="lounge_host_toggle")
+    @discord.ui.button(label="Toggle Privacy", style=discord.ButtonStyle.secondary, custom_id="lounge_host_toggle")
     async def toggle_privacy_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _bot, _db
         lounge = get_lounge_by_channel(_db, interaction.channel_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("❌ This lounge is not currently active.", ephemeral=True)
+            await interaction.response.send_message("[Error] This lounge is not currently active.", ephemeral=True)
             return
 
         if interaction.user.id != lounge["host_user_id"] and not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("🔒 Only the Lounge Host can toggle privacy.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only the Lounge Host can toggle privacy.", ephemeral=True)
             return
 
         new_privacy = "public" if lounge["privacy"] == "private" else "private"
@@ -813,30 +757,32 @@ class LoungeHostControlView(discord.ui.View):
         except Exception:
             invited = []
 
-        # Update host panel embed immediately to acknowledge interaction
+        # Update host panel embed immediately
         updated_lounge = get_lounge_row(_db, lounge["lounge_id"])
         embed = build_host_control_embed(updated_lounge)
         await interaction.response.edit_message(embed=embed, view=self)
 
-        if interaction.guild:
-            await apply_lounge_permissions(interaction.guild, lounge["lounge_id"], interaction.user, new_privacy, invited)
+        async def _bg_privacy():
+            if interaction.guild:
+                await apply_lounge_permissions(interaction.guild, lounge["lounge_id"], interaction.user, new_privacy, invited)
+            await refresh_lobby_message(_bot, _db, interaction.guild)
 
-        await refresh_lobby_message(_bot, _db, interaction.guild)
+        asyncio.create_task(_bg_privacy())
         await interaction.followup.send(
-            f"🛡️ Privacy mode switched to **{new_privacy.upper()}**!",
+            f"Privacy mode updated to **{new_privacy.upper()}**.",
             ephemeral=True,
         )
 
-    @discord.ui.button(label="Extend (+30m)", emoji="⏱️", style=discord.ButtonStyle.secondary, custom_id="lounge_host_extend")
+    @discord.ui.button(label="Extend (+30m)", style=discord.ButtonStyle.secondary, custom_id="lounge_host_extend")
     async def extend_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _bot, _db
         lounge = get_lounge_by_channel(_db, interaction.channel_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("❌ This lounge is not currently active.", ephemeral=True)
+            await interaction.response.send_message("[Error] This lounge is not currently active.", ephemeral=True)
             return
 
         if interaction.user.id != lounge["host_user_id"] and not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("🔒 Only the Lounge Host can extend the session.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only the Lounge Host can extend the session.", ephemeral=True)
             return
 
         max_duration = int(setting(_db, "lounge_max_duration_mins") or 300) * 60
@@ -844,7 +790,6 @@ class LoungeHostControlView(discord.ui.View):
         current_expiry = lounge["expires_at"]
         new_expiry = current_expiry + 1800  # +30 minutes
 
-        # Check if user has unlimited extension bypass (Administrator or VIP Lounge Pass owner)
         is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
         has_vip_pass = False
         if not is_admin:
@@ -857,8 +802,8 @@ class LoungeHostControlView(discord.ui.View):
 
         if not has_unlimited_extension and (new_expiry - reserved_at) > max_duration:
             await interaction.response.send_message(
-                f"⚠️ Cannot extend further! Standard session limit is **{max_duration // 60} minutes (5 Hours)**.\n"
-                f"-# 💡 Server Administrators and members holding a **VIP Lounge Pass** enjoy unlimited extensions!",
+                f"[Limit Reached] Standard session limit is {max_duration // 60} minutes (5 Hours).\n"
+                f"-# Administrators and VIP Lounge Pass holders enjoy unlimited extensions.",
                 ephemeral=True,
             )
             return
@@ -870,53 +815,53 @@ class LoungeHostControlView(discord.ui.View):
         embed = build_host_control_embed(updated_lounge)
         await interaction.response.edit_message(embed=embed, view=self)
 
-        await refresh_lobby_message(_bot, _db, interaction.guild)
+        asyncio.create_task(refresh_lobby_message(_bot, _db, interaction.guild))
         total_mins = (new_expiry - reserved_at) // 60
-        vip_tag = " [👑 Unlimited VIP/Admin Extension]" if has_unlimited_extension else " (Standard Max: 5 Hours)"
+        vip_tag = " [Unlimited Extension]" if has_unlimited_extension else " (Standard Max: 5 Hours)"
         await interaction.followup.send(
-            f"⏳ **Session extended by +30 minutes!**\n"
-            f"• Current Total Session: **{total_mins} mins**{vip_tag}\n"
+            f"**Session extended by +30 minutes.**\n"
+            f"• Current Total Session: {total_mins} mins{vip_tag}\n"
             f"• New Expiry: <t:{new_expiry}:R> (<t:{new_expiry}:t>)",
             ephemeral=True,
         )
 
-    @discord.ui.button(label="End Session & Clean", emoji="🚪", style=discord.ButtonStyle.danger, custom_id="lounge_host_end")
+    @discord.ui.button(label="End Session & Clean", style=discord.ButtonStyle.danger, custom_id="lounge_host_end")
     async def end_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _bot, _db
         lounge = get_lounge_by_channel(_db, interaction.channel_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("❌ This lounge is not currently active.", ephemeral=True)
+            await interaction.response.send_message("[Error] This lounge is not currently active.", ephemeral=True)
             return
 
         if interaction.user.id != lounge["host_user_id"] and not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("🔒 Only the Lounge Host or an Admin can end this session.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only the Lounge Host or an Admin can end this session.", ephemeral=True)
             return
 
-        await interaction.response.send_message("🧹 **Ending session and initiating auto-clean...**", ephemeral=True)
-        await clear_and_reopen_lounge(_bot, _db, interaction.guild, lounge["lounge_id"], reason=f"Ended early by host {interaction.user.display_name}")
+        await interaction.response.send_message("[Session Ended] Resetting room and clearing channels...", ephemeral=True)
+        asyncio.create_task(clear_and_reopen_lounge(_bot, _db, interaction.guild, lounge["lounge_id"], reason=f"Ended early by host {interaction.user.display_name}"))
 
-    @discord.ui.button(label="Ping Squad (LFG)", emoji="📢", style=discord.ButtonStyle.primary, custom_id="lounge_host_squad_ping", row=2)
+    @discord.ui.button(label="Ping Squad (LFG)", style=discord.ButtonStyle.primary, custom_id="lounge_host_squad_ping", row=2)
     async def ping_squad_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         global _db
         lounge = get_lounge_by_channel(_db, interaction.channel_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("❌ This lounge is not currently active.", ephemeral=True)
+            await interaction.response.send_message("[Error] This lounge is not currently active.", ephemeral=True)
             return
 
         is_admin = getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.administrator
         if interaction.user.id != lounge["host_user_id"] and not is_admin:
-            await interaction.response.send_message("🔒 Only the Lounge Host or an Admin can ping a squad.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only the Lounge Host or an Admin can ping a squad.", ephemeral=True)
             return
 
         now = int(time.time())
         last_ping = _squad_ping_cooldowns.get(lounge["lounge_id"], 0)
         if now - last_ping < 300:
             rem = 300 - (now - last_ping)
-            await interaction.response.send_message(f"⏳ Squad ping is on cooldown! You can broadcast again in **{rem}s**.", ephemeral=True)
+            await interaction.response.send_message(f"[Cooldown] Squad ping is on cooldown. You can broadcast again in {rem}s.", ephemeral=True)
             return
 
         view = LoungeSquadPingSelectView(lounge["lounge_id"])
-        await interaction.response.send_message("📢 **Select Game Squad to Rally:**", view=view, ephemeral=True)
+        await interaction.response.send_message("**Select Game Squad to Rally:**", view=view, ephemeral=True)
 
 
 class LoungeSquadPingSelectView(discord.ui.View):
@@ -926,10 +871,10 @@ class LoungeSquadPingSelectView(discord.ui.View):
         self.lounge_id = lounge_id
 
         options = [
-            discord.SelectOption(label="Steam Squad", value="steam", emoji="🎮", description="Broadcast to Steam gamers"),
-            discord.SelectOption(label="Roblox Squad", value="roblox", emoji="🟥", description="Broadcast to Roblox gamers"),
-            discord.SelectOption(label="Mobile Squad", value="mobile", emoji="📱", description="Broadcast to Mobile gamers"),
-            discord.SelectOption(label="General Squad", value="general", emoji="👥", description="Broadcast general community LFG"),
+            discord.SelectOption(label="Steam Squad", value="steam", description="Broadcast to Steam gamers"),
+            discord.SelectOption(label="Roblox Squad", value="roblox", description="Broadcast to Roblox gamers"),
+            discord.SelectOption(label="Mobile Squad", value="mobile", description="Broadcast to Mobile gamers"),
+            discord.SelectOption(label="General Squad", value="general", description="Broadcast general community LFG"),
         ]
 
         self.select_cat = discord.ui.Select(
@@ -977,7 +922,7 @@ class LoungeSquadPingModal(discord.ui.Modal):
 
         lounge = get_lounge_row(_db, self.lounge_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.followup.send("❌ This lounge is no longer active.", ephemeral=True)
+            await interaction.followup.send("[Notice] This lounge is no longer active.", ephemeral=True)
             return
 
         _squad_ping_cooldowns[self.lounge_id] = int(time.time())
@@ -1010,31 +955,30 @@ class LoungeSquadPingModal(discord.ui.Modal):
             color_val = 0x5865F2
 
         if not target_channel:
-            notif_id = int(setting(_db, "deadzone_notification_channel_id") or 0)
-            target_channel = guild.get_channel(notif_id) or interaction.channel
+            target_channel = interaction.channel
 
         privacy = lounge.get("privacy", "private")
-        priv_badge = "🔒 Private Lounge (Click Jump In to enter!)" if privacy == "private" else "🌐 Public Lounge (Open to All)"
+        priv_badge = "Private Lounge (Click Jump In to enter)" if privacy == "private" else "Public Lounge (Open to All)"
 
         host_profile = _db.execute("SELECT * FROM game_profiles WHERE user_id=?", (interaction.user.id,)).fetchone()
         host_handle_line = ""
         if host_profile:
             if self.category == "steam" and host_profile["steam_id"]:
-                host_handle_line = f"\n🎮 **Host Steam Code:** `{host_profile['steam_id']}`"
+                host_handle_line = f"\n**Host Steam Code:** `{host_profile['steam_id']}`"
             elif self.category == "roblox" and host_profile["roblox_name"]:
-                host_handle_line = f"\n🟥 **Host Roblox User:** `{host_profile['roblox_name']}`"
+                host_handle_line = f"\n**Host Roblox User:** `{host_profile['roblox_name']}`"
 
         embed = discord.Embed(
-            title=f"🎮 [SQUAD RALLY · {cat_label.upper()}]",
+            title=f"[SQUAD RALLY · {cat_label.upper()}]",
             description=(
-                f"📢 {interaction.user.mention} **is rallying a squad in {lounge['name']}!**\n\n"
-                f"🎯 **Game / Activity:** {self.activity_input.value}\n"
-                f"👥 **Spots Open:** `{self.slots_input.value}`\n"
-                f"🔊 **Voice Channel:** <#{info['vc_id']}>\n"
-                f"🛡️ **Access:** {priv_badge}"
+                f"{interaction.user.mention} **is rallying a squad in {lounge['name']}!**\n\n"
+                f"• **Game / Activity:** {self.activity_input.value}\n"
+                f"• **Spots Open:** `{self.slots_input.value}`\n"
+                f"• **Voice Channel:** <#{info['vc_id']}>\n"
+                f"• **Access:** {priv_badge}"
                 f"{host_handle_line}\n\n"
-                f"🎁 **Voice Perks:** Active chatters in Lounge VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
-                f"📦 **Supply Drop:** 30+ min squad sessions earn a **Gamer Supply Drop** (+$10,000 Cash, +25 XC, +50 XP)!"
+                f"• **Voice Perks:** Active chatters in Lounge VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
+                f"• **Supply Drop:** 30+ min squad sessions earn a **Gamer Supply Drop** (+$10,000 Cash, +25 XC, +50 XP)!"
             ),
             color=color_val,
         )
@@ -1042,10 +986,10 @@ class LoungeSquadPingModal(discord.ui.Modal):
 
         join_view = LoungeSquadJoinView(self.lounge_id)
         try:
-            await target_channel.send(content=f"{role_mention}🚨 **Squad Rally in {lounge['name']}!**", embed=embed, view=join_view)
-            await interaction.followup.send(f"✅ **Squad rally broadcasted in {target_channel.mention}!** Members can click to join your lounge.", ephemeral=True)
+            await target_channel.send(content=f"{role_mention}**Squad Rally in {lounge['name']}!**", embed=embed, view=join_view)
+            await interaction.followup.send(f"[Success] Squad rally broadcasted in {target_channel.mention}! Members can click to join your lounge.", ephemeral=True)
         except discord.HTTPException as err:
-            await interaction.followup.send(f"⚠️ Failed to post rally in {target_channel.mention}: {err}", ephemeral=True)
+            await interaction.followup.send(f"[Error] Failed to post rally in {target_channel.mention}: {err}", ephemeral=True)
 
 
 class LoungeSquadJoinView(discord.ui.View):
@@ -1055,7 +999,6 @@ class LoungeSquadJoinView(discord.ui.View):
         self.lounge_id = int(lounge_id)
         button = discord.ui.Button(
             label="Jump In / Join Squad",
-            emoji="🚀",
             style=discord.ButtonStyle.success,
             custom_id=f"xbot:lounge:joinsquad:{self.lounge_id}",
         )
@@ -1065,23 +1008,17 @@ class LoungeSquadJoinView(discord.ui.View):
     async def on_join(self, interaction: discord.Interaction):
         global _bot, _db
         if not _db:
-            await interaction.response.send_message("Database unavailable.", ephemeral=True)
+            await interaction.response.send_message("[Error] Database unavailable.", ephemeral=True)
             return
 
         lounge = get_lounge_row(_db, self.lounge_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.response.send_message("⚠️ This lounge session has ended or is no longer occupied.", ephemeral=True)
-            return
-
-        # Check deadzone
-        dz_status = deadzone.member_status(_db, interaction.user.id)
-        if dz_status and dz_status["is_in_deadzone"]:
-            await interaction.response.send_message("💀 You are currently in the Deadzone. Please thaw and revive to join squads.", ephemeral=True)
+            await interaction.response.send_message("[Notice] This lounge session has ended or is no longer occupied.", ephemeral=True)
             return
 
         info = LOUNGES.get(self.lounge_id)
         if not info:
-            await interaction.response.send_message("Lounge configuration error.", ephemeral=True)
+            await interaction.response.send_message("[Error] Lounge configuration error.", ephemeral=True)
             return
 
         guild = interaction.guild
@@ -1115,14 +1052,14 @@ class LoungeSquadJoinView(discord.ui.View):
                 # Notify lounge text chat
                 if tc:
                     try:
-                        await tc.send(f"👋 {user.mention} **joined the squad from the LFG rally!** Welcome them in!")
+                        await tc.send(f"{user.mention} **joined the squad from the LFG rally!** Welcome them in!")
                     except Exception:
                         pass
 
         await interaction.response.send_message(
-            f"🎉 **Welcome to the squad!** You now have access to **{lounge['name']}**.\n"
-            f"• 🔊 Voice Channel: <#{info['vc_id']}>\n"
-            f"• 💬 Text Channel: <#{info['text_id']}>",
+            f"**Welcome to the squad!** You now have access to **{lounge['name']}**.\n"
+            f"• Voice Channel: <#{info['vc_id']}>\n"
+            f"• Text Channel: <#{info['text_id']}>",
             ephemeral=True,
         )
 
@@ -1151,7 +1088,7 @@ class LoungeMemberSelectView(discord.ui.View):
         target = self.user_select.values[0]
         lounge = get_lounge_row(_db, self.lounge_id)
         if not lounge or lounge["status"] != "occupied":
-            await interaction.followup.send("❌ Lounge is no longer active.", ephemeral=True)
+            await interaction.followup.send("[Notice] Lounge is no longer active.", ephemeral=True)
             return
 
         try:
@@ -1166,10 +1103,10 @@ class LoungeMemberSelectView(discord.ui.View):
 
         if self.action == "invite":
             if target.id == interaction.user.id:
-                await interaction.followup.send("❌ You are already the host!", ephemeral=True)
+                await interaction.followup.send("[Notice] You are already the host!", ephemeral=True)
                 return
             if target.id in invited:
-                await interaction.followup.send(f"⚠️ {target.mention} is already invited.", ephemeral=True)
+                await interaction.followup.send(f"[Notice] {target.mention} is already invited.", ephemeral=True)
                 return
 
             invited.append(target.id)
@@ -1191,14 +1128,14 @@ class LoungeMemberSelectView(discord.ui.View):
             # Notify in text channel
             if tc:
                 try:
-                    await tc.send(f"👋 {target.mention} was invited to the Lounge by {interaction.user.mention}!")
+                    await tc.send(f"{target.mention} was invited to the Lounge by {interaction.user.mention}!")
                 except Exception:
                     pass
 
             # Send friendly DM to target
             try:
                 await target.send(
-                    f"💌 **Lounge Invitation!**\n"
+                    f"[Lounge Invitation]\n"
                     f"{interaction.user.mention} has invited you to **{info['name']}** in **{guild.name}**!\n"
                     f"• Text: <#{info['text_id']}>\n"
                     f"• Voice: <#{info['vc_id']}>"
@@ -1206,7 +1143,7 @@ class LoungeMemberSelectView(discord.ui.View):
             except Exception:
                 pass
 
-            await interaction.followup.send(f"✅ Successfully invited {target.mention} to **{info['name']}**!", ephemeral=True)
+            await interaction.followup.send(f"[Success] Successfully invited {target.mention} to **{info['name']}**!", ephemeral=True)
 
         elif self.action == "kick":
             if target.id in invited:
@@ -1229,7 +1166,7 @@ class LoungeMemberSelectView(discord.ui.View):
                 except Exception:
                     pass
 
-            await interaction.followup.send(f"👢 Removed {target.mention} from **{info['name']}**.", ephemeral=True)
+            await interaction.followup.send(f"[Success] Removed {target.mention} from **{info['name']}**.", ephemeral=True)
 
         # Update host panel embed in text channel
         if tc and lounge.get("control_message_id"):
@@ -1256,31 +1193,7 @@ async def lounge_check_loop():
 
     now = int(time.time())
 
-    # Auto-cleanup settlement embeds older than 10 minutes (even across bot restarts)
-    for lid, info in LOUNGES.items():
-        tc_id = info.get("text_id")
-        tc = _bot.get_channel(tc_id) if _bot else None
-        if not tc and _bot:
-            try:
-                tc = await _bot.fetch_channel(tc_id)
-            except Exception:
-                pass
-        if not tc:
-            continue
-        try:
-            async for msg in tc.history(limit=10):
-                if getattr(msg, "author", None) == _bot.user and msg.embeds:
-                    for emb in msg.embeds:
-                        if emb.title and "LOUNGE SESSION VOICE SETTLEMENT" in emb.title:
-                            msg_age = now - int(msg.created_at.timestamp())
-                            if msg_age >= 600:
-                                try:
-                                    await msg.delete()
-                                except Exception:
-                                    pass
-        except Exception:
-            pass
-
+    # Periodic check for active lounge warnings and expiry
     active_lounges = _db.execute("SELECT * FROM server_lounges WHERE status='occupied'").fetchall()
 
     for row in active_lounges:
@@ -1315,7 +1228,7 @@ async def lounge_check_loop():
                 tc = guild.get_channel(info["text_id"])
                 if tc:
                     try:
-                        await tc.send(f"⚠️ **1-Minute Final Warning:** Wrapping up! In 60 seconds, members will be disconnected, chat purged, and the lounge reopened.")
+                        await tc.send(f"[Warning] Wrapping up! In 60 seconds, members will be disconnected, chat purged, and the lounge reopened.")
                     except Exception:
                         pass
 
@@ -1350,7 +1263,7 @@ async def lounge_check_loop():
                         try:
                             empty_limit_time = now + max(0, empty_timeout - empty_elapsed)
                             await tc.send(
-                                f"⚠️ **Empty Lounge Alert:** No members detected in the voice channel!\n"
+                                f"[Alert] No members detected in the voice channel!\n"
                                 f"This lounge will automatically reset and reopen <t:{empty_limit_time}:R> if nobody rejoins."
                             )
                         except Exception:
@@ -1370,7 +1283,7 @@ async def lounge_check_loop():
                         tc = guild.get_channel(info["text_id"])
                         if tc:
                             try:
-                                await tc.send("🟢 **Activity Restored:** Members detected in the lounge. Auto-cleanup cancelled.")
+                                await tc.send("[Notice] Members detected in the lounge. Auto-cleanup cancelled.")
                             except Exception:
                                 pass
                 _lounge_empty_warned.pop(lid, None)
@@ -1398,38 +1311,7 @@ async def lounge_check_loop():
             _user_vc_duration[uid] = _user_vc_duration.get(uid, 0) + 30
             _user_dz_thaw_seconds[uid] = _user_dz_thaw_seconds.get(uid, 0) + 30
 
-            # Keep active in deadzone activity tracker so VC chatter is never marked inactive
-            deadzone.touch_activity(_db, uid)
-
-            # 1. Deadzone VC Thaw: Every 3 minutes (180s) in Lounge VC melts +1 cryo-stasis seal
-            status = deadzone.member_status(_db, uid)
-            if status and status["is_in_deadzone"]:
-                if _user_dz_thaw_seconds[uid] >= 180:
-                    _user_dz_thaw_seconds[uid] = 0
-                    current_thaw = status["thaw_count"] if "thaw_count" in status.keys() else 0
-                    if current_thaw < 5:
-                        new_thaw = current_thaw + 1
-                        _db.execute("UPDATE deadzone_members SET thaw_count=? WHERE user_id=?", (new_thaw, uid))
-                        _db.commit()
-                        if tc:
-                            try:
-                                if new_thaw == 5:
-                                    embed = discord.Embed(
-                                        title="🧊 [CRYO-THAW COMPLETE (5/5)]",
-                                        description=(
-                                            f"🎉 {member.mention} **has fully melted their cryo-stasis seal in {vc.mention}!**\n\n"
-                                            f"🤝 **Next Step (Condition 2):** An active comrade can now run:\n"
-                                            f"`/deadzone rescue member:{member.mention}`\n\n"
-                                            f"*(Rescuers receive **+$50,000 Cash, +250 XC & +150 XP** for pulling you out of the crypt!)*"
-                                        ),
-                                        color=0x3498DB,
-                                    )
-                                    embed.set_footer(text="X BOT · Deadzone Division · Lounge Voice Protocol")
-                                    await tc.send(embed=embed)
-                            except Exception:
-                                pass
-
-            # 2. Lounge Voice Activity Rewards: Every 5 minutes (300s) of active voice chat
+            # Lounge Voice Activity Rewards: Every 5 minutes (300s) of active voice chat
             if _user_vc_duration[uid] >= 300:
                 _user_vc_duration[uid] = 0
                 leveling._ensure_economy_player(_db, member)
@@ -1478,13 +1360,13 @@ async def lounge_check_loop():
                     try:
                         pings = " ".join(sm.mention for sm in human_members)
                         squad_embed = discord.Embed(
-                            title="📦 [GAMER SUPPLY DROP DELIVERED!]",
+                            title="[GAMER SUPPLY DROP DELIVERED]",
                             description=(
-                                f"🎖️ **Outstanding Squadwork!** The squad in **{info['name']}** has maintained active voice chat for **30+ minutes**!\n\n"
-                                f"🎁 **Supply Drop Rewarded to Active Squadmates:**\n"
-                                f"• 💵 **+$10,000 Cash**\n"
-                                f"• 🪙 **+25 XC**\n"
-                                f"• ⭐ **+50 XP**\n\n"
+                                f"**Outstanding Squadwork!** The squad in **{info['name']}** has maintained active voice chat for **30+ minutes**!\n\n"
+                                f"**Supply Drop Rewarded to Active Squadmates:**\n"
+                                f"• **+$10,000 Cash**\n"
+                                f"• **+25 XC**\n"
+                                f"• **+50 XP**\n\n"
                                 f"Squadmates rewarded: {pings}\n"
                                 f"-# Keep gaming and voice chatting together for more supply drops!"
                             ),
@@ -1524,7 +1406,7 @@ async def handle_voice_state_update(bot: discord.Client, db, member: discord.Mem
                         if tc:
                             try:
                                 await tc.send(
-                                    f"⚠️ **Empty Lounge Alert:** Everyone has left the voice channel!\n"
+                                    f"[Alert] Everyone has left the voice channel!\n"
                                     f"This lounge will automatically reset and reopen <t:{now + empty_timeout}:R> if nobody rejoins."
                                 )
                             except Exception:
@@ -1539,7 +1421,7 @@ async def handle_voice_state_update(bot: discord.Client, db, member: discord.Mem
                 tc = bot.get_channel(LOUNGES[lid]["text_id"])
                 if tc:
                     try:
-                        await tc.send(f"🟢 {member.mention} **rejoined the voice channel!** Auto-cleanup cancelled.")
+                        await tc.send(f"[Notice] {member.mention} rejoined the voice channel. Auto-cleanup cancelled.")
                     except Exception:
                         pass
 
@@ -1579,7 +1461,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
     @app_commands.describe(channel="Channel where the Lounge Lobby panel will live (optional: defaults to here)")
     async def lounge_post_lobby(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
         if not is_council_or_admin(interaction):
-            await interaction.response.send_message("🔒 Only Administrators can post the Lounge Lobby.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only Administrators can post the Lounge Lobby.", ephemeral=True)
             return
 
         target_ch = channel or interaction.channel
@@ -1590,7 +1472,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         set_setting(db, "lounge_lobby_channel_id", str(target_ch.id))
         set_setting(db, "lounge_lobby_message_id", str(msg.id))
 
-        await interaction.response.send_message(f"✅ **Lounge Lobby successfully posted in {target_ch.mention}!**", ephemeral=True)
+        await interaction.response.send_message(f"[Success] Lounge Lobby successfully posted in {target_ch.mention}!", ephemeral=True)
 
     @lounge_admin.command(name="clear", description="Admin: Force clear and reopen a lounge immediately")
     @app_commands.describe(lounge_number="Lounge number 1 to 5 to clear and reopen")
@@ -1599,7 +1481,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
     ])
     async def lounge_clear(interaction: discord.Interaction, lounge_number: int):
         if not is_council_or_admin(interaction):
-            await interaction.response.send_message("🔒 Only Administrators can force-clear lounges.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only Administrators can force-clear lounges.", ephemeral=True)
             return
 
         if not interaction.response.is_done():
@@ -1607,14 +1489,14 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
 
         success = await clear_and_reopen_lounge(bot, db, interaction.guild, lounge_number, reason=f"Admin clear by {interaction.user.display_name}")
         if success:
-            await interaction.followup.send(f"✅ **Lounge {lounge_number}** has been purged, permissions reset, and reopened!", ephemeral=True)
+            await interaction.followup.send(f"[Success] Lounge {lounge_number} has been purged, permissions reset, and reopened!", ephemeral=True)
         else:
-            await interaction.followup.send(f"⚠️ Failed to clear Lounge {lounge_number}.", ephemeral=True)
+            await interaction.followup.send(f"[Error] Failed to clear Lounge {lounge_number}.", ephemeral=True)
 
     @lounge_admin.command(name="clear_all", description="Admin: Force clear and reopen all 5 lounges")
     async def lounge_clear_all(interaction: discord.Interaction):
         if not is_council_or_admin(interaction):
-            await interaction.response.send_message("🔒 Only Administrators can force-clear lounges.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only Administrators can force-clear lounges.", ephemeral=True)
             return
 
         if not interaction.response.is_done():
@@ -1623,13 +1505,13 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         for i in range(1, 6):
             await clear_and_reopen_lounge(bot, db, interaction.guild, i, reason=f"Admin clear_all by {interaction.user.display_name}")
 
-        await interaction.followup.send("✅ **All 5 Lounges have been purged, permissions reset, and reopened!**", ephemeral=True)
+        await interaction.followup.send("[Success] All 5 Lounges have been purged, permissions reset, and reopened!", ephemeral=True)
 
     @lounge_admin.command(name="delete_suite", description="Admin: Delete a private suite and its channels")
     @app_commands.describe(suite_id="The ID of the private suite application")
     async def lounge_delete_suite(interaction: discord.Interaction, suite_id: int):
         if not is_council_or_admin(interaction):
-            await interaction.response.send_message("🔒 Only Administrators can delete Private Suites.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only Administrators can delete Private Suites.", ephemeral=True)
             return
 
         if not interaction.response.is_done():
@@ -1638,36 +1520,36 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
         import suites
         success = await suites.delete_suite_channels(bot, db, interaction.guild, suite_id, reason=f"Deleted by admin {interaction.user.display_name}")
         if success:
-            await interaction.followup.send(f"✅ **Private Suite #{suite_id}** and its channels have been deleted.", ephemeral=True)
+            await interaction.followup.send(f"[Success] Private Suite #{suite_id} and its channels have been deleted.", ephemeral=True)
         else:
-            await interaction.followup.send(f"⚠️ Suite #{suite_id} not found.", ephemeral=True)
+            await interaction.followup.send(f"[Notice] Suite #{suite_id} not found.", ephemeral=True)
 
     @lounge_admin.command(name="set_suite_category", description="Admin: Set target Category ID for Private Suites")
     @app_commands.describe(category_id="Category ID where private suites should be created")
     async def lounge_set_suite_category(interaction: discord.Interaction, category_id: str):
         if not is_council_or_admin(interaction):
-            await interaction.response.send_message("🔒 Only Administrators can manage settings.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only Administrators can manage settings.", ephemeral=True)
             return
 
         try:
             cid = int(category_id.strip())
         except ValueError:
-            await interaction.response.send_message("⚠️ Category ID must be a numeric Discord snowflake ID.", ephemeral=True)
+            await interaction.response.send_message("[Error] Category ID must be a numeric Discord snowflake ID.", ephemeral=True)
             return
 
         cat = interaction.guild.get_channel(cid)
         if not cat:
-            await interaction.response.send_message(f"⚠️ Category with ID `{category_id}` was not found in this server.", ephemeral=True)
+            await interaction.response.send_message(f"[Error] Category with ID `{category_id}` was not found in this server.", ephemeral=True)
             return
 
         import suites
         suites.set_setting(db, "suite_category_id", str(cid))
-        await interaction.response.send_message(f"✅ Private Suite Category set to **{cat.name}** (`{cat.id}`)!", ephemeral=True)
+        await interaction.response.send_message(f"[Success] Private Suite Category set to **{cat.name}** (`{cat.id}`)!", ephemeral=True)
 
     @lounge_admin.command(name="sync_suites_category", description="Admin: Move all active private suite channels to the target category")
     async def lounge_sync_suites_category(interaction: discord.Interaction):
         if not is_council_or_admin(interaction):
-            await interaction.response.send_message("🔒 Only Administrators can manage suites.", ephemeral=True)
+            await interaction.response.send_message("[Restricted] Only Administrators can manage suites.", ephemeral=True)
             return
 
         if not interaction.response.is_done():
@@ -1682,7 +1564,7 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
             except Exception:
                 pass
         if not target_cat:
-            await interaction.followup.send(f"⚠️ Target category ID `{cat_id}` not found in this server.", ephemeral=True)
+            await interaction.followup.send(f"[Error] Target category ID `{cat_id}` not found in this server.", ephemeral=True)
             return
 
         moved = 0
@@ -1715,6 +1597,6 @@ def register_commands(bot: discord.Client, db, is_council_or_admin, STAFF_COMMAN
                             except Exception:
                                 pass
 
-        await interaction.followup.send(f"✅ Moved {moved} suite channels into category **{target_cat.name}** (`{target_cat.id}`)!", ephemeral=True)
+        await interaction.followup.send(f"[Success] Moved {moved} suite channels into category **{target_cat.name}** (`{target_cat.id}`)!", ephemeral=True)
 
     bot.tree.add_command(lounge_admin, **STAFF_COMMAND_KWARGS)
