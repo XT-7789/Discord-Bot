@@ -326,15 +326,27 @@ async def sync_guild_member_levels(bot, db, guild):
     return updated_count
 
 async def _announce(bot, db, member, new_level, rewards):
-    if setting(db, "xp_announcement_enabled") != "1": return
-    reward_text = ", ".join(f"{r['emoji']} **{r['name']}**" for r in rewards) or ""
+    if setting(db, "xp_announcement_enabled") != "1":
+        return
+    reward_text = ", ".join(f"**{r['name']}**" for r in rewards) or ""
     custom = next((r["announcement"] for r in reversed(rewards) if r["announcement"]), "")
-    text = (custom or setting(db, "xp_announcement_template")).replace("{mention}", member.mention).replace("{user}", member.display_name).replace("{level}", str(new_level)).replace("{reward}", reward_text)
+    tmpl = setting(db, "xp_announcement_template") or "**LEVEL UP!** {mention} reached **Level {level}**! {reward}"
+    tmpl = tmpl.replace("🎉 ", "").replace("🎉", "")
+    text = (custom or tmpl).replace("{mention}", member.mention).replace("{user}", member.display_name).replace("{level}", str(new_level)).replace("{reward}", reward_text)
     channel_id = int(setting(db, "xp_announcement_channel_id") or 0)
     channel = bot.get_channel(channel_id) if channel_id else None
     if channel:
-        try: await channel.send(view=xbot_ui.success(f"🎉 Level {new_level} Announcement", text))
-        except discord.HTTPException: pass
+        embed = discord.Embed(
+            title=f"[LEVEL UP · LEVEL {new_level}]",
+            description=text,
+            color=0x5865F2,
+        )
+        embed.set_footer(text="X BOT · Level Progression")
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            pass
+
 
 async def settle_weekly_dividends(bot, db):
     """Settle top 10 weekly XP earners when transitioning to a new calendar week."""
@@ -378,16 +390,16 @@ async def settle_weekly_dividends(bot, db):
         chan_id = int(setting(db, "xp_announcement_channel_id") or 0)
         target_chan = bot.get_channel(chan_id) if chan_id and bot else None
         if target_chan and settled_results:
-            medals = ["🥇", "🥈", "🥉"]
             lines = [
-                f"{medals[r-1] if r<=3 else f'**#{r}**'} <@{uid}> — `{xp:,} XP` ➔ **+${c:,} Cash** & **+{x} XC**"
+                f"**#{r}** <@{uid}> — `{xp:,} XP` -> **+${c:,} Cash** & **+{x} XC**"
                 for r, uid, xp, c, x in settled_results
             ]
             embed = discord.Embed(
-                title=f"🏆 Weekly Activity Dividends Distributed! (Week {last_settled})",
+                title=f"[WEEKLY ACTIVITY DIVIDENDS DISTRIBUTED · WEEK {last_settled}]",
                 description="Congratulations to our top active members of the week! The prize pool has been deposited into your wallets:\n\n" + "\n".join(lines),
-                color=discord.Color.gold()
+                color=0x5865F2
             )
+            embed.set_footer(text="X BOT · Weekly Rewards")
             embed.set_footer(text="Keep chatting, playing, and chilling in Voice Lounges to rank in this week's leaderboard!")
             try:
                 await target_chan.send(embed=embed)

@@ -56,6 +56,12 @@ try:
 except Exception:
     pass
 
+
+# Bind level up announcement channel to #bot-notifications (1526521131048370217)
+c.execute("INSERT INTO economy_settings(key,value) VALUES('xp_announcement_channel_id','1526521131048370217') ON CONFLICT(key) DO UPDATE SET value='1526521131048370217'")
+c.execute("INSERT INTO economy_settings(key,value) VALUES('xp_announcement_template','**LEVEL UP!** {mention} reached **Level {level}**! {reward}') ON CONFLICT(key) DO UPDATE SET value='**LEVEL UP!** {mention} reached **Level {level}**! {reward}'")
+print("Bound xp_announcement_channel_id to 1526521131048370217 (#bot-notifications)")
+
 conn.commit()
 print("\nFinal xp_rewards:")
 for row in c.execute("SELECT level, name, emoji, role_id, enabled FROM xp_rewards ORDER BY level"):
