@@ -52,6 +52,7 @@ _user_vc_duration = {}
 _user_dz_thaw_seconds = {}
 _squad_ping_cooldowns = {}
 _lounge_squad_time = {}
+_squad_rally_messages = {}  # lounge_id -> (channel_id, message_id)
 _lounge_empty_since = {}
 _lounge_empty_warned = {}
 _lounge_session_rewards = {}
@@ -266,6 +267,19 @@ async def clear_and_reopen_lounge(bot: discord.Client, db, guild: discord.Guild,
     _lounge_empty_since.pop(lounge_id, None)
     _lounge_empty_warned.pop(lounge_id, None)
     session_rewards = _lounge_session_rewards.pop(lounge_id, None)
+
+    # Immediately delete squad rally broadcast from public channel if active
+    rally_ref = _squad_rally_messages.pop(lounge_id, None)
+    if rally_ref and guild:
+        r_ch_id, r_msg_id = rally_ref
+        r_ch = guild.get_channel(r_ch_id)
+        if r_ch:
+            try:
+                r_msg = await r_ch.fetch_message(r_msg_id)
+                if r_msg:
+                    await r_msg.delete()
+            except Exception:
+                pass
 
     # 5. Announce session settlement & clean reopen in the text channel
     if guild:
@@ -932,30 +946,27 @@ class LoungeSquadPingModal(discord.ui.Modal):
             await interaction.followup.send("Guild unavailable.", ephemeral=True)
             return
 
-        import gaming
-        role_map = {
-            "steam": ("game_role_steam_id", "game_channel_steam_id", "Steam Squad", 0x1B2838),
-            "roblox": ("game_role_roblox_id", "game_channel_roblox_id", "Roblox Squad", 0xE74C3C),
-            "mobile": ("game_role_mobile_id", "game_channel_mobile_id", "Mobile Squad", 0x2ECC71),
+        cat_labels = {
+            "steam": "Steam Squad",
+            "roblox": "Roblox Squad",
+            "mobile": "Mobile Squad",
+            "general": "General Squad",
         }
+        cat_label = cat_labels.get(self.category, "Gaming Squad")
 
-        role_mention = ""
-        target_channel = None
-
-        if self.category in role_map:
-            role_key, ch_key, cat_label, color_val = role_map[self.category]
-            role_id = int(gaming.setting(_db, role_key) or 0)
-            ch_id = int(gaming.setting(_db, ch_key) or 0)
-            if role_id:
-                role_mention = f"<@&{role_id}> "
-            if ch_id:
-                target_channel = guild.get_channel(ch_id)
-        else:
-            cat_label = "Gaming Squad"
-            color_val = 0x5865F2
-
+        # 1. Target Channel: Broadcast to public #general channel so all members can see it
+        gen_val = setting(_db, "general_channel_id")
+        general_id = int(gen_val) if gen_val and gen_val.isdigit() and int(gen_val) > 0 else 1505255037767647314
+        target_channel = guild.get_channel(general_id) if guild else None
+        if not target_channel and guild:
+            target_channel = guild.system_channel
         if not target_channel:
             target_channel = interaction.channel
+
+        # 2. Role Mention: Ping @Member role
+        val = setting(_db, "verification_member_role_id")
+        member_role_id = int(val) if val and val.isdigit() and int(val) > 0 else 1505437941647015986
+        role_mention = f"<@&{member_role_id}> " if member_role_id else ""
 
         privacy = lounge.get("privacy", "private")
         priv_badge = "Private Lounge (Click Jump In to enter)" if privacy == "private" else "Public Lounge (Open to All)"
@@ -980,13 +991,14 @@ class LoungeSquadPingModal(discord.ui.Modal):
                 f"• **Voice Perks:** Active chatters in Lounge VC earn **+$1,000 Cash, +10 XC & +25 XP** every 5 mins!\n"
                 f"• **Supply Drop:** 30+ min squad sessions earn a **Gamer Supply Drop** (+$10,000 Cash, +25 XC, +50 XP)!"
             ),
-            color=color_val,
+            color=0x5865F2,
         )
         embed.set_footer(text=f"X BOT · Lounge #{self.lounge_id} Squad Rally · Click [Jump In] to join")
 
         join_view = LoungeSquadJoinView(self.lounge_id)
         try:
-            await target_channel.send(content=f"{role_mention}**Squad Rally in {lounge['name']}!**", embed=embed, view=join_view)
+            sent_msg = await target_channel.send(content=f"{role_mention}**Squad Rally in {lounge['name']}!**", embed=embed, view=join_view)
+            _squad_rally_messages[self.lounge_id] = (target_channel.id, sent_msg.id)
             await interaction.followup.send(f"[Success] Squad rally broadcasted in {target_channel.mention}! Members can click to join your lounge.", ephemeral=True)
         except discord.HTTPException as err:
             await interaction.followup.send(f"[Error] Failed to post rally in {target_channel.mention}: {err}", ephemeral=True)
@@ -1037,16 +1049,21 @@ class LoungeSquadJoinView(discord.ui.View):
             _db.execute("UPDATE server_lounges SET invited_user_ids=? WHERE lounge_id=?", (json.dumps(invited), self.lounge_id))
             _db.commit()
 
-            # Apply permission overwrites
+            # Apply permission overwrites with full text and voice access
             if guild:
                 tc = guild.get_channel(info["text_id"])
                 vc = guild.get_channel(info["vc_id"])
-                overwrite = discord.PermissionOverwrite(view_channel=True, send_messages=True, connect=True, speak=True)
+                tc_overwrites = discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True
+                )
+                vc_overwrites = discord.PermissionOverwrite(
+                    view_channel=True, connect=True, speak=True, stream=True, use_voice_activation=True
+                )
                 if tc:
-                    try: await tc.set_permissions(user, overwrite=overwrite)
+                    try: await tc.set_permissions(user, overwrite=tc_overwrites)
                     except discord.HTTPException: pass
                 if vc:
-                    try: await vc.set_permissions(user, overwrite=overwrite)
+                    try: await vc.set_permissions(user, overwrite=vc_overwrites)
                     except discord.HTTPException: pass
 
                 # Notify lounge text chat
@@ -1216,7 +1233,7 @@ async def lounge_check_loop():
                 tc = guild.get_channel(info["text_id"])
                 if tc:
                     try:
-                        await tc.send(f"⏳ **5-Minute Warning:** This lounge session will expire <t:{expires_at}:R>! Use the host panel to extend or wrap up.")
+                        await tc.send(f"[Warning] 5-Minute Warning: This lounge session will expire <t:{expires_at}:R>. Use the host panel to extend or wrap up.")
                     except Exception:
                         pass
 
@@ -1283,7 +1300,7 @@ async def lounge_check_loop():
                         tc = guild.get_channel(info["text_id"])
                         if tc:
                             try:
-                                await tc.send("[Notice] Members detected in the lounge. Auto-cleanup cancelled.")
+                                pass
                             except Exception:
                                 pass
                 _lounge_empty_warned.pop(lid, None)
@@ -1389,7 +1406,7 @@ async def handle_voice_state_update(bot: discord.Client, db, member: discord.Mem
     if not bot or not db or getattr(member, "bot", False):
         return
 
-    # Check if member left a lounge VC
+    # Check if member left a lounge VC (silently track empty state without spamming chat)
     if before.channel and before.channel.id in LOUNGE_VC_CHANNEL_IDS and (after.channel is None or after.channel.id != before.channel.id):
         lid = next((k for k, v in LOUNGES.items() if v["vc_id"] == before.channel.id), None)
         if lid:
@@ -1400,30 +1417,12 @@ async def handle_voice_state_update(bot: discord.Client, db, member: discord.Mem
                     now = int(time.time())
                     if lid not in _lounge_empty_since:
                         _lounge_empty_since[lid] = now
-                        _lounge_empty_warned[lid] = True
-                        empty_timeout = int(setting(db, "lounge_empty_timeout_seconds") or 90)
-                        tc = bot.get_channel(LOUNGES[lid]["text_id"])
-                        if tc:
-                            try:
-                                await tc.send(
-                                    f"[Alert] Everyone has left the voice channel!\n"
-                                    f"This lounge will automatically reset and reopen <t:{now + empty_timeout}:R> if nobody rejoins."
-                                )
-                            except Exception:
-                                pass
 
-    # Check if member joined a lounge VC
+    # Check if member joined a lounge VC (silently clear empty state without spamming chat)
     if after.channel and after.channel.id in LOUNGE_VC_CHANNEL_IDS and (before.channel is None or before.channel.id != after.channel.id):
         lid = next((k for k, v in LOUNGES.items() if v["vc_id"] == after.channel.id), None)
         if lid and lid in _lounge_empty_since:
             _lounge_empty_since.pop(lid, None)
-            if _lounge_empty_warned.pop(lid, False):
-                tc = bot.get_channel(LOUNGES[lid]["text_id"])
-                if tc:
-                    try:
-                        await tc.send(f"[Notice] {member.mention} rejoined the voice channel. Auto-cleanup cancelled.")
-                    except Exception:
-                        pass
 
 
 def start_lounge_loop(bot: discord.Client, db):

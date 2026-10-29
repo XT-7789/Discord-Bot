@@ -29,11 +29,11 @@ import tester_feedback
 # [FROZEN] import tier8
 import system_ui
 # [FROZEN] import casual_games
-# [FROZEN] import deadzone
 import gaming
 import lounges
 import suites
 import autoclear
+import counting
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -143,7 +143,6 @@ tester_feedback.initialise(db)
 # [FROZEN] tier7.initialise(db)
 # [FROZEN] tier8.initialise(db)
 # [FROZEN] casual_games.initialise(db)
-# [FROZEN] deadzone.initialise(db)
 gaming.initialise(db)
 lounges.initialise(db)
 autoclear.initialise(db)
@@ -435,7 +434,6 @@ class XBot(discord.Client):
     async def setup_hook(self):
         applications.setup_persistent_views(self, db)
         tester_feedback.setup_persistent_views(self, db)
-        # [FROZEN] self.add_view(deadzone.DeadzoneReviveView())
         self.add_view(gaming.GameRolesView())
         self.add_view(gaming.NewUserOnboardingView())
         self.add_view(lounges.LoungeLobbyView())
@@ -445,6 +443,7 @@ class XBot(discord.Client):
         suites._bot = self
         suites._db = db
         suites.initialise(db)
+        counting.initialise(db)
         try:
             for req in db.execute("SELECT id FROM suite_requests WHERE status='pending'").fetchall():
                 self.add_view(suites.SuiteAdminReviewView(req["id"]))
@@ -453,7 +452,7 @@ class XBot(discord.Client):
         except Exception:
             pass
         published = PUBLIC_PLAYER_COMMANDS | STAFF_SLASH_COMMANDS | {
-            "lounge_admin", "code_create", "code_disable", "application_review", "verify", "autoclear", "clear",
+            "counting", "lounge_admin", "code_create", "code_disable", "application_review", "verify", "autoclear", "clear",
             "setannouncementchat", "setannouncement", "announcementshow", "level_rewards"
         }
 
@@ -510,7 +509,6 @@ class XBot(discord.Client):
         # [FROZEN] casino.start_vip_cleanup_task(self, db)
         leveling.start_voice_task(self, db)
         # [FROZEN] tier4.start_backup_task(self, db)
-        # [FROZEN] deadzone.start_deadzone_task(self, db)
 
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type == discord.InteractionType.component and interaction.data:
@@ -751,11 +749,6 @@ async def on_ready():
         
     lounges.start_lounge_loop(bot, db)
     autoclear.start_autoclear_loop(bot, db)
-    try:
-        pass
-        # [FROZEN] await deadzone.update_crypt_board(bot, db)
-    except Exception:
-        pass
     # Startup audit: remove regular Music role from members who have Premium Music
     for guild in bot.guilds:
         for member in guild.members:
@@ -806,7 +799,7 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     await leveling.handle_message(bot, db, message)
-    # [FROZEN] await deadzone.handle_message(bot, db, message)
+    await counting.handle_message(bot, db, message)
     await autoclear.handle_message(bot, db, message)
     await run_xb_prefix(message)
 
@@ -815,9 +808,6 @@ async def on_message(message: discord.Message):
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     if member.bot:
         return
-    if after.channel is not None:
-        pass
-        # [FROZEN] deadzone.touch_activity(db, member.id)
     await lounges.handle_voice_state_update(bot, db, member, before, after)
 
 
@@ -1124,7 +1114,6 @@ advanced_systems.register_commands(bot, db, create_player)
 leveling.register_commands(bot, db, is_council_or_admin)
 applications.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 staff_panel.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
-# [FROZEN] deadzone.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 # X Community has retired the old company/job economy.  Keep the historical
 # database tables for old logs, but do not publish these commands any more.
@@ -1135,7 +1124,7 @@ for _retired_command in (
     "prepare", "rally", "supply_buy", "navy", "airforce",
     # Replaced by the single interactive /server_settings panel.
     "setannouncement", "announcementshow", "setannouncementchat",
-    # Standalone verification, application, and deadzone panels retired (managed via Staff Panel /admin)
+    # Standalone verification and application panels retired (managed via Staff Panel /admin)
     "verification_panel", "application_panel", "apply",
     # Economy deposit/withdraw retired in favour of /bank & /menu
     "deposit", "withdraw",
@@ -1161,6 +1150,7 @@ for _retired_command in (
 
 lounges.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 autoclear.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
+counting.register_commands(bot, db, is_council_or_admin, STAFF_COMMAND_KWARGS)
 
 # Mark all registered commands as wrapped for consistency and testing
 for _cmd in bot.tree.get_commands():
