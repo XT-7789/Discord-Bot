@@ -1081,23 +1081,40 @@ def register_commands(bot, db, create_player) -> None:
             guild = interaction.guild
             member = interaction.user if isinstance(interaction.user, discord.Member) else None
             if not guild or not member:
-                notice = "[Failed] Premium Music role can only be assigned within the Discord server."
+                notice = "[Failed] Premium Music pass can only be activated inside the Discord server."
             else:
                 role = guild.get_role(1526237128093339848)
                 if not role:
                     notice = "[Error] Premium Music role not found on server. Contact staff."
-                elif role in member.roles:
-                    notice = "[Failed] You already have the Premium Music role!"
                 else:
-                    try:
-                        await member.add_roles(role, reason="Redeemed Premium Music Pass")
-                        db.execute("UPDATE inventories SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?", (interaction.user.id, item["id"]))
-                        db.commit()
-                        notice = "[Success] Premium Music role granted! You now have access to the special music bot service."
-                    except discord.Forbidden:
-                        notice = "[Error] Bot lacks permission to assign the Premium Music role. Contact an administrator."
-                    except Exception as err:
-                        notice = f"[Error] Failed to assign role: {err}"
+                    now = int(time.time())
+                    duration = 7 * 86400
+                    sub = db.execute("SELECT expires_at FROM premium_music_members WHERE user_id = ?", (interaction.user.id,)).fetchone()
+                    if sub and sub["expires_at"] > now:
+                        new_expiry = sub["expires_at"] + duration
+                        db.execute("UPDATE premium_music_members SET expires_at = ? WHERE user_id = ?", (new_expiry, interaction.user.id))
+                        msg_action = "extended by 7 days"
+                    else:
+                        new_expiry = now + duration
+                        db.execute("""
+                            INSERT INTO premium_music_members (user_id, expires_at, activated_at)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(user_id) DO UPDATE SET expires_at = excluded.expires_at, activated_at = excluded.activated_at
+                        """, (interaction.user.id, new_expiry, now))
+                        msg_action = "activated for 7 days"
+
+                    if role not in member.roles:
+                        try:
+                            await member.add_roles(role, reason="Activated Premium Music 7-Day Pass")
+                        except discord.HTTPException:
+                            pass
+
+                    db.execute("UPDATE inventories SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?", (interaction.user.id, item["id"]))
+                    db.commit()
+
+                    rem = new_expiry - now
+                    d, h = rem // 86400, (rem % 86400) // 3600
+                    notice = f"[Success] Premium Music {msg_action}! (Total remaining: {d}d {h}h). Dedicated 2nd music bot line ready."
         elif effect in ('xc_reward', 'war_credits', 'capital_repair'):
             import economy_journey
             try:
@@ -1191,23 +1208,40 @@ def register_commands(bot, db, create_player) -> None:
                 guild = interaction.guild
                 member = interaction.user if isinstance(interaction.user, discord.Member) else (guild.get_member(owner_id) if guild else None)
                 if not guild or not member:
-                    notice = "[Failed] Premium Music role can only be assigned within the Discord server."
+                    notice = "[Failed] Premium Music pass can only be activated inside the Discord server."
                 else:
                     role = guild.get_role(1526237128093339848)
                     if not role:
                         notice = "[Error] Premium Music role not found on server. Contact staff."
-                    elif role in member.roles:
-                        notice = "[Failed] You already have the Premium Music role!"
                     else:
-                        try:
-                            await member.add_roles(role, reason="Redeemed Premium Music Pass")
-                            db.execute("UPDATE inventories SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?", (owner_id, item_id))
-                            db.commit()
-                            notice = "[Success] Premium Music role granted! You now have access to the special music bot service."
-                        except discord.Forbidden:
-                            notice = "[Error] Bot lacks permission to assign the Premium Music role. Contact an administrator."
-                        except Exception as err:
-                            notice = f"[Error] Failed to assign role: {err}"
+                        now = int(time.time())
+                        duration = 7 * 86400
+                        sub = db.execute("SELECT expires_at FROM premium_music_members WHERE user_id = ?", (owner_id,)).fetchone()
+                        if sub and sub["expires_at"] > now:
+                            new_expiry = sub["expires_at"] + duration
+                            db.execute("UPDATE premium_music_members SET expires_at = ? WHERE user_id = ?", (new_expiry, owner_id))
+                            msg_action = "extended by 7 days"
+                        else:
+                            new_expiry = now + duration
+                            db.execute("""
+                                INSERT INTO premium_music_members (user_id, expires_at, activated_at)
+                                VALUES (?, ?, ?)
+                                ON CONFLICT(user_id) DO UPDATE SET expires_at = excluded.expires_at, activated_at = excluded.activated_at
+                            """, (owner_id, new_expiry, now))
+                            msg_action = "activated for 7 days"
+
+                        if role not in member.roles:
+                            try:
+                                await member.add_roles(role, reason="Activated Premium Music 7-Day Pass")
+                            except discord.HTTPException:
+                                pass
+
+                        db.execute("UPDATE inventories SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?", (owner_id, item_id))
+                        db.commit()
+
+                        rem = new_expiry - now
+                        d, h = rem // 86400, (rem % 86400) // 3600
+                        notice = f"[Success] Premium Music {msg_action}! (Total remaining: {d}d {h}h). Dedicated 2nd music bot line ready."
             elif effect in ('xc_reward', 'war_credits', 'capital_repair'):
                 import economy_journey
                 try:
@@ -1269,8 +1303,18 @@ def register_commands(bot, db, create_player) -> None:
             else:
                 selected_item = next((it for it in items if it["id"] == self.selected_id), None)
                 if selected_item:
+                    extra_status = ""
+                    if selected_item.get("effect") == "premium_music":
+                        now = int(time.time())
+                        sub = db.execute("SELECT expires_at FROM premium_music_members WHERE user_id = ?", (owner_id,)).fetchone()
+                        if sub and sub["expires_at"] > now:
+                            rem = sub["expires_at"] - now
+                            d, h = rem // 86400, (rem % 86400) // 3600
+                            extra_status = f"\nStatus: Active ({d}d {h}h remaining) - Use to extend +7 days"
+                        else:
+                            extra_status = "\nStatus: Inactive - Use to activate 7 days access"
                     desc_text = (
-                        f"Quantity Owned: {selected_item['quantity']}x\n"
+                        f"Quantity Owned: {selected_item['quantity']}x{extra_status}\n"
                         f"Category: {selected_item['category']}\n\n"
                         f"Description:\n{selected_item['description']}"
                     )
@@ -2297,3 +2341,52 @@ def register_commands(bot, db, create_player) -> None:
         "army": lambda owner_id: ArmedForcesView(owner_id),
         "recruit": lambda owner_id: ArmyShopView(owner_id),
     })
+
+_premium_music_bot = None
+_premium_music_db = None
+
+@tasks.loop(minutes=10)
+async def premium_music_expiry_loop():
+    if not _premium_music_bot or not _premium_music_db:
+        return
+    now = int(time.time())
+    try:
+        expired = _premium_music_db.execute("SELECT user_id FROM premium_music_members WHERE expires_at <= ?", (now,)).fetchall()
+        if not expired:
+            return
+        role_id = 1526237128093339848
+        for row in expired:
+            uid = row["user_id"]
+            for guild in _premium_music_bot.guilds:
+                member = guild.get_member(uid)
+                if member:
+                    role = guild.get_role(role_id)
+                    if role and role in member.roles:
+                        try:
+                            await member.remove_roles(role, reason="Premium Music 7-day pass expired")
+                            print(f"[Premium Music] Expired 7-day pass for {member} ({uid}), removed role.")
+                        except Exception:
+                            pass
+            _premium_music_db.execute("DELETE FROM premium_music_members WHERE user_id = ?", (uid,))
+        _premium_music_db.commit()
+    except Exception as err:
+        print(f"[Premium Music Loop Error] {err}")
+
+def start_premium_music_loop(bot: discord.Client, db):
+    global _premium_music_bot, _premium_music_db
+    _premium_music_bot = bot
+    _premium_music_db = db
+    try:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS premium_music_members (
+                user_id INTEGER PRIMARY KEY,
+                expires_at INTEGER NOT NULL,
+                activated_at INTEGER NOT NULL
+            )
+        """)
+        db.commit()
+    except Exception:
+        pass
+    if not premium_music_expiry_loop.is_running():
+        premium_music_expiry_loop.start()
+

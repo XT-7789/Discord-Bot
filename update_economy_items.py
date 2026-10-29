@@ -5,13 +5,23 @@ def migrate(db_path="xwar.db"):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
+    # Create table for premium music subscriptions
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS premium_music_members (
+            user_id INTEGER PRIMARY KEY,
+            expires_at INTEGER NOT NULL,
+            activated_at INTEGER NOT NULL
+        )
+    """)
+
     # Clean old name collisions safely
     c.execute("DELETE FROM items WHERE name = 'Custom Tag'")
     c.execute("DELETE FROM items WHERE name = 'Legacy Custom Tag'")
 
-    # Update existing items if needed
+    # Update existing item names to new standardized names
     c.execute("UPDATE items SET name = 'Xustom Tag Voucher' WHERE name = 'Custom Tag Voucher'")
     c.execute("UPDATE items SET name = 'XP Boost (1h)', price = 5000, effect = 'xp_boost_1h', effect_value = 60, description = 'Grants 1 hour of 1.5x XP bonus for chatting and participating in server activities.' WHERE name = 'XP Boost (2h)'")
+    c.execute("UPDATE items SET name = 'Premium Music Pass (7 Days)' WHERE name = 'Premium Music Pass'")
 
     # 1. Disable all items not in the approved 5 items list
     active_names = (
@@ -19,7 +29,7 @@ def migrate(db_path="xwar.db"):
         'XP Boost (1h)',
         'VIP Lounge Pass',
         'Cash Red Packet',
-        'Premium Music Pass'
+        'Premium Music Pass (7 Days)'
     )
     c.execute(f"""
         UPDATE items
@@ -102,21 +112,21 @@ def migrate(db_path="xwar.db"):
             "emoji": ""
         },
         {
-            "name": "Premium Music Pass",
-            "description": "Grants the exclusive Premium Music role with dedicated 24/7 high-quality bot service.",
+            "name": "Premium Music Pass (7 Days)",
+            "description": "Unlock 7 days of exclusive access to the dedicated 2nd music bot line with no queue conflicts.",
             "category": "Perks",
             "category_id": 6824,
-            "price": 50000,
+            "price": 30000,
             "currency": "cash",
             "sell_price": 0,
             "stock": -1,
             "effect": "premium_music",
-            "effect_value": 1526237128093339848,
+            "effect_value": 604800,  # 7 days in seconds
             "enabled": 1,
             "shop_visible": 1,
             "sellable": 0,
             "tradeable": 0,
-            "aliases": "primunem music,premium music,music_pass,primunem",
+            "aliases": "primunem music,premium music,music_pass,primunem,premium music pass",
             "emoji": ""
         }
     ]

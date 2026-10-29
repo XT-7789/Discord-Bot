@@ -749,6 +749,7 @@ async def on_ready():
         
     lounges.start_lounge_loop(bot, db)
     autoclear.start_autoclear_loop(bot, db)
+    economy.start_premium_music_loop(bot, db)
     # Startup audit: remove regular Music role from members who have Premium Music
     for guild in bot.guilds:
         for member in guild.members:
