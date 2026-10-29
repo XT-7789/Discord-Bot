@@ -4,7 +4,7 @@ from discord.ui.select import BaseSelect
 
 
 def build(panel, content):
-    from staff_panel import PAGES, TOOL_GROUPS, AdminPageSelect, ApplicationFormSelect, PendingApplicationSelect, RewardCodeSelect, TesterFeedbackSelect, AdminUserSelect, AdminChannelSelect
+    from staff_panel import PAGES, TOOL_GROUPS, AdminPageSelect, ApplicationFormSelect, PendingApplicationSelect, RewardCodeSelect, AdminUserSelect, AdminChannelSelect
     import staff_tools
     controls=list(panel._controls)
     for control in controls:
@@ -60,14 +60,6 @@ def build(panel, content):
         if selected:items.append(DetailsButton(panel))
         items+=action('review:accepted','review:hold','review:denied')
         section('Review an application',text+'\n'+panel.list_pages.get('applications','No pending applications.'),items)
-    elif panel.page=='tester':
-        channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
-        selected=panel.selected_feedback()
-        section('Choose a report',panel.list_pages.get('reports','No pending reports.'),listing(TesterFeedbackSelect,'reports'))
-        if selected:
-            section('Selected report',f"**#{selected['id']} · {selected['user_name']}**\n{selected['kind'].title()} · **{selected['title']}**\n{selected['details'][:450]}\nRead the full report before deciding.",[DetailsButton(panel),*action('accept_feedback','reject_feedback')])
-        else:section('Review','Select a report to see its details and available actions.')
-        section('Collect feedback','Select destination channel and post the feedback entry.',channel_select+action('post_tester_feedback'))
     elif panel.page=='codes':
         filters=take(lambda c:getattr(c,'action','').startswith('filter_codes:'))
         section('Find a code',panel.list_pages.get('codes','No codes match this filter.')+'\nSelecting only previews a code; no reward is issued.')
@@ -111,15 +103,15 @@ def build(panel, content):
         channel_select = take(lambda c: isinstance(c, AdminChannelSelect))
         form_select = listing(ApplicationFormSelect, 'forms')
         panel_actions = action(
-            'post_verification', 'server_post_gaming_roles', 'post_application', 'server_post_deadzone',
-            'server_post_lounge_lobby', 'post_tester_feedback'
+            'post_verification', 'server_post_gaming_roles', 'post_application',
+            'server_post_lounge_lobby'
         )
         for field in fields: section(field.name, field.value)
         section('Target Destination Channel', 'Choose the channel where you want to deploy the panel.', channel_select)
         section('Deploy Server Panels', 'Select an application form if needed, then click any button to deploy.', form_select + panel_actions)
     elif panel.page == 'server':
         channel_select=take(lambda c:isinstance(c,AdminChannelSelect))
-        server_actions=action('server_post_gaming_roles','post_verification','post_tester_feedback','server_post_deadzone','server_post_lounge_lobby','server_say','server_toggle_level','server_set_level_channel','server_edit_template','server_lottery_draw')
+        server_actions=action('server_post_gaming_roles','post_verification','server_post_lounge_lobby','server_say','server_toggle_level','server_set_level_channel','server_edit_template','server_lottery_draw')
         legacy_tools=take(lambda c:isinstance(c,staff_tools.ToolButton))
         for field in fields:section(field.name,field.value)
         section('Server Channel & Action Controls','Select a channel above, then choose a setting or panel action below.',channel_select+server_actions+legacy_tools)

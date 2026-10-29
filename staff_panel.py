@@ -7,33 +7,29 @@ import discord
 from discord import app_commands
 
 import applications
-import tester_feedback
 import gaming
 import leveling
 import war_system
-import deadzone
 
 
 PAGES = {
     'home': 'Control Centre', 'panels': 'Post Panels', 'members': 'Members', 'assets': 'Player Assets',
-    'deadzone': 'Deadzone', 'server': 'Server Tools', 'war_tools': 'Armed Forces',
-    'applications': 'Applications', 'tester': 'Tester Reports', 'verification': 'Verification',
+    'server': 'Server Tools', 'war_tools': 'Armed Forces',
+    'applications': 'Applications', 'verification': 'Verification',
     'codes': 'Reward Codes', 'economy': 'Economy Status', 'maintenance': 'Maintenance',
 }
-TOOL_GROUPS = {'members': 'Members', 'assets': 'Assets', 'deadzone': 'Deadzone', 'server': 'Server', 'war_tools': 'War'}
+TOOL_GROUPS = {'members': 'Members', 'assets': 'Assets', 'server': 'Server', 'war_tools': 'War'}
 
 PAGE_METADATA = {
     'home': ('🏠', 'Control Centre', 'Main staff overview & navigation hub'),
-    'panels': ('📢', 'Post Panels', 'Deploy Verification, Application, Deadzone, Lounge, Gaming'),
+    'panels': ('📢', 'Post Panels', 'Deploy Verification, Application, Lounge, Gaming'),
     'server': ('🔔', 'Server Tools', 'Post /say announcements and manage level-up notices'),
     'codes': ('🎟️', 'Reward Codes', 'Create and manage gift redemption codes'),
     'verification': ('🛡️', 'Verification', 'Role mapping and verification status toggle'),
     'members': ('👥', 'Members', 'Give/remove roles, level sync, and inspect members'),
     'assets': ('💰', 'Player Assets', 'Edit money, bank, cash, backpack items and inventory'),
     'war_tools': ('⚔️', 'Armed Forces', 'Inspect military, troops, capital health & resources'),
-    'deadzone': ('💀', 'Deadzone', 'Send to Deadzone, revive members, scan inactive (7d)'),
     'applications': ('📝', 'Applications', 'Review pending staff and role applications'),
-    'tester': ('🧪', 'Tester Reports', 'Review bug reports and issue tester rewards'),
     'economy': ('📊', 'Economy Status', 'Read-only live economy inflation and financial metrics'),
     'maintenance': ('🛠️', 'Maintenance', 'System diagnostics, database backups, and data repair'),
 }
@@ -684,7 +680,7 @@ class AdminPanel(discord.ui.LayoutView):
                 parts.extend((discord.ui.Separator(), discord.ui.ActionRow(*rows.pop(99))))
             sections = (
                 (0, '📢 Channel Panels & Server Setup', 'Deploy public panels to channels, announcements & reward codes.'),
-                (1, '👥 Player & Moderation Manager', 'Manage member roles, player economy assets, armed forces & Deadzone.'),
+                (1, '👥 Player & Moderation Manager', 'Manage member roles, player economy assets, and armed forces.'),
                 (2, '📬 Submissions & Reviews', 'Review pending staff applications and beta tester bug reports.'),
                 (3, '🛠️ System Diagnostics & Health', 'Live economy status, system health checks & backups.'),
             )
@@ -780,15 +776,13 @@ class AdminPanel(discord.ui.LayoutView):
             self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=3))
             self.add_item(AdminActionButton("server_post_gaming_roles", "Post Roles Panel", emoji="🎮", style=discord.ButtonStyle.success, row=3))
             self.add_item(AdminActionButton("post_application", "Post Application Form", emoji="📨", style=discord.ButtonStyle.primary, row=3))
-            self.add_item(AdminActionButton("server_post_deadzone", "Post Deadzone", emoji="⚰️", style=discord.ButtonStyle.secondary, row=4))
             self.add_item(AdminActionButton("server_post_lounge_lobby", "Post Lounge Lobby", emoji="🛋️", style=discord.ButtonStyle.primary, row=4))
-            self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel", emoji="🧪", style=discord.ButtonStyle.secondary, row=4))
+            self.add_item(AdminActionButton("Post Tester Panel", emoji="🧪", style=discord.ButtonStyle.secondary, row=4))
         elif self.page == "server":
             self.add_item(AdminChannelSelect(placeholder="Choose destination channel to deploy panels…", default_channel_id=self.target_channel_id, row=2))
             self.add_item(AdminActionButton("server_post_gaming_roles", "Post Gaming Roles", emoji="🎮", style=discord.ButtonStyle.success, row=3))
             self.add_item(AdminActionButton("post_verification", "Post Verification", emoji="✅", style=discord.ButtonStyle.success, row=3))
-            self.add_item(AdminActionButton("post_tester_feedback", "Post Feedback", emoji="🧪", style=discord.ButtonStyle.primary, row=3))
-            self.add_item(AdminActionButton("server_post_deadzone", "Post Deadzone", emoji="⚰️", style=discord.ButtonStyle.secondary, row=3))
+            self.add_item(AdminActionButton("Post Feedback", emoji="🧪", style=discord.ButtonStyle.primary, row=3))
             self.add_item(AdminActionButton("server_post_lounge_lobby", "Post Lounge Lobby", emoji="🛋️", style=discord.ButtonStyle.primary, row=3))
             self.add_item(AdminActionButton("server_say", "Post /say", emoji="📢", style=discord.ButtonStyle.primary, row=4))
             self.add_item(AdminActionButton("server_toggle_level", "Toggle Notices", emoji="🔔", style=discord.ButtonStyle.secondary, row=4))
@@ -823,7 +817,7 @@ class AdminPanel(discord.ui.LayoutView):
             if reports:
                 self.add_item(TesterFeedbackSelect(self._page_rows(reports, "reports"), self.selected_feedback_id))
             self.add_item(AdminChannelSelect(placeholder="Target channel to deploy feedback panel…", default_channel_id=self.target_channel_id, row=2))
-            self.add_item(AdminActionButton("post_tester_feedback", "Post Tester Panel", emoji="📨", style=discord.ButtonStyle.primary, row=3))
+            self.add_item(AdminActionButton("Post Tester Panel", emoji="📨", style=discord.ButtonStyle.primary, row=3))
             if self.selected_feedback():
                 self.add_item(AdminActionButton("accept_feedback", "Accept + Reward", emoji="🎁", style=discord.ButtonStyle.success, row=3))
                 self.add_item(AdminActionButton("reject_feedback", "Reject", emoji="❌", style=discord.ButtonStyle.danger, row=3))
@@ -853,13 +847,13 @@ class AdminPanel(discord.ui.LayoutView):
                 self.add_item(AdminActionButton('page:' + page, label, emoji=emoji, style=style, row=0))
 
             # Row 1: 👥 Player & Moderation Manager
-            for page in ('members', 'assets', 'war_tools', 'deadzone'):
+            for page in ('members', 'assets', 'war_tools'):
                 emoji, label = PAGE_METADATA[page][0], PAGES[page]
                 self.add_item(AdminActionButton('page:' + page, label, emoji=emoji, style=discord.ButtonStyle.secondary, row=1))
 
             # Row 2: 📬 Submissions & Reviews
-            for page in ('applications', 'tester'):
-                count = {'applications': pending, 'tester': reports}.get(page, 0)
+            for page in ('applications',):
+                count = {'applications': pending}.get(page, 0)
                 label = PAGES[page] + (f' · {count}' if count is not None else '')
                 emoji = PAGE_METADATA[page][0]
                 style = discord.ButtonStyle.primary if count else discord.ButtonStyle.secondary
@@ -935,7 +929,7 @@ class AdminPanel(discord.ui.LayoutView):
         elif self.page == "home":
             pending = self.db.execute("SELECT COUNT(*) FROM application_submissions WHERE status IN ('pending','hold')").fetchone()[0]
             active_codes = self.db.execute("SELECT COUNT(*) FROM reward_codes WHERE enabled=1").fetchone()[0]
-            reports = self.db.execute("SELECT COUNT(*) FROM tester_feedback WHERE status='pending'").fetchone()[0]
+            reports = 0
             verification = "Open" if _setting(self.db, "verification_enabled", "1") == "1" else "Closed"
             embed.description = (
                 f"🟢 **System Operational** · 🛡️ Verification **{verification}**\n"
@@ -1029,7 +1023,6 @@ class AdminPanel(discord.ui.LayoutView):
                 f"Choose the target channel from the picker, then click any button to deploy:\n"
                 f"• ✅ **Verification:** Onboarding verification gate & member role assignment\n"
                 f"• 📨 **Application Form:** Interactive submission form button\n"
-                f"• ⚰️ **Deadzone:** Live Crypt status board & member rescue breakout\n"
                 f"• 🎮 **Gaming Roles:** Steam, Roblox & Mobile role toggles\n"
                 f"• 🛋️ **Lounge Lobby:** 5 dynamic voice lounges reservation hub\n"
                 f"• 🧪 **Tester Feedback:** Beta testing & bug report panel"
@@ -1074,7 +1067,6 @@ class AdminPanel(discord.ui.LayoutView):
                     "• 🎮 **Gaming Roles:** Steam, Roblox & Mobile role picker\n"
                     "• ✅ **Verification:** Server onboarding gate\n"
                     "• 🧪 **Tester Feedback:** Bug report & feedback panel\n"
-                    "• ⚰️ **Deadzone:** Resurrection breakout status & rescue board\n"
                     "• 📢 **Post Announcement:** Post custom message as X BOT via `/say`"
                 ),
                 inline=False,
@@ -1083,18 +1075,9 @@ class AdminPanel(discord.ui.LayoutView):
             embed.description = {
                 'members':'Inspect a player or manage roles and activity level.',
                 'assets':'Select a player, review the amount, then confirm. No assets change on opening a tool.',
-                'deadzone':'Manage inactive members, send to crypt, or run inactivity scan.',
                 'server':'Prepare an announcement or review a lottery draw.',
                 'war_tools':'Review alliance targets before starting or ending a war.',
             }[self.page] + '\n**1 Choose tool → 2 Fill details → 3 Review & confirm**'
-            if self.page == "deadzone":
-                try:
-                    sleepers = self.db.execute("SELECT COUNT(*) FROM deadzone_members WHERE is_in_deadzone=1").fetchone()[0]
-                    thawed = self.db.execute("SELECT COUNT(*) FROM deadzone_members WHERE is_in_deadzone=1 AND thaw_count>=5").fetchone()[0]
-                    threshold_days = deadzone.setting(self.db, "deadzone_days") or "7"
-                except Exception:
-                    sleepers, thawed, threshold_days = 0, 0, "7"
-                embed.add_field(name="Crypt Population", value=f"💀 **Active Sleepers:** `{sleepers}`\n🧊 **Thawed Comrades:** `{thawed}`\n⏰ **Auto Inactivity Threshold:** `{threshold_days} days`", inline=False)
         elif self.page == "applications":
             embed.description = f"**{'Open' if _setting(self.db, 'applications_enabled', '1') == '1' else 'Closed'}** · **{len(self.pending_applications())}** awaiting review"
             form = self.selected_form()
@@ -1185,8 +1168,8 @@ class AdminPanel(discord.ui.LayoutView):
             return
         if action in {
             "system_status", "tier5_repair", "tier6_repair", "backup_now",
-            "post_application", "post_verification", "post_tester_feedback",
-            "server_post_gaming_roles", "server_post_onboarding_roles", "server_post_deadzone", "server_post_lounge_lobby",
+            "post_application", "post_verification",
+            "server_post_gaming_roles", "server_post_onboarding_roles", "server_post_lounge_lobby",
         }:
             await interaction.response.defer()
         if action == "close":
@@ -1374,18 +1357,6 @@ class AdminPanel(discord.ui.LayoutView):
             embed = gaming.build_onboarding_embed()
             await target_ch.send(embed=embed, view=gaming.NewUserOnboardingView())
             await self.refresh(interaction, notice=f"✅ New User Onboarding panel posted in <#{target_cid}>!")
-            return
-        if action == "server_post_deadzone":
-            target_cid, target_ch = self._resolve_target_channel(interaction)
-            if not target_ch:
-                await self.refresh(interaction, notice="❌ Target channel was not found.")
-                return
-            embed = deadzone.build_deadzone_board_embed(self.db)
-            msg = await target_ch.send(embed=embed, view=deadzone.DeadzoneReviveView())
-            self.db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_channel_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(target_cid),))
-            self.db.execute("INSERT INTO economy_settings(key,value) VALUES('deadzone_crypt_message_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(msg.id),))
-            self.db.commit()
-            await self.refresh(interaction, notice=f"✅ Deadzone Revival board posted in <#{target_cid}>!")
             return
         if action == "server_post_lounge_lobby":
             target_cid, target_ch = self._resolve_target_channel(interaction)

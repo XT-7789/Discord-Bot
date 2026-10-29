@@ -37,80 +37,9 @@ def _seed_tester_questions(db, form_id):
 
 
 def _ensure_single_tester_form(db):
-    """Merge old Tester forms without deleting historical submissions."""
-    forms = db.execute("SELECT * FROM application_forms ORDER BY id").fetchall()
-    tester_forms = []
-    for form in forms:
-        accepted = set(filter(None, (form["accepted_role_ids"] or form["accepted_role_id"] or "").split(",")))
-        if TESTER_ROLE_ID in accepted or "tester" in form["name"].casefold():
-            tester_forms.append(form)
-
-    if not tester_forms:
-        cursor = db.execute(
-            """INSERT INTO application_forms(name,emoji,description,reviewer_role_ids,accepted_role_ids,cooldown_seconds,enabled)
-               VALUES(?,?,?,?,?,?,1)""",
-            (
-                TESTER_FORM_NAME,
-                "🧪",
-                "Help test upcoming X BOT features, report clear bugs, and give useful feedback. Testers do not receive staff or Dashboard permissions.",
-                TESTER_REVIEWER_ROLE_IDS,
-                TESTER_ROLE_ID,
-                7 * 86400,
-            ),
-        )
-        _seed_tester_questions(db, cursor.lastrowid)
-        return
-
-    def submission_count(form):
-        return db.execute("SELECT COUNT(*) FROM application_submissions WHERE form_id=?", (form["id"],)).fetchone()[0]
-
-    def question_count(form):
-        return db.execute("SELECT COUNT(*) FROM application_questions WHERE form_id=?", (form["id"],)).fetchone()[0]
-
-    # Prefer the form that owns real history as the permanent record. Use the
-    # most complete current question set for future applications.
-    canonical = max(tester_forms, key=lambda form: (submission_count(form), -int(form["id"])))
-    question_source = max(tester_forms, key=lambda form: (question_count(form), int(form["id"])))
-    canonical_id = int(canonical["id"])
-    source_id = int(question_source["id"])
-
-    for form in tester_forms:
-        form_id = int(form["id"])
-        if form_id != canonical_id:
-            db.execute("UPDATE application_submissions SET form_id=? WHERE form_id=?", (canonical_id, form_id))
-
-    if source_id != canonical_id:
-        old_question_ids = [row[0] for row in db.execute("SELECT id FROM application_questions WHERE form_id=?", (canonical_id,))]
-        if old_question_ids:
-            db.executemany("DELETE FROM application_question_options WHERE question_id=?", [(question_id,) for question_id in old_question_ids])
-        db.execute("DELETE FROM application_questions WHERE form_id=?", (canonical_id,))
-        db.execute("UPDATE application_questions SET form_id=? WHERE form_id=?", (canonical_id, source_id))
-
-    for form in tester_forms:
-        form_id = int(form["id"])
-        if form_id == canonical_id:
-            continue
-        remaining_question_ids = [row[0] for row in db.execute("SELECT id FROM application_questions WHERE form_id=?", (form_id,))]
-        if remaining_question_ids:
-            db.executemany("DELETE FROM application_question_options WHERE question_id=?", [(question_id,) for question_id in remaining_question_ids])
-        db.execute("DELETE FROM application_questions WHERE form_id=?", (form_id,))
-        db.execute("DELETE FROM application_forms WHERE id=?", (form_id,))
-
-    db.execute(
-        """UPDATE application_forms SET name=?,emoji=?,description=?,reviewer_role_ids=?,accepted_role_ids=?,
-           cooldown_seconds=?,enabled=1 WHERE id=?""",
-        (
-            TESTER_FORM_NAME,
-            "🧪",
-            "Help test upcoming X BOT features, report clear bugs, and give useful feedback. Testers do not receive staff or Dashboard permissions.",
-            TESTER_REVIEWER_ROLE_IDS,
-            TESTER_ROLE_ID,
-            7 * 86400,
-            canonical_id,
-        ),
-    )
-    if question_count({"id": canonical_id}) == 0:
-        _seed_tester_questions(db, canonical_id)
+    """Disable deprecated Tester forms."""
+    db.execute("UPDATE application_forms SET enabled=0 WHERE name LIKE '%tester%'")
+    db.commit()
 
 
 def initialise(db):

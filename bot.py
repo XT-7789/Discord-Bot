@@ -21,7 +21,6 @@ import advanced_systems
 import leveling
 import applications
 import staff_panel
-import tester_feedback
 # [FROZEN] import tier4
 # [FROZEN] import tier5
 # [FROZEN] import tier6
@@ -136,7 +135,6 @@ economy_extra.initialise(db)
 advanced_systems.initialise(db)
 leveling.initialise(db)
 applications.initialise(db)
-tester_feedback.initialise(db)
 # [FROZEN] tier4.initialise(db)
 # [FROZEN] tier5.initialise(db)
 # [FROZEN] tier6.initialise(db)
@@ -433,7 +431,6 @@ class XBot(discord.Client):
 
     async def setup_hook(self):
         applications.setup_persistent_views(self, db)
-        tester_feedback.setup_persistent_views(self, db)
         self.add_view(gaming.GameRolesView())
         self.add_view(gaming.NewUserOnboardingView())
         self.add_view(lounges.LoungeLobbyView())
