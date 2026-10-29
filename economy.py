@@ -1068,8 +1068,8 @@ def register_commands(bot, db, create_player) -> None:
         if effect == "color_role":
             notice = "[Info] Color Role Voucher: Custom name color modal will be available in the upcoming update."
         elif effect == "custom_tag":
-            notice = "[Info] Custom Tag Voucher: Custom title modal will be available in the upcoming update."
-        elif effect == "xp_boost_2h":
+            notice = "[Info] Xustom Tag Voucher: Custom title modal will be available in the upcoming update."
+        elif effect in ("xp_boost_1h", "xp_boost_2h"):
             notice = "[Info] XP Boost: Chat bonus activation will be available in the upcoming update."
         elif effect == "vip_lounge":
             notice = "[Info] VIP Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
@@ -1077,6 +1077,27 @@ def register_commands(bot, db, create_player) -> None:
             notice = "[Info] Server Megaphone: Server-wide broadcast will be available in the upcoming update."
         elif effect == "red_packet":
             notice = "[Info] Cash Red Packet: Red packet dropping will be available in the upcoming update."
+        elif effect == "premium_music":
+            guild = interaction.guild
+            member = interaction.user if isinstance(interaction.user, discord.Member) else None
+            if not guild or not member:
+                notice = "[Failed] Premium Music role can only be assigned within the Discord server."
+            else:
+                role = guild.get_role(1526237128093339848)
+                if not role:
+                    notice = "[Error] Premium Music role not found on server. Contact staff."
+                elif role in member.roles:
+                    notice = "[Failed] You already have the Premium Music role!"
+                else:
+                    try:
+                        await member.add_roles(role, reason="Redeemed Premium Music Pass")
+                        db.execute("UPDATE inventories SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?", (interaction.user.id, item["id"]))
+                        db.commit()
+                        notice = "[Success] Premium Music role granted! You now have access to the special music bot service."
+                    except discord.Forbidden:
+                        notice = "[Error] Bot lacks permission to assign the Premium Music role. Contact an administrator."
+                    except Exception as err:
+                        notice = f"[Error] Failed to assign role: {err}"
         elif effect in ('xc_reward', 'war_credits', 'capital_repair'):
             import economy_journey
             try:
@@ -1157,8 +1178,8 @@ def register_commands(bot, db, create_player) -> None:
             if effect == "color_role":
                 notice = "[Info] Color Role Voucher: Custom name color modal will be available in the upcoming update."
             elif effect == "custom_tag":
-                notice = "[Info] Custom Tag Voucher: Custom title modal will be available in the upcoming update."
-            elif effect == "xp_boost_2h":
+                notice = "[Info] Xustom Tag Voucher: Custom title modal will be available in the upcoming update."
+            elif effect in ("xp_boost_1h", "xp_boost_2h"):
                 notice = "[Info] XP Boost: Chat bonus activation will be available in the upcoming update."
             elif effect == "vip_lounge":
                 notice = "[Info] VIP Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
@@ -1166,6 +1187,27 @@ def register_commands(bot, db, create_player) -> None:
                 notice = "[Info] Server Megaphone: Server-wide broadcast will be available in the upcoming update."
             elif effect == "red_packet":
                 notice = "[Info] Cash Red Packet: Red packet dropping will be available in the upcoming update."
+            elif effect == "premium_music":
+                guild = interaction.guild
+                member = interaction.user if isinstance(interaction.user, discord.Member) else (guild.get_member(owner_id) if guild else None)
+                if not guild or not member:
+                    notice = "[Failed] Premium Music role can only be assigned within the Discord server."
+                else:
+                    role = guild.get_role(1526237128093339848)
+                    if not role:
+                        notice = "[Error] Premium Music role not found on server. Contact staff."
+                    elif role in member.roles:
+                        notice = "[Failed] You already have the Premium Music role!"
+                    else:
+                        try:
+                            await member.add_roles(role, reason="Redeemed Premium Music Pass")
+                            db.execute("UPDATE inventories SET quantity = quantity - 1 WHERE user_id = ? AND item_id = ?", (owner_id, item_id))
+                            db.commit()
+                            notice = "[Success] Premium Music role granted! You now have access to the special music bot service."
+                        except discord.Forbidden:
+                            notice = "[Error] Bot lacks permission to assign the Premium Music role. Contact an administrator."
+                        except Exception as err:
+                            notice = f"[Error] Failed to assign role: {err}"
             elif effect in ('xc_reward', 'war_credits', 'capital_repair'):
                 import economy_journey
                 try:
