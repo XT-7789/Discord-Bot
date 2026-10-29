@@ -809,7 +809,7 @@ def register_commands(bot, db, create_player) -> None:
     class ShopRoleBuyButton(discord.ui.Button):
         def __init__(self, offer):
             label = f"Buy ({offer['price']:,} {'XC' if offer['currency']=='xc' else 'XCrystals'})"
-            super().__init__(label=label[:80], emoji="🛍️", style=discord.ButtonStyle.success)
+            super().__init__(label=label[:80], style=discord.ButtonStyle.success)
             self.offer_id = offer["id"]
 
         async def callback(self, interaction: discord.Interaction):
@@ -817,49 +817,10 @@ def register_commands(bot, db, create_player) -> None:
             import advanced_systems
             await advanced_systems.purchase_role(interaction, db, create_player, offer)
 
-    class ShopCategorySelect(discord.ui.Select):
-        def __init__(self, owner_id: int, selected_category_id):
-            options = [discord.SelectOption(label=row['label'][:100], value=str(row['id']), emoji=row['emoji'], default=str(row['id']) == str(selected_category_id)) for row in shop_categories()]
-            options.append(discord.SelectOption(
-                label="Discord Roles",
-                value="roles",
-                emoji="🎭",
-                description="Purchase server Discord roles with XC",
-                default=str(selected_category_id) == "roles"
-            ))
-            super().__init__(placeholder="Choose a shop category…", min_values=1, max_values=1, options=options)
-            self.owner_id = owner_id
-
-        async def callback(self, interaction: discord.Interaction):
-            val = self.values[0]
-            category_id = val if val == "roles" else int(val)
-            view = ShopView(self.owner_id, category_id, 0)
-            await interaction.response.edit_message(view=view)
-
-    class ShopBuyButton(discord.ui.Button):
-        def __init__(self, item, disabled: bool):
-            super().__init__(label="View Item", style=discord.ButtonStyle.primary)
-            self.item_id = item['id']
-        async def callback(self, interaction):
-            if interaction.user.id != self.view.owner_id:
-                await interaction.response.send_message('Open your own Shop.',ephemeral=True);return
-            from economy_trade_ui import TradeView
-            owner,category,page=self.view.owner_id,self.view.category_id,self.view.page
-            await interaction.response.edit_message(view=TradeView(bot,db,owner,'shop',self.item_id,back=lambda:ShopView(owner,category,page)))
-
-    class ShopPageButton(discord.ui.Button):
-        def __init__(self, owner_id: int, category_id, target_page: int, label: str, emoji: str, disabled: bool):
-            super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.primary, disabled=disabled)
-            self.owner_id, self.category_id, self.target_page = owner_id, category_id, target_page
-
-        async def callback(self, interaction: discord.Interaction):
-            view = ShopView(self.owner_id, self.category_id, self.target_page)
-            await interaction.response.edit_message(view=view)
-
     class EconomyCentreButton(discord.ui.Button):
         """Return child Economy pages to the same player's Economy Centre."""
         def __init__(self, owner_id: int, label: str = "Economy Centre"):
-            super().__init__(label=label, emoji="⬅️", style=discord.ButtonStyle.secondary)
+            super().__init__(label=label, style=discord.ButtonStyle.secondary)
             self.owner_id = owner_id
 
         async def callback(self, interaction: discord.Interaction):
@@ -872,104 +833,200 @@ def register_commands(bot, db, create_player) -> None:
                 return
             await interaction.response.edit_message(view=builder(self.owner_id))
 
-    class ShopView(discord.ui.LayoutView):
-        def __init__(self, owner_id: int, category_id, page: int = 0):
+    class ShopItemSelect(discord.ui.Select):
+        def __init__(self, owner_id: int, items, selected_id: int | None):
+            self.owner_id = owner_id
+            options = []
+            for item in items[:25]:
+                curr = "Cash" if item["currency"] in ("cash", "money") else item["currency"].upper()
+                price_str = f"${item['price']:,} {curr}" if curr == "Cash" else f"{item['price']:,} {curr}"
+                label = f"{item['name']} - {price_str}"[:100]
+                desc = (item["description"] or "")[:100]
+                options.append(discord.SelectOption(
+                    label=label,
+                    value=str(item["id"]),
+                    description=desc,
+                    default=(item["id"] == selected_id)
+                ))
+            if not options:
+                options.append(discord.SelectOption(label="No items available", value="0"))
+            super().__init__(placeholder="Select an item to view or buy...", options=options, min_values=1, max_values=1)
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message("Please open your own /shop.", ephemeral=True)
+                return
+            selected_id = int(self.values[0])
+            view = ShopView(self.owner_id, selected_id=selected_id)
+            await interaction.response.edit_message(embed=view.embed, view=view)
+
+    class ShopBuyButton(discord.ui.Button):
+        def __init__(self, quantity: int = 1, disabled: bool = False):
+            super().__init__(
+                label=f"[Buy {quantity}x]",
+                style=discord.ButtonStyle.success if quantity == 1 else discord.ButtonStyle.primary,
+                disabled=disabled
+            )
+            self.quantity = quantity
+
+        async def callback(self, interaction: discord.Interaction):
+            owner_id = self.view.owner_id
+            if interaction.user.id != owner_id:
+                await interaction.response.send_message("Please open your own /shop.", ephemeral=True)
+                return
+
+            item_id = self.view.selected_id
+            if not item_id:
+                await interaction.response.send_message("[Error] No item selected.", ephemeral=True)
+                return
+
+            item = db.execute("SELECT * FROM items WHERE id = ? AND enabled = 1", (item_id,)).fetchone()
+            if not item:
+                await interaction.response.send_message("[Error] Item is currently unavailable.", ephemeral=True)
+                return
+
+            if item["stock"] >= 0 and item["stock"] < self.quantity:
+                await interaction.response.send_message(f"[Failed] Insufficient stock. Only {item['stock']} available.", ephemeral=True)
+                return
+
+            player = db.execute("SELECT * FROM players WHERE user_id = ?", (owner_id,)).fetchone()
+            if not player:
+                create_player(interaction.user)
+                player = db.execute("SELECT * FROM players WHERE user_id = ?", (owner_id,)).fetchone()
+
+            currency_col = "money" if item["currency"] in ("cash", "money") else "xc" if item["currency"] == "xc" else "xcrystals"
+            curr_label = "Cash" if currency_col == "money" else "XC" if currency_col == "xc" else "XCrystals"
+            prefix = "$" if currency_col == "money" else ""
+            total_price = item["price"] * self.quantity
+            balance = player[currency_col]
+
+            if balance < total_price:
+                await interaction.response.send_message(
+                    f"[Failed] Insufficient funds. You need {prefix}{total_price:,} {curr_label}, but only have {prefix}{balance:,} {curr_label}.",
+                    ephemeral=True
+                )
+                return
+
+            # Deduct funds
+            db.execute(f"UPDATE players SET {currency_col} = {currency_col} - ? WHERE user_id = ?", (total_price, owner_id))
+            # Add to inventory
+            db.execute("""
+                INSERT INTO inventories (user_id, item_id, quantity)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + excluded.quantity
+            """, (owner_id, item_id, self.quantity))
+            # Decrement stock if limited
+            if item["stock"] >= 0:
+                db.execute("UPDATE items SET stock = stock - ? WHERE id = ?", (self.quantity, item_id))
+            # Audit log
+            now = int(time.time())
+            db.execute("INSERT INTO economy_logs (user_id, action, detail, created_at) VALUES (?, 'buy', ?, ?)",
+                       (owner_id, f"Purchased {self.quantity}x {item['name']} for {total_price} {curr_label}", now))
+            db.commit()
+
+            notice = f"[Success] Purchased {self.quantity}x {item['name']} for {prefix}{total_price:,} {curr_label}."
+            new_view = ShopView(owner_id, selected_id=item_id, notice=notice)
+            await interaction.response.edit_message(embed=new_view.embed, view=new_view)
+
+    class ShopRefreshButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="[Refresh]", style=discord.ButtonStyle.secondary)
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.view.owner_id:
+                await interaction.response.send_message("Please open your own /shop.", ephemeral=True)
+                return
+            new_view = ShopView(self.view.owner_id, selected_id=self.view.selected_id)
+            await interaction.response.edit_message(embed=new_view.embed, view=new_view)
+
+    class ShopView(discord.ui.View):
+        def __init__(self, owner_id: int, selected_id: int | None = None, category_id = None, page: int = 0, notice: str = ""):
             super().__init__(timeout=300)
             self.owner_id = owner_id
             self.category_id = category_id
             self.page = page
-            container = discord.ui.Container(accent_color=discord.Color.teal())
-            wallet = db.execute('SELECT xc,xcrystals FROM players WHERE user_id=?', (owner_id,)).fetchone()
-            player = db.execute("SELECT * FROM players WHERE user_id=?", (owner_id,)).fetchone()
+            self.notice = notice
 
-            if str(category_id) == "roles":
-                roles = db.execute("SELECT * FROM role_shop WHERE enabled=1 AND stock<>0 ORDER BY price,name").fetchall()
-                pages = max(1, (len(roles) + 4) // 5)
-                self.page = max(0, min(page, pages - 1))
-                container.add_item(discord.ui.TextDisplay(
-                    f"## 🎭 Discord Role Shop\n"
-                    f"Wallet **{wallet['xc']:,} XC** · Crystals **{wallet['xcrystals']:,}**\n"
-                    f"Unlock exclusive Discord server roles with your balance."
-                ))
-                container.add_item(discord.ui.Separator())
-                for role_row in roles[self.page * 5:(self.page + 1) * 5]:
-                    currency = "XC" if role_row["currency"] == "xc" else "XCrystals"
-                    stock = "Unlimited" if role_row["stock"] < 0 else str(role_row["stock"])
-                    text = f"### {role_row['emoji']} {role_row['name']}\n💰 Price: **{role_row['price']:,} {currency}** · 📦 Stock: **{stock}**\n{role_row['description'] or 'Official Discord role.'}"
-                    container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=ShopRoleBuyButton(role_row)))
-                    container.add_item(discord.ui.Separator())
-                if not roles:
-                    container.add_item(discord.ui.TextDisplay("No roles are currently for sale in the Role Shop."))
-                item_count = len(roles)
+            items = db.execute("SELECT * FROM items WHERE enabled = 1 AND shop_visible = 1 ORDER BY price ASC").fetchall()
+            self.items = items
+
+            # Determine selected item
+            if selected_id and any(it["id"] == selected_id for it in items):
+                self.selected_id = selected_id
+            elif items:
+                self.selected_id = items[0]["id"]
             else:
-                cat_id_int = int(category_id)
-                items = category_items(cat_id_int)
-                pages = max(1, (len(items) + 4) // 5)
-                self.page = max(0, min(page, pages - 1))
-                category = db.execute("SELECT * FROM item_categories WHERE id=?", (cat_id_int,)).fetchone()
-                cat_label = category['label'] if category else 'Item'
-                container.add_item(discord.ui.TextDisplay(f"## 🏪 {cat_label} Shop\nWallet **{wallet['xc']:,} XC** · Crystals **{wallet['xcrystals']:,}**\nChoose an item below."))
-                container.add_item(discord.ui.Separator())
-                for item in items[self.page * 5:(self.page + 1) * 5]:
-                    balance = player['xc'] if player and item['currency'] == 'xc' else player['xcrystals'] if player else 0
-                    unavailable = item['stock'] == 0 or balance < item['price']
-                    stock = "Unlimited" if item['stock'] < 0 else str(item['stock'])
-                    currency = "XC" if item['currency'] == 'xc' else "XCrystals"
-                    text = f"### {item['emoji']} {item['name']}\n📦 Stock: **{stock}**\n💰 Price: **{item['price']} {currency}**\n{item['description'][:180]}"
-                    container.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=ShopBuyButton(item, unavailable)))
-                    container.add_item(discord.ui.Separator())
-                item_count = len(items)
+                self.selected_id = None
 
-            navigation = discord.ui.ActionRow(
-                ShopPageButton(owner_id, category_id, 0, "", "⏪", self.page == 0),
-                ShopPageButton(owner_id, category_id, self.page - 1, "", "◀️", self.page == 0),
-                ShopPageButton(owner_id, category_id, self.page + 1, "", "▶️", self.page >= pages - 1),
-                ShopPageButton(owner_id, category_id, pages - 1, "", "⏩", self.page >= pages - 1),
-                ShopMarketButton(owner_id),
+            player = db.execute("SELECT money, xc, xcrystals FROM players WHERE user_id = ?", (owner_id,)).fetchone()
+            money = player["money"] if player else 0
+            xc = player["xc"] if player else 0
+
+            self.embed = discord.Embed(
+                title="[SERVER SHOP]",
+                description=f"Your Balance: ${money:,} Cash | {xc:,} XC\nSelect an item from the menu below to view details and purchase.",
+                color=0x2b2d31
             )
-            container.add_item(navigation)
-            container.add_item(discord.ui.ActionRow(ShopCategorySelect(owner_id, category_id)))
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page + 1}/{pages} · {item_count} item(s) · Switch categories or visit Player Market."))
-            self.add_item(container)
+
+            if notice:
+                self.embed.add_field(name="[Notice]", value=notice, inline=False)
+
+            selected_item = next((it for it in items if it["id"] == self.selected_id), None) if self.selected_id else None
+            if selected_item:
+                curr = "Cash" if selected_item["currency"] in ("cash", "money") else selected_item["currency"].upper()
+                price_str = f"${selected_item['price']:,} {curr}" if curr == "Cash" else f"{selected_item['price']:,} {curr}"
+                stock_str = "Unlimited" if selected_item["stock"] < 0 else str(selected_item["stock"])
+
+                owned_row = db.execute("SELECT quantity FROM inventories WHERE user_id = ? AND item_id = ?", (owner_id, selected_item["id"])).fetchone()
+                owned_qty = owned_row["quantity"] if owned_row else 0
+
+                desc_text = (
+                    f"Price: {price_str}\n"
+                    f"Stock: {stock_str}\n"
+                    f"You Own: {owned_qty}x\n\n"
+                    f"Description:\n{selected_item['description']}"
+                )
+                self.embed.add_field(name=f"[{selected_item['name']}]", value=desc_text, inline=False)
+            elif not items:
+                self.embed.description = "The shop is currently empty. Check back later."
+
+            if items:
+                self.add_item(ShopItemSelect(owner_id, items, self.selected_id))
+                self.add_item(ShopBuyButton(quantity=1, disabled=self.selected_id is None))
+                self.add_item(ShopBuyButton(quantity=5, disabled=self.selected_id is None))
+                self.add_item(ShopRefreshButton())
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This shop menu belongs to the player who opened it. Open `/menu` for your own menu.", ephemeral=True)
+            await interaction.response.send_message("This shop session belongs to another member. Use /shop to open your own.", ephemeral=True)
             return False
 
-    @bot.tree.command(name="shop", description="Open the interactive X BOT Economy Shop")
+    @bot.tree.command(name="shop", description="Open the Server Shop")
     async def shop(interaction: discord.Interaction):
         if not setting(db, "economy_shop_enabled"):
-            await interaction.response.send_message(view=xbot_ui.warning("🏪 Economy Shop Closed", "The Economy Shop is currently closed."), ephemeral=True)
+            await interaction.response.send_message("[Closed] The Shop is currently closed.", ephemeral=True)
             return
-        categories = shop_categories()
-        first_cat = categories[0]['id'] if categories else "roles"
-        if not categories and not db.execute("SELECT 1 FROM role_shop WHERE enabled=1 AND stock<>0").fetchone():
-            await interaction.response.send_message("🏪 The Economy Shop is empty. An administrator can add shop-visible items or roles in the Dashboard.")
-            return
-        await interaction.response.defer()
         create_player(interaction.user)
-        view = ShopView(interaction.user.id, first_cat)
-        await interaction.edit_original_response(view=view)
+        view = ShopView(interaction.user.id)
+        await interaction.response.send_message(embed=view.embed, view=view)
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
-    bot.xbot_player_panel_builders["shop"] = lambda owner_id: ShopView(owner_id, shop_categories()[0]['id'] if shop_categories() else "roles")
+    bot.xbot_player_panel_builders["shop"] = lambda owner_id: ShopView(owner_id)
 
-    @bot.tree.command(name="inventory", description="View your X BOT inventory")
+    @bot.tree.command(name="inventory", description="View your inventory")
     async def inventory(interaction: discord.Interaction):
-        player = create_player(interaction.user)
-        rows = db.execute("""SELECT items.*, inventories.quantity FROM inventories INNER JOIN items ON items.id = inventories.item_id WHERE inventories.user_id = ? AND inventories.quantity > 0 ORDER BY items.name""", (interaction.user.id,)).fetchall()
-        if not rows:
-            if interaction.message is not None:
-                await interaction.response.edit_message(view=xbot_ui.warning("🎒 Backpack Empty", "Your inventory is empty."))
-            else:
-                await interaction.response.send_message("🎒 Your inventory is empty.")
-            return
+        create_player(interaction.user)
+        view = InventoryView(interaction.user.id)
         if interaction.message is not None:
-            await interaction.response.edit_message(view=InventoryView(interaction.user.id))
+            await interaction.response.edit_message(embed=view.embed, view=view)
         else:
-            await interaction.response.send_message(view=InventoryView(interaction.user.id))
+            await interaction.response.send_message(embed=view.embed, view=view)
+
+    @bot.tree.command(name="bag", description="View your inventory")
+    async def bag(interaction: discord.Interaction):
+        await inventory(interaction)
+
 
     @bot.tree.command(name="sell_item", description="Sell an inventory item back to X BOT")
     @app_commands.describe(name="Exact item name", amount="How many to sell")
@@ -1003,115 +1060,190 @@ def register_commands(bot, db, create_player) -> None:
     @app_commands.autocomplete(name=owned_item_autocomplete)
     async def use(interaction: discord.Interaction, name: str):
         create_player(interaction.user)
-        item=find_item(db,name,interaction.user.id)
+        item = find_item(db, name, interaction.user.id)
         if item is None:
-            await interaction.response.send_message('You do not own that item.',ephemeral=True);return
-        import economy_journey
-        try:notice=economy_journey.use(db,interaction.user.id,item['id'])
-        except ValueError as error:notice=str(error)
-        await interaction.response.send_message(view=xbot_ui.panel('Item Use',notice))
+            await interaction.response.send_message("You do not own that item.", ephemeral=True)
+            return
+        effect = item.get("effect", "none")
+        if effect == "color_role":
+            notice = "[Info] Color Role Voucher: Custom name color modal will be available in the upcoming update."
+        elif effect == "custom_tag":
+            notice = "[Info] Custom Tag Voucher: Custom title modal will be available in the upcoming update."
+        elif effect == "xp_boost_2h":
+            notice = "[Info] XP Boost: Chat bonus activation will be available in the upcoming update."
+        elif effect == "vip_lounge":
+            notice = "[Info] VIP Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
+        elif effect == "server_megaphone":
+            notice = "[Info] Server Megaphone: Server-wide broadcast will be available in the upcoming update."
+        elif effect == "red_packet":
+            notice = "[Info] Cash Red Packet: Red packet dropping will be available in the upcoming update."
+        elif effect in ('xc_reward', 'war_credits', 'capital_repair'):
+            import economy_journey
+            try:
+                notice = economy_journey.use(db, interaction.user.id, item["id"])
+            except ValueError as error:
+                notice = f"[Error] {error}"
+        else:
+            notice = f"[Info] '{item['name']}' has no active use effect."
+        await interaction.response.send_message(f"[{item['name']}]\n{notice}", ephemeral=True)
 
     @bot.tree.command(name="equip", description="Equip a Pickaxe from your inventory")
     @app_commands.describe(name="Pickaxe name or an item alias")
     @app_commands.autocomplete(name=owned_item_autocomplete)
     async def equip(interaction: discord.Interaction, name: str):
         create_player(interaction.user)
-        item=find_item(db,name,interaction.user.id)
+        item = find_item(db, name, interaction.user.id)
         if item is None:
-            await interaction.response.send_message('You do not own that item.',ephemeral=True);return
+            await interaction.response.send_message("You do not own that item.", ephemeral=True)
+            return
         import economy_transactions
-        try:notice=economy_transactions.equip(db,interaction.user.id,item['id'])
-        except ValueError as error:notice=str(error)
-        await interaction.response.send_message(view=xbot_ui.panel('Equip Item',notice))
+        try:
+            notice = economy_transactions.equip(db, interaction.user.id, item["id"])
+        except ValueError as error:
+            notice = str(error)
+        await interaction.response.send_message(f"[Equip Item]\n{notice}", ephemeral=True)
 
-
-
-    class BackpackItemSelect(discord.ui.Select):
-        def __init__(self, owner_id: int, page: int, selected_id: int | None, rows):
-            options = [discord.SelectOption(
-                label=f"{row['name']} × {row['quantity']}"[:100], value=str(row['id']), emoji=safe_discord_component_emoji(row['emoji'], '📦'),
-                default=row['id'] == selected_id,
-            ) for row in rows]
-            super().__init__(placeholder="Choose an item to inspect…", options=options, min_values=1, max_values=1)
-            self.owner_id, self.page = owner_id, page
+    class InventoryItemSelect(discord.ui.Select):
+        def __init__(self, owner_id: int, items, selected_id: int | None):
+            self.owner_id = owner_id
+            options = []
+            for it in items[:25]:
+                label = f"{it['name']} x{it['quantity']}"[:100]
+                desc = (it["description"] or "")[:100]
+                options.append(discord.SelectOption(
+                    label=label,
+                    value=str(it["id"]),
+                    description=desc,
+                    default=(it["id"] == selected_id)
+                ))
+            if not options:
+                options.append(discord.SelectOption(label="No items owned", value="0"))
+            super().__init__(placeholder="Select an item to view or use...", options=options, min_values=1, max_values=1)
 
         async def callback(self, interaction: discord.Interaction):
-            await interaction.response.edit_message(view=InventoryView(self.owner_id, self.page, int(self.values[0])))
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message("Please open your own /inventory.", ephemeral=True)
+                return
+            selected_id = int(self.values[0])
+            view = InventoryView(self.owner_id, selected_id=selected_id)
+            await interaction.response.edit_message(embed=view.embed, view=view)
 
-    class BackpackPageButton(discord.ui.Button):
-        def __init__(self, owner_id: int, page: int, target_page: int, emoji: str, disabled: bool):
-            super().__init__(emoji=emoji, style=discord.ButtonStyle.primary, disabled=disabled)
-            self.owner_id, self.page, self.target_page = owner_id, page, target_page
+    class InventoryUseButton(discord.ui.Button):
+        def __init__(self, disabled: bool = False):
+            super().__init__(label="[Use Item]", style=discord.ButtonStyle.primary, disabled=disabled)
 
         async def callback(self, interaction: discord.Interaction):
-            await interaction.response.edit_message(view=InventoryView(self.owner_id, self.target_page))
+            owner_id = self.view.owner_id
+            if interaction.user.id != owner_id:
+                await interaction.response.send_message("Please open your own /inventory.", ephemeral=True)
+                return
 
-    class BackpackActionButton(discord.ui.Button):
-        def __init__(self, action, item, disabled, page):
-            labels={'use':'Use','equip':'Equip','sell':'Sell to System','list':'List for Players'}
-            super().__init__(label=labels[action],style=discord.ButtonStyle.secondary,disabled=disabled)
-            self.action,self.item_id,self.page=action,item['id'],page
-        async def callback(self, interaction):
-            owner=self.view.owner_id
-            if interaction.user.id!=owner:
-                await interaction.response.send_message('Open your own Backpack.',ephemeral=True);return
-            if self.action=='equip':
-                import economy_transactions
-                try:notice=economy_transactions.equip(db,owner,self.item_id)
-                except ValueError as error:notice=str(error)
-                await interaction.response.edit_message(view=InventoryView(owner,self.page,self.item_id,notice=notice));return
-            from economy_trade_ui import TradeView
-            await interaction.response.edit_message(view=TradeView(bot,db,owner,self.action,self.item_id,back=lambda:InventoryView(owner,self.page,self.item_id)))
+            item_id = self.view.selected_id
+            if not item_id:
+                await interaction.response.send_message("[Error] No item selected.", ephemeral=True)
+                return
 
-    class InventoryView(discord.ui.LayoutView):
+            inv_row = db.execute("SELECT quantity FROM inventories WHERE user_id = ? AND item_id = ?", (owner_id, item_id)).fetchone()
+            if not inv_row or inv_row["quantity"] <= 0:
+                await interaction.response.send_message("[Failed] You do not own this item.", ephemeral=True)
+                return
+
+            item = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+            if not item:
+                await interaction.response.send_message("[Error] Item not found.", ephemeral=True)
+                return
+
+            effect = item.get("effect", "none")
+            if effect == "color_role":
+                notice = "[Info] Color Role Voucher: Custom name color modal will be available in the upcoming update."
+            elif effect == "custom_tag":
+                notice = "[Info] Custom Tag Voucher: Custom title modal will be available in the upcoming update."
+            elif effect == "xp_boost_2h":
+                notice = "[Info] XP Boost: Chat bonus activation will be available in the upcoming update."
+            elif effect == "vip_lounge":
+                notice = "[Info] VIP Lounge Pass: Private VIP Suite activation will be available in the upcoming update."
+            elif effect == "server_megaphone":
+                notice = "[Info] Server Megaphone: Server-wide broadcast will be available in the upcoming update."
+            elif effect == "red_packet":
+                notice = "[Info] Cash Red Packet: Red packet dropping will be available in the upcoming update."
+            elif effect in ('xc_reward', 'war_credits', 'capital_repair'):
+                import economy_journey
+                try:
+                    notice = economy_journey.use(db, owner_id, item_id)
+                except ValueError as err:
+                    notice = f"[Error] {err}"
+            else:
+                notice = f"[Info] '{item['name']}' has no active use effect."
+
+            new_view = InventoryView(owner_id, selected_id=item_id, notice=notice)
+            await interaction.response.edit_message(embed=new_view.embed, view=new_view)
+
+    class InventoryRefreshButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="[Refresh]", style=discord.ButtonStyle.secondary)
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.view.owner_id:
+                await interaction.response.send_message("Please open your own /inventory.", ephemeral=True)
+                return
+            new_view = InventoryView(self.view.owner_id, selected_id=self.view.selected_id)
+            await interaction.response.edit_message(embed=new_view.embed, view=new_view)
+
+    class InventoryView(discord.ui.View):
         def __init__(self, owner_id: int, page: int = 0, selected_id: int | None = None, notice: str = ""):
             super().__init__(timeout=300)
             self.owner_id = owner_id
-            all_rows = db.execute("""SELECT i.*,inv.quantity FROM inventories inv JOIN items i ON i.id=inv.item_id
-                WHERE inv.user_id=? AND inv.quantity>0 ORDER BY i.name""", (owner_id,)).fetchall()
-            pages = max(1, (len(all_rows) + 24) // 25)
-            self.page = max(0, min(page, pages - 1))
-            shown = all_rows[self.page * 25:(self.page + 1) * 25]
-            selected = next((row for row in all_rows if row['id'] == selected_id), None) or (shown[0] if shown else None)
-            container = discord.ui.Container(accent_color=discord.Color.blurple())
-            if selected is None:
-                container.add_item(discord.ui.TextDisplay("## 🎒 X BOT Backpack\nYour inventory is empty."))
-                container.add_item(discord.ui.ActionRow(EconomyCentreButton(owner_id, "Economy")))
-                self.add_item(container)
-                return
-            equipped = db.execute("SELECT equipped_pickaxe_id FROM players WHERE user_id=?", (owner_id,)).fetchone()
-            equipped_text = " · **Equipped**" if equipped and equipped['equipped_pickaxe_id'] == selected['id'] else ""
-            sell_value = selected['sell_price'] if selected['sellable'] else 0
-            description = selected['description'] or "No description provided."
-            notice_text = f"\n{notice}" if notice else ""
-            container.add_item(discord.ui.TextDisplay(
-                f"## 🎒 X BOT Backpack\n"
-                f"**{len(all_rows)} item types** · **{sum(int(row['quantity']) for row in all_rows):,} items**\n"
-                f"### {selected['emoji']} {selected['name']} × {selected['quantity']}{equipped_text}\n"
-                f"{description[:300]}\n"
-                f"### Sell-back Value\n## {sell_value:,} {'XC' if selected['currency']=='xc' else 'XCrystals'}\nPer item{notice_text}"
-            ))
-            container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.ActionRow(BackpackItemSelect(owner_id, self.page, selected['id'], shown)))
-            actions=[]
-            if selected['effect'] in {'war_credits','capital_repair','xc_reward'}:actions.append(BackpackActionButton('use',selected,False,self.page))
-            if selected['effect']=='mine_tool':actions.append(BackpackActionButton('equip',selected,False,self.page))
-            if selected['sellable'] and selected['sell_price']>0:actions.append(BackpackActionButton('sell',selected,False,self.page))
-            if selected['tradeable']:actions.append(BackpackActionButton('list',selected,False,self.page))
-            if actions:container.add_item(discord.ui.ActionRow(*actions))
-            container.add_item(discord.ui.ActionRow(
-                BackpackPageButton(owner_id, self.page, self.page - 1, "◀️", self.page == 0),
-                BackpackPageButton(owner_id, self.page, self.page + 1, "▶️", self.page >= pages - 1),
-                EconomyCentreButton(owner_id, "Economy"),
-            ))
-            container.add_item(discord.ui.TextDisplay(f"-# Page {self.page + 1}/{pages} · {len(all_rows)} different item(s) · Select an item, then use the available buttons."))
-            self.add_item(container)
+            self.page = page
+            self.notice = notice
+
+            items = db.execute("""
+                SELECT i.*, inv.quantity
+                FROM inventories inv
+                JOIN items i ON i.id = inv.item_id
+                WHERE inv.user_id = ? AND inv.quantity > 0
+                ORDER BY i.name ASC
+            """, (owner_id,)).fetchall()
+            self.items = items
+
+            if selected_id and any(it["id"] == selected_id for it in items):
+                self.selected_id = selected_id
+            elif items:
+                self.selected_id = items[0]["id"]
+            else:
+                self.selected_id = None
+
+            total_qty = sum(it["quantity"] for it in items)
+            self.embed = discord.Embed(
+                title="[INVENTORY]",
+                description=f"Total Items: {total_qty} ({len(items)} types)\nSelect an item from the menu below to view details or use.",
+                color=0x2b2d31
+            )
+
+            if notice:
+                self.embed.add_field(name="[Notice]", value=notice, inline=False)
+
+            if not items:
+                self.embed.description = "Your inventory is empty.\nUse /shop to purchase perk and utility vouchers."
+            else:
+                selected_item = next((it for it in items if it["id"] == self.selected_id), None)
+                if selected_item:
+                    desc_text = (
+                        f"Quantity Owned: {selected_item['quantity']}x\n"
+                        f"Category: {selected_item['category']}\n\n"
+                        f"Description:\n{selected_item['description']}"
+                    )
+                    self.embed.add_field(name=f"[{selected_item['name']}]", value=desc_text, inline=False)
+
+                self.add_item(InventoryItemSelect(owner_id, items, self.selected_id))
+                self.add_item(InventoryUseButton(disabled=self.selected_id is None))
+                self.add_item(InventoryRefreshButton())
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id == self.owner_id:
                 return True
-            await interaction.response.send_message("This Backpack belongs to the player who opened it. Open `/menu` for your own Backpack.", ephemeral=True)
+            await interaction.response.send_message("This inventory belongs to another member. Use /inventory to view your own.", ephemeral=True)
             return False
+
 
     class MiningAreaSelect(discord.ui.Select):
         def __init__(self, owner_id: int, current_area_id: int, mining_level: int):
@@ -2111,10 +2243,7 @@ def register_commands(bot, db, create_player) -> None:
         return MiningHubView(owner_id, player, area, pickaxe, energy)
 
     def _shop_panel(owner_id: int):
-        categories = shop_categories()
-        if not categories:
-            return xbot_ui.warning("🏪 Economy Shop", "The Economy Shop is empty right now.")
-        return ShopView(owner_id, categories[0]['id'])
+        return ShopView(owner_id)
 
     bot.xbot_player_panel_builders = getattr(bot, "xbot_player_panel_builders", {})
     bot.xbot_mine_button_builder = lambda: MiningHubButton('mine','Mine Now','⛏️',discord.ButtonStyle.success)
